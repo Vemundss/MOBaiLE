@@ -1,0 +1,17 @@
+[project]
+name = "voice-agent-backend"
+version = "0.1.0"
+description = "Backend orchestrator for voice-to-agent app"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pydantic>=2.8"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

@@ -1,0 +1,113 @@
+# Project Status
+
+Last updated: 2026-02-19
+
+## 1) Snapshot
+
+Project stage: MVP vertical slice implementation.
+Current objective: complete phone-to-backend-to-executor loop for remote "vibe coding".
+
+Updates (2026-02-18 to 2026-02-19):
+- Created an initial lean monorepo scaffold:
+  - `contracts/`
+  - `backend/` (FastAPI starter + `pyproject.toml`)
+  - `ios/` (placeholder structure/docs)
+  - `infra/` (optional, documented)
+  - `scripts/`
+- Implemented minimal backend execution loop:
+  - `POST /v1/utterances` for request intake and synchronous execution.
+  - `GET /v1/runs/{run_id}` for run/result retrieval.
+  - Planner stub that maps utterance text to an `ActionPlan`.
+  - Policy checks for allowlisted binaries and path safety.
+  - Local sandbox executor for `write_file` and `run_command`.
+  - Smoke script: `scripts/backend_smoke.py`.
+- Switched local backend workflow to `uv`:
+  - `cd backend && uv sync`
+  - `uv run uvicorn app.main:app --reload`
+  - `uv run python ../scripts/backend_smoke.py`
+- Fixed backend packaging for `uv sync` by restricting setuptools package discovery to `app*`.
+- Fixed smoke script import path so it works reliably from `backend/`.
+- Refined MVP consensus:
+  - iPhone = voice input/output client.
+  - Backend = LLM planning + execution control plane.
+  - Codex CLI runs unrestricted with full access on the target machine.
+- Added product distribution requirement:
+  - iOS app distribution + one-command backend install from repo.
+  - Setup must produce pairing info (URL + token/QR) for app onboarding.
+- Added setup scripts:
+  - `scripts/install_backend.sh` for one-command backend setup + pairing file generation.
+  - `scripts/doctor.sh` for dependency/runtime health checks.
+- Added asynchronous run execution in backend:
+  - `POST /v1/utterances` now starts runs and returns immediately with `Run started`.
+  - Run status now includes `running` before terminal state.
+- Added SSE endpoint:
+  - `GET /v1/runs/{run_id}/events` for live event streaming.
+- Added Codex executor path:
+  - `executor="codex"` on utterance requests.
+  - Codex CLI invoked via backend executor.
+- Set Codex executor to unrestricted by default:
+  - backend now passes `--dangerously-bypass-approvals-and-sandbox`
+  - env toggle: `VOICE_AGENT_CODEX_UNRESTRICTED` (default `true`)
+  - optional env override: `VOICE_AGENT_CODEX_MODEL`
+
+## 2) What Exists
+
+- `README.md`: project intent and document map.
+- `ARCHITECTURE.md`: detailed architecture and phased implementation plan.
+- `STATUS.md`: current state tracker (this file).
+- `MEMORY.md`: persistent project memory log.
+
+## 3) Working vs Not Working
+
+Working:
+- Shared vision and architecture documented.
+- Phased roadmap defined with exit criteria.
+- Initial data contracts and action schema documented.
+- Baseline folder layout and backend starter app created.
+- Minimal backend request -> plan -> validate -> execute -> result flow is functional.
+- `uv` local workflow is verified end-to-end.
+- SSE event stream endpoint is implemented and verified.
+- Codex executor integration path is implemented (runtime success depends on local Codex auth/model access).
+
+Not implemented yet:
+- iOS app code.
+- LLM integration.
+- SSH executor.
+- Automated tests/CI (`uv run pytest` target not set up yet).
+- Auth for external access.
+
+## 4) Risks / Unknowns
+
+- Unrestricted execution increases blast radius; target should be isolated/dedicated.
+- iOS speech-to-text mode (on-device vs cloud) needs explicit decision.
+- LLM placement choice (backend-only vs partial phone-side) impacts security and key handling.
+- Public internet exposure requires auth + transport hardening before non-local use.
+
+## 5) Immediate Next Steps
+
+1. Add automated tests for current backend flow and unrestricted executor path.
+2. Add simple backend LLM planner integration behind current planner stub.
+3. Add SSE endpoint for live run events.
+4. Add basic token auth for phone-to-backend requests.
+5. Add service auto-start setup (systemd/launchd) to installer.
+6. Build minimal iOS client loop:
+- speech capture + transcription
+- send utterance to backend
+- show events/final text
+- speak final response
+
+## 6) Definition of Done for MVP
+
+MVP is done when:
+- Spoken request from iPhone can trigger code creation/execution on the target machine (structured mode or unrestricted Codex mode).
+- Output is returned to phone (polling or streaming), then summarized.
+- Final response is read aloud in app.
+- Each run has a complete audit trail.
+
+## 7) Tracking Rules
+
+Update this file after each meaningful milestone:
+- What changed.
+- What works now.
+- What broke or is blocked.
+- Exact next actions.
