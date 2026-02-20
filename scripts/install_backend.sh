@@ -56,6 +56,14 @@ VOICE_AGENT_CODEX_BINARY=codex
 VOICE_AGENT_CODEX_UNRESTRICTED=true
 # Optional model override:
 # VOICE_AGENT_CODEX_MODEL=gpt-5.1
+# Transcription provider: mock (default) or openai
+VOICE_AGENT_TRANSCRIBE_PROVIDER=mock
+# SQLite run store path:
+VOICE_AGENT_DB_PATH=data/runs.db
+# Optional fixed transcript text for /v1/audio mock mode:
+# VOICE_AGENT_TRANSCRIBE_MOCK_TEXT=hello from audio
+# Optional OpenAI transcription model when provider=openai:
+# VOICE_AGENT_TRANSCRIBE_MODEL=whisper-1
 EOF
   echo "Created ${ENV_FILE}"
 }

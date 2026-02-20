@@ -72,3 +72,7 @@ class UtteranceResponse(BaseModel):
     run_id: str
     status: Literal["accepted", "rejected"]
     message: str
+
+
+class AudioRunResponse(UtteranceResponse):
+    transcript_text: str

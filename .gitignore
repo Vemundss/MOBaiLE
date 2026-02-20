@@ -6,5 +6,7 @@ backend/.env
 backend/pairing.json
 hello.py
 hello_unrestricted.py
+backend/data/*.db
+.DS_Store
 
 backend/*.egg-info/

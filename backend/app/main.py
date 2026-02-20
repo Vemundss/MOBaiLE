@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.executors.codex_executor import CodexExecutor
 from app.executors.local_executor import LocalExecutor
 from app.models.schemas import (
     ActionPlan,
+    AudioRunResponse,
     ExecutionEvent,
     RunRecord,
     UtteranceRequest,
@@ -21,17 +24,66 @@ from app.models.schemas import (
 )
 from app.orchestrator.planner import plan_from_utterance
 from app.policy.validator import validate_plan
+from app.storage import RunStore
+from app.transcription import Transcriber, TranscriptionError
+
+
+def _load_token_from_env_file() -> str:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return ""
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not stripped.startswith("VOICE_AGENT_API_TOKEN="):
+            continue
+        _, value = stripped.split("=", 1)
+        return value.strip().strip("'\"")
+    return ""
+
 
 app = FastAPI(title="Voice Agent Backend", version="0.1.0")
-RUNS: dict[str, RunRecord] = {}
 RUNS_LOCK = threading.Lock()
 EXECUTOR = LocalExecutor(Path(__file__).resolve().parent.parent / "sandbox")
 CODEX_EXECUTOR = CodexExecutor(Path(__file__).resolve().parents[2])
+TRANSCRIBER = Transcriber()
+API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN") or _load_token_from_env_file()
+RUN_STORE = RunStore(
+    Path(
+        os.getenv(
+            "VOICE_AGENT_DB_PATH",
+            str(Path(__file__).resolve().parent.parent / "data" / "runs.db"),
+        )
+    )
+)
+RUNS: dict[str, RunRecord] = RUN_STORE.load_all()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    if not request.url.path.startswith("/v1/"):
+        return await call_next(request)
+
+    if not API_TOKEN:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "server auth token is not configured"},
+        )
+
+    auth_header = request.headers.get("Authorization", "")
+    expected = f"Bearer {API_TOKEN}"
+    if not secrets.compare_digest(auth_header, expected):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "missing or invalid bearer token"},
+        )
+    return await call_next(request)
 
 
 @app.post("/v1/utterances", response_model=UtteranceResponse)
@@ -85,6 +137,39 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
     )
     threading.Thread(target=_run_local_plan, args=(run_id, plan), daemon=True).start()
     return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
+
+
+@app.post("/v1/audio", response_model=AudioRunResponse)
+async def create_audio_run(
+    session_id: str = Form(...),
+    audio: UploadFile = File(...),
+    executor: Literal["local", "codex"] = Form("codex"),
+    mode: Literal["assistant", "execute"] = Form("execute"),
+    transcript_hint: str | None = Form(None),
+) -> AudioRunResponse:
+    audio_bytes = await audio.read()
+    try:
+        transcript_text = TRANSCRIBER.transcribe(
+            audio_bytes=audio_bytes,
+            filename=audio.filename or "audio",
+            text_hint=transcript_hint,
+        )
+    except TranscriptionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    result = create_utterance(
+        UtteranceRequest(
+            session_id=session_id,
+            utterance_text=transcript_text,
+            executor=executor,
+            mode=mode,
+        )
+    )
+    return AudioRunResponse(
+        run_id=result.run_id,
+        status=result.status,
+        message=result.message,
+        transcript_text=transcript_text,
+    )
 
 
 @app.get("/v1/runs/{run_id}", response_model=RunRecord)
@@ -239,6 +324,7 @@ def _execute_plan(run_id: str, plan: ActionPlan) -> bool:
 def _store_run(run: RunRecord) -> None:
     with RUNS_LOCK:
         RUNS[run.run_id] = run
+        RUN_STORE.upsert(run)
 
 
 def _append_event(run_id: str, event: ExecutionEvent) -> None:
@@ -247,6 +333,7 @@ def _append_event(run_id: str, event: ExecutionEvent) -> None:
         if run is None:
             return
         run.events.append(event)
+        RUN_STORE.upsert(run)
 
 
 def _set_run_status(run_id: str, status: str, summary: str) -> None:
@@ -256,3 +343,4 @@ def _set_run_status(run_id: str, status: str, summary: str) -> None:
             return
         run.status = status
         run.summary = summary
+        RUN_STORE.upsert(run)

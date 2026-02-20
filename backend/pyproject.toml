@@ -6,7 +6,11 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn>=0.30",
-  "pydantic>=2.8"
+  "pydantic>=2.8",
+  "python-multipart>=0.0.9",
+  "requests>=2.32",
+  "pytest>=8.0",
+  "httpx>=0.28"
 ]
 
 [build-system]

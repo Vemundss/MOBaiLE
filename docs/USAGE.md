@@ -13,6 +13,7 @@ bash ./scripts/doctor.sh
 
 `install_backend.sh` performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
 By default, Codex executor runs in unrestricted mode (`VOICE_AGENT_CODEX_UNRESTRICTED=true`).
+All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 
 ## Prerequisites
 
@@ -68,7 +69,9 @@ Expected behavior:
 Create an utterance:
 
 ```bash
+TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' backend/.env)"
 curl -s -X POST http://127.0.0.1:8000/v1/utterances \
+  -H "Authorization: Bearer ${TOKEN}" \
   -H 'Content-Type: application/json' \
   -d '{
     "session_id": "demo-session",
@@ -81,19 +84,20 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
 Then fetch the run by id:
 
 ```bash
-curl -s http://127.0.0.1:8000/v1/runs/<run_id>
+curl -s -H "Authorization: Bearer ${TOKEN}" http://127.0.0.1:8000/v1/runs/<run_id>
 ```
 
 Stream run events (SSE):
 
 ```bash
-curl -N http://127.0.0.1:8000/v1/runs/<run_id>/events
+curl -N -H "Authorization: Bearer ${TOKEN}" http://127.0.0.1:8000/v1/runs/<run_id>/events
 ```
 
 Try Codex executor mode:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/v1/utterances \
+  -H "Authorization: Bearer ${TOKEN}" \
   -H 'Content-Type: application/json' \
   -d '{
     "session_id": "demo-session",
@@ -105,11 +109,42 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
 Codex executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (default).
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
+- `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
+
+## 5) Audio upload flow (`/v1/audio`)
+
+This endpoint accepts multipart audio and starts a run from server-side transcription.
+
+```bash
+TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' backend/.env)"
+printf 'fakewav' > /tmp/voice_sample.wav
+
+curl -s -X POST http://127.0.0.1:8000/v1/audio \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -F 'session_id=audio-session' \
+  -F 'executor=local' \
+  -F 'transcript_hint=create a hello python script and run it' \
+  -F 'audio=@/tmp/voice_sample.wav;type=audio/wav'
+```
+
+Notes:
+- `transcript_hint` is optional and useful for deterministic MVP testing.
+- Default provider is mock (`VOICE_AGENT_TRANSCRIBE_PROVIDER=mock`).
+- For real STT, set in `backend/.env`:
+  - `VOICE_AGENT_TRANSCRIBE_PROVIDER=openai`
+  - `OPENAI_API_KEY=<your-key>`
+  - optional: `VOICE_AGENT_TRANSCRIBE_MODEL=whisper-1`
+- Response includes `transcript_text` and run metadata (`run_id`, `status`, `message`).
+
+## 6) Run automated tests
+
+```bash
+cd backend
+uv run pytest -q
+```
 
 ## Current Limitations
 
 - Planner is a stub (rule-based), not a real LLM yet.
-- Run storage is in-memory (lost on server restart).
-- No auth on non-health endpoints yet.
 - Codex executor success depends on local Codex CLI auth/model access.
 - iOS client is not implemented yet.

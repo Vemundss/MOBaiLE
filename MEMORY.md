@@ -59,3 +59,18 @@
   - unrestricted mode enabled by default (`VOICE_AGENT_CODEX_UNRESTRICTED=true`)
   - optional model override supported via `VOICE_AGENT_CODEX_MODEL`
 - Verified backend-triggered Codex runs report `sandbox: danger-full-access`.
+- Added bearer token authentication middleware for all `/v1/*` routes.
+- Token source order: `VOICE_AGENT_API_TOKEN` env var, then `backend/.env`.
+- Updated usage and doctor checks to validate token-protected API access.
+- Added transcription adapter module (`app/transcription/transcriber.py`) and `/v1/audio` endpoint.
+- Verified `/v1/audio` behavior:
+  - 401 without token
+  - accepted run creation with token
+  - run completion observable via `/v1/runs/{run_id}` and SSE
+- Extended transcription adapter with provider modes:
+  - `VOICE_AGENT_TRANSCRIBE_PROVIDER=mock` (deterministic local mode)
+  - `VOICE_AGENT_TRANSCRIBE_PROVIDER=openai` (real STT using OpenAI audio transcriptions API)
+- Added SQLite-backed run store (`app/storage/run_store.py`) and wired run upserts on create/event/status updates.
+- Verified run persistence by creating a run, restarting server, and successfully reading the same run after restart.
+- Added automated backend tests in `backend/tests/test_api.py`.
+- Added test dependencies (`pytest`, `httpx`) and verified `uv run pytest -q` passes (4 tests).

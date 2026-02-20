@@ -49,6 +49,24 @@ Updates (2026-02-18 to 2026-02-19):
   - backend now passes `--dangerously-bypass-approvals-and-sandbox`
   - env toggle: `VOICE_AGENT_CODEX_UNRESTRICTED` (default `true`)
   - optional env override: `VOICE_AGENT_CODEX_MODEL`
+- Implemented bearer token auth for all `/v1/*` endpoints:
+  - token sourced from `VOICE_AGENT_API_TOKEN` (env or `backend/.env`)
+  - `/health` remains open for liveness checks
+- Added `POST /v1/audio` endpoint:
+  - accepts multipart audio upload
+  - performs MVP transcription via server adapter
+  - starts run using same async execution pipeline
+- Added transcription provider modes:
+  - `mock` (default)
+  - `openai` (`/v1/audio/transcriptions` with API key)
+- Added SQLite run persistence:
+  - runs/events now survive backend restart
+  - default DB path: `backend/data/runs.db`
+- Added backend API test suite (`pytest`) for:
+  - auth requirements
+  - local utterance flow
+  - `/v1/audio` mock flow
+  - `/v1/audio` openai misconfig handling
 
 ## 2) What Exists
 
@@ -68,13 +86,16 @@ Working:
 - `uv` local workflow is verified end-to-end.
 - SSE event stream endpoint is implemented and verified.
 - Codex executor integration path is implemented (runtime success depends on local Codex auth/model access).
+- `/v1/audio` is implemented and verified end-to-end (auth, run creation, run completion).
+- Run history persistence across backend restarts is implemented and verified.
 
 Not implemented yet:
 - iOS app code.
 - LLM integration.
+- Production-ready speech-to-text tuning/retry/error UX (openai mode is implemented, not hardened).
 - SSH executor.
-- Automated tests/CI (`uv run pytest` target not set up yet).
-- Auth for external access.
+- CI automation for running tests on push/PR.
+- Service hardening for internet exposure (reverse proxy/TLS/rate limiting).
 
 ## 4) Risks / Unknowns
 
@@ -88,9 +109,8 @@ Not implemented yet:
 1. Add automated tests for current backend flow and unrestricted executor path.
 2. Add simple backend LLM planner integration behind current planner stub.
 3. Add SSE endpoint for live run events.
-4. Add basic token auth for phone-to-backend requests.
-5. Add service auto-start setup (systemd/launchd) to installer.
-6. Build minimal iOS client loop:
+4. Add service auto-start setup (systemd/launchd) to installer.
+5. Build minimal iOS client loop:
 - speech capture + transcription
 - send utterance to backend
 - show events/final text

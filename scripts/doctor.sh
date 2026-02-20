@@ -67,6 +67,26 @@ main() {
 
   if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
     ok "backend health endpoint reachable at http://127.0.0.1:8000/health"
+    local auth_code
+    auth_code="$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8000/v1/utterances || true)"
+    if [[ "${auth_code}" == "401" ]]; then
+      ok "/v1 auth check without token returns 401"
+    else
+      warn "/v1 auth check without token expected 401, got ${auth_code} (possible old server build)"
+    fi
+    if [[ -f "${ENV_FILE}" ]]; then
+      local token
+      token="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' "${ENV_FILE}")"
+      if [[ -n "${token}" ]]; then
+        local token_code
+        token_code="$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer ${token}" http://127.0.0.1:8000/v1/utterances || true)"
+        if [[ "${token_code}" == "422" ]]; then
+          ok "/v1 auth check with token accepted (422 from empty request body is expected)"
+        else
+          warn "/v1 auth check with token expected 422, got ${token_code}"
+        fi
+      fi
+    fi
   else
     warn "backend not reachable on 127.0.0.1:8000 (start server to verify runtime)"
   fi
