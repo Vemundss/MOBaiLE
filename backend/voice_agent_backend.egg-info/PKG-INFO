@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: voice-agent-backend
-Version: 0.1.0
-Summary: Backend orchestrator for voice-to-agent app
-Requires-Python: >=3.11
-Requires-Dist: fastapi>=0.115
-Requires-Dist: uvicorn>=0.30
-Requires-Dist: pydantic>=2.8
