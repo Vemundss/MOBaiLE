@@ -77,6 +77,15 @@ Updates (2026-02-18 to 2026-02-19):
   - verifies health, auth enforcement, `/v1/audio`, and terminal run status
 - Added immediate iPhone test path without native app code:
   - `docs/PHONE_SHORTCUT_MVP.md` (Shortcuts workflow: dictate -> run -> poll -> speak)
+- Added native iOS app scaffold files:
+  - SwiftUI app entry + content view
+  - API client for `/v1/utterances` and `/v1/runs/{id}`
+  - run polling + TTS in view model
+  - model decoding test template
+- Extended native iOS scaffold with audio upload path:
+  - local microphone recording in app
+  - upload recorded file to `/v1/audio`
+  - show transcript + run events + spoken summary
 
 ## 2) What Exists
 
@@ -101,9 +110,10 @@ Working:
 - Always-on backend service flow is implemented and verified on macOS.
 - Pairing-based connection smoke passes end-to-end.
 - iPhone Shortcuts-based voice loop is documented for immediate device testing.
+- Native iOS scaffold exists for direct backend testing in Xcode.
 
 Not implemented yet:
-- iOS app code.
+- Production-ready native iOS project wiring (Xcode target + signing + permissions setup).
 - LLM integration.
 - Production-ready speech-to-text tuning/retry/error UX (openai mode is implemented, not hardened).
 - SSH executor.

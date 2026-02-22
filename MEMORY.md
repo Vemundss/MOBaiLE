@@ -83,3 +83,11 @@
   - unauthenticated `/v1/*` = 401
   - authenticated `/v1/audio` run reaches `completed`
 - Added `docs/PHONE_SHORTCUT_MVP.md` for immediate iPhone Shortcuts-based voice testing without building a native app yet.
+- Added native iOS scaffold source files under `ios/VoiceAgentApp/`:
+  - `VoiceAgentApp.swift`, `ContentView.swift`, `VoiceAgentViewModel.swift`, `APIClient.swift`, `Models.swift`
+- Added initial iOS model decoding test file under `ios/VoiceAgentAppTests/VoiceAgentModelTests.swift`.
+- Updated `ios/README.md` with concrete Xcode import/run instructions for backend connectivity testing.
+- Extended iOS scaffold with audio recording/upload support:
+  - `AudioRecorderService.swift` for microphone capture
+  - multipart `/v1/audio` request path in `APIClient.swift`
+  - transcript display + recording actions in `ContentView.swift`
