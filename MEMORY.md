@@ -91,3 +91,4 @@
   - `AudioRecorderService.swift` for microphone capture
   - multipart `/v1/audio` request path in `APIClient.swift`
   - transcript display + recording actions in `ContentView.swift`
+- Added GitHub Actions workflow `.github/workflows/backend-tests.yml` for backend test automation on push/PR.

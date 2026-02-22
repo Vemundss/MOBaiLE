@@ -86,6 +86,9 @@ Updates (2026-02-18 to 2026-02-19):
   - local microphone recording in app
   - upload recorded file to `/v1/audio`
   - show transcript + run events + spoken summary
+- Added GitHub Actions backend CI:
+  - `.github/workflows/backend-tests.yml`
+  - runs `uv sync` + `uv run pytest -q` on push/PR
 
 ## 2) What Exists
 
