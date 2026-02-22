@@ -35,6 +35,7 @@ final class APIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 15
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try jsonEncoder.encode(requestBody)
@@ -55,6 +56,7 @@ final class APIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 10
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -76,6 +78,7 @@ final class APIClient {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 30
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
@@ -110,6 +113,7 @@ final class APIClient {
 
                 var request = URLRequest(url: url)
                 request.httpMethod = "GET"
+                request.timeoutInterval = 60
                 request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)

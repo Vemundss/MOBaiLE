@@ -98,41 +98,8 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func observeRun(runID: String) async throws {
-        do {
-            try await streamRunEvents(runID: runID)
-            try await finalizeRun(runID: runID)
-        } catch {
-            statusText = "Stream failed, falling back to polling..."
-            try await pollRunUntilDone(runID: runID)
-        }
-    }
-
-    private func streamRunEvents(runID: String) async throws {
-        statusText = "Streaming events..."
-        for try await event in client.streamRunEvents(
-            serverURL: normalizedServerURL,
-            token: apiToken,
-            runID: runID
-        ) {
-            events.append(event)
-            statusText = "Event: \(event.type)"
-            if event.type == "run.completed" || event.type == "run.failed" {
-                break
-            }
-        }
-    }
-
-    private func finalizeRun(runID: String) async throws {
-        let run = try await client.fetchRun(
-            serverURL: normalizedServerURL,
-            token: apiToken,
-            runID: runID
-        )
-        statusText = "Run status: \(run.status)"
-        summaryText = run.summary
-        events = run.events
-        isLoading = false
-        speak(run.summary)
+        statusText = "Polling run..."
+        try await pollRunUntilDone(runID: runID)
     }
 
     private func pollRunUntilDone(runID: String) async throws {
@@ -146,7 +113,7 @@ final class VoiceAgentViewModel: ObservableObject {
             summaryText = run.summary
             events = run.events
 
-            if run.status != "running" {
+            if run.status == "completed" || run.status == "failed" || run.status == "rejected" {
                 isLoading = false
                 speak(run.summary)
                 return
