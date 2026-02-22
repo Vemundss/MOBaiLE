@@ -105,7 +105,10 @@ EOF
   echo
   echo "Start server:"
   echo "  cd \"${BACKEND_DIR}\""
-  echo "  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"
+  echo "  bash ./run_backend.sh"
+  echo
+  echo "Install always-on macOS service (recommended on Mac):"
+  echo "  bash ./scripts/service_macos.sh install"
   echo
   echo "Pairing info written to:"
   echo "  ${PAIRING_FILE}"

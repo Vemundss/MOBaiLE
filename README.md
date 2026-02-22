@@ -23,3 +23,4 @@ Distribution vision:
 The implementation strategy, architecture, and rollout plan are documented in `ARCHITECTURE.md`.
 Current execution status is tracked in `STATUS.md`.
 Basic local setup and run instructions are in `docs/USAGE.md`.
+Immediate iPhone testing path (Shortcuts-based) is in `docs/PHONE_SHORTCUT_MVP.md`.

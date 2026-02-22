@@ -28,19 +28,24 @@ from app.storage import RunStore
 from app.transcription import Transcriber, TranscriptionError
 
 
-def _load_token_from_env_file() -> str:
+def _load_env_defaults() -> None:
     env_path = Path(__file__).resolve().parent.parent / ".env"
     if not env_path.exists():
-        return ""
+        return
     for line in env_path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if not stripped.startswith("VOICE_AGENT_API_TOKEN="):
+        if "=" not in stripped:
             continue
-        _, value = stripped.split("=", 1)
-        return value.strip().strip("'\"")
-    return ""
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        os.environ.setdefault(key, value.strip().strip("'\""))
+
+
+_load_env_defaults()
 
 
 app = FastAPI(title="Voice Agent Backend", version="0.1.0")
@@ -48,7 +53,7 @@ RUNS_LOCK = threading.Lock()
 EXECUTOR = LocalExecutor(Path(__file__).resolve().parent.parent / "sandbox")
 CODEX_EXECUTOR = CodexExecutor(Path(__file__).resolve().parents[2])
 TRANSCRIBER = Transcriber()
-API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN") or _load_token_from_env_file()
+API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN", "")
 RUN_STORE = RunStore(
     Path(
         os.getenv(

@@ -9,6 +9,7 @@ From project root:
 ```bash
 bash ./scripts/install_backend.sh
 bash ./scripts/doctor.sh
+bash ./scripts/service_macos.sh install   # macOS only
 ```
 
 `install_backend.sh` performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
@@ -42,12 +43,25 @@ uv sync
 From `backend/`:
 
 ```bash
-uv run uvicorn app.main:app --reload
+bash ./run_backend.sh
 ```
 
 API will be available at:
 - `http://127.0.0.1:8000/health`
 - `http://127.0.0.1:8000/docs`
+
+Service management on macOS:
+
+```bash
+bash ./scripts/service_macos.sh status
+bash ./scripts/service_macos.sh sync
+bash ./scripts/service_macos.sh restart
+bash ./scripts/service_macos.sh logs
+```
+
+Notes:
+- Service runtime is synced to `~/Library/Application Support/MOBaiLE/backend-runtime`.
+- Run `sync` after backend code/config changes, then `restart`.
 
 ## 3) Try the current flow
 
@@ -142,6 +156,22 @@ Notes:
 cd backend
 uv run pytest -q
 ```
+
+## 7) Connectivity smoke (pairing-based)
+
+After install + service start:
+
+```bash
+bash ./scripts/phone_connectivity_smoke.sh
+```
+
+This script reads `backend/pairing.json`, validates auth behavior, uploads audio to `/v1/audio`, and waits for terminal run status.
+
+## 8) iPhone voice testing (no app code)
+
+Use the Shortcuts-based workflow in:
+
+`docs/PHONE_SHORTCUT_MVP.md`
 
 ## Current Limitations
 

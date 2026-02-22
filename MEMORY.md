@@ -74,3 +74,12 @@
 - Verified run persistence by creating a run, restarting server, and successfully reading the same run after restart.
 - Added automated backend tests in `backend/tests/test_api.py`.
 - Added test dependencies (`pytest`, `httpx`) and verified `uv run pytest -q` passes (4 tests).
+- Added backend runner script `backend/run_backend.sh` to load `.env` and run uvicorn consistently.
+- Added macOS launchd management script `scripts/service_macos.sh`.
+- Implemented runtime sync to `~/Library/Application Support/MOBaiLE/backend-runtime` to avoid iCloud path execution issues with launchd.
+- Verified service lifecycle commands (`install`, `restart`, `stop`, `start`) and health/auth checks through service.
+- Added `scripts/phone_connectivity_smoke.sh` and verified pairing-based end-to-end flow:
+  - health = 200
+  - unauthenticated `/v1/*` = 401
+  - authenticated `/v1/audio` run reaches `completed`
+- Added `docs/PHONE_SHORTCUT_MVP.md` for immediate iPhone Shortcuts-based voice testing without building a native app yet.

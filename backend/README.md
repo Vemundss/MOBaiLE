@@ -9,7 +9,7 @@ FastAPI service for:
 Run locally (after installing deps):
 
 ```bash
-uv run uvicorn app.main:app --reload
+bash ./run_backend.sh
 ```
 
 Current implemented endpoints:

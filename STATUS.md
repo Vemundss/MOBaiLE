@@ -67,6 +67,16 @@ Updates (2026-02-18 to 2026-02-19):
   - local utterance flow
   - `/v1/audio` mock flow
   - `/v1/audio` openai misconfig handling
+- Added macOS launchd service management:
+  - `scripts/service_macos.sh` (`install/start/stop/restart/status/logs/sync`)
+  - service runs from synced runtime path:
+    `~/Library/Application Support/MOBaiLE/backend-runtime`
+  - verified health/auth checks through service process
+- Added pairing-based end-to-end connectivity smoke script:
+  - `scripts/phone_connectivity_smoke.sh`
+  - verifies health, auth enforcement, `/v1/audio`, and terminal run status
+- Added immediate iPhone test path without native app code:
+  - `docs/PHONE_SHORTCUT_MVP.md` (Shortcuts workflow: dictate -> run -> poll -> speak)
 
 ## 2) What Exists
 
@@ -88,6 +98,9 @@ Working:
 - Codex executor integration path is implemented (runtime success depends on local Codex auth/model access).
 - `/v1/audio` is implemented and verified end-to-end (auth, run creation, run completion).
 - Run history persistence across backend restarts is implemented and verified.
+- Always-on backend service flow is implemented and verified on macOS.
+- Pairing-based connection smoke passes end-to-end.
+- iPhone Shortcuts-based voice loop is documented for immediate device testing.
 
 Not implemented yet:
 - iOS app code.

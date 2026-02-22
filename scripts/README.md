@@ -14,6 +14,21 @@ Run environment and connectivity checks:
 bash ./scripts/doctor.sh
 ```
 
+Install and manage backend as macOS launchd service:
+
+```bash
+bash ./scripts/service_macos.sh install
+bash ./scripts/service_macos.sh sync
+bash ./scripts/service_macos.sh status
+bash ./scripts/service_macos.sh logs
+```
+
+Run end-to-end connection smoke using `backend/pairing.json`:
+
+```bash
+bash ./scripts/phone_connectivity_smoke.sh
+```
+
 Smoke test:
 
 ```bash
