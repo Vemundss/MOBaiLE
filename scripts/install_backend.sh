@@ -116,6 +116,9 @@ EOF
   echo "Use in iOS app onboarding:"
   echo "  server_url: ${server_url}"
   echo "  api_token: ${token}"
+  echo
+  echo "Generate pairing QR (optional):"
+  echo "  bash ./scripts/pairing_qr.sh"
 }
 
 main "$@"

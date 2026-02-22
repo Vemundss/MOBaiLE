@@ -29,6 +29,12 @@ Run end-to-end connection smoke using `backend/pairing.json`:
 bash ./scripts/phone_connectivity_smoke.sh
 ```
 
+Generate a pairing QR from `backend/pairing.json`:
+
+```bash
+bash ./scripts/pairing_qr.sh
+```
+
 Smoke test:
 
 ```bash

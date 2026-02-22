@@ -4,10 +4,13 @@ __pycache__/
 .pytest_cache/
 backend/.env
 backend/pairing.json
+backend/pairing-qr.png
 hello.py
 hello_unrestricted.py
 backend/data/*.db
 .DS_Store
 backend/logs/
+*.xcuserdatad/
+*.xcworkspace/xcuserdata/
 
 backend/*.egg-info/

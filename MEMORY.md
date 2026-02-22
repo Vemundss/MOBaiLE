@@ -99,3 +99,5 @@
 - Added native iOS SSE client parsing for `/v1/runs/{run_id}/events` in `APIClient.swift`.
 - Updated iOS view model to prefer streaming run events with polling fallback.
 - Re-verified simulator build and tests after SSE integration.
+- Added `scripts/pairing_qr.sh` for local QR generation from pairing data.
+- Verified QR generation to `backend/pairing-qr.png` with `qrencode`.

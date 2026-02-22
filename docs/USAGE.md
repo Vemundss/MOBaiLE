@@ -173,6 +173,17 @@ Use the Shortcuts-based workflow in:
 
 `docs/PHONE_SHORTCUT_MVP.md`
 
+## 9) Pairing QR (optional)
+
+Generate a local QR image from `backend/pairing.json`:
+
+```bash
+bash ./scripts/pairing_qr.sh
+```
+
+By default this writes:
+- `backend/pairing-qr.png`
+
 ## Current Limitations
 
 - Planner is a stub (rule-based), not a real LLM yet.

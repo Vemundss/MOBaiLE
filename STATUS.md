@@ -89,6 +89,9 @@ Updates (2026-02-18 to 2026-02-19):
 - Added native iOS SSE event streaming:
   - app now streams `/v1/runs/{run_id}/events` for live updates
   - automatic fallback to polling when stream fails
+- Added QR-based pairing support:
+  - `scripts/pairing_qr.sh` generates local pairing QR from `backend/pairing.json`
+  - supports shortcut onboarding via scanned JSON payload
 - Added GitHub Actions backend CI:
   - `.github/workflows/backend-tests.yml`
   - runs `uv sync` + `uv run pytest -q` on push/PR
