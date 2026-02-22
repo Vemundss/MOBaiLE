@@ -92,3 +92,7 @@
   - multipart `/v1/audio` request path in `APIClient.swift`
   - transcript display + recording actions in `ContentView.swift`
 - Added GitHub Actions workflow `.github/workflows/backend-tests.yml` for backend test automation on push/PR.
+- Installed `xcodegen` and added iOS project spec `ios/project.yml`.
+- Generated `ios/VoiceAgentApp.xcodeproj` and verified:
+  - simulator build succeeds (`xcodebuild ... build`)
+  - test target succeeds (`xcodebuild ... test`)

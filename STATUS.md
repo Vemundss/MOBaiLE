@@ -89,6 +89,10 @@ Updates (2026-02-18 to 2026-02-19):
 - Added GitHub Actions backend CI:
   - `.github/workflows/backend-tests.yml`
   - runs `uv sync` + `uv run pytest -q` on push/PR
+- Added Xcode project generation/wiring:
+  - `ios/project.yml` (xcodegen spec)
+  - generated `ios/VoiceAgentApp.xcodeproj`
+  - simulator build + test verified via `xcodebuild`
 
 ## 2) What Exists
 
@@ -114,6 +118,7 @@ Working:
 - Pairing-based connection smoke passes end-to-end.
 - iPhone Shortcuts-based voice loop is documented for immediate device testing.
 - Native iOS scaffold exists for direct backend testing in Xcode.
+- Native iOS project builds and tests successfully on simulator.
 
 Not implemented yet:
 - Production-ready native iOS project wiring (Xcode target + signing + permissions setup).
