@@ -86,6 +86,9 @@ Updates (2026-02-18 to 2026-02-19):
   - local microphone recording in app
   - upload recorded file to `/v1/audio`
   - show transcript + run events + spoken summary
+- Added native iOS SSE event streaming:
+  - app now streams `/v1/runs/{run_id}/events` for live updates
+  - automatic fallback to polling when stream fails
 - Added GitHub Actions backend CI:
   - `.github/workflows/backend-tests.yml`
   - runs `uv sync` + `uv run pytest -q` on push/PR
@@ -119,6 +122,7 @@ Working:
 - iPhone Shortcuts-based voice loop is documented for immediate device testing.
 - Native iOS scaffold exists for direct backend testing in Xcode.
 - Native iOS project builds and tests successfully on simulator.
+- Native iOS app now receives run updates in real time via SSE.
 
 Not implemented yet:
 - Production-ready native iOS project wiring (Xcode target + signing + permissions setup).

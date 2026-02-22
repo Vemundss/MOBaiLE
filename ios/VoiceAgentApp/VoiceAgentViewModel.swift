@@ -41,7 +41,7 @@ final class VoiceAgentViewModel: ObservableObject {
             )
             runID = response.runId
             statusText = "Run started (\(response.runId))"
-            try await pollRunUntilDone(runID: response.runId)
+            try await observeRun(runID: response.runId)
         } catch {
             errorText = error.localizedDescription
             statusText = "Failed"
@@ -89,12 +89,50 @@ final class VoiceAgentViewModel: ObservableObject {
             runID = response.runId
             transcriptText = response.transcriptText
             statusText = "Audio run started (\(response.runId))"
-            try await pollRunUntilDone(runID: response.runId)
+            try await observeRun(runID: response.runId)
         } catch {
             errorText = error.localizedDescription
             statusText = "Failed"
             isLoading = false
         }
+    }
+
+    private func observeRun(runID: String) async throws {
+        do {
+            try await streamRunEvents(runID: runID)
+            try await finalizeRun(runID: runID)
+        } catch {
+            statusText = "Stream failed, falling back to polling..."
+            try await pollRunUntilDone(runID: runID)
+        }
+    }
+
+    private func streamRunEvents(runID: String) async throws {
+        statusText = "Streaming events..."
+        for try await event in client.streamRunEvents(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            runID: runID
+        ) {
+            events.append(event)
+            statusText = "Event: \(event.type)"
+            if event.type == "run.completed" || event.type == "run.failed" {
+                break
+            }
+        }
+    }
+
+    private func finalizeRun(runID: String) async throws {
+        let run = try await client.fetchRun(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            runID: runID
+        )
+        statusText = "Run status: \(run.status)"
+        summaryText = run.summary
+        events = run.events
+        isLoading = false
+        speak(run.summary)
     }
 
     private func pollRunUntilDone(runID: String) async throws {

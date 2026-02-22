@@ -97,6 +97,65 @@ final class APIClient {
         return try jsonDecoder.decode(AudioRunResponse.self, from: data)
     }
 
+    func streamRunEvents(
+        serverURL: String,
+        token: String,
+        runID: String
+    ) -> AsyncThrowingStream<ExecutionEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                guard let url = URL(string: serverURL + "/v1/runs/\(runID)/events") else {
+                    throw APIError.invalidURL
+                }
+
+                var request = URLRequest(url: url)
+                request.httpMethod = "GET"
+                request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw APIError.invalidResponse
+                }
+                guard (200...299).contains(http.statusCode) else {
+                    throw APIError.httpError(http.statusCode, "")
+                }
+
+                let decoder = JSONDecoder()
+                var dataLines: [String] = []
+
+                for try await line in bytes.lines {
+                    if line.hasPrefix("data: ") {
+                        dataLines.append(String(line.dropFirst(6)))
+                        continue
+                    }
+                    if line.isEmpty {
+                        if !dataLines.isEmpty {
+                            let payload = dataLines.joined(separator: "\n")
+                            dataLines.removeAll()
+                            if let payloadData = payload.data(using: .utf8) {
+                                let event = try decoder.decode(ExecutionEvent.self, from: payloadData)
+                                continuation.yield(event)
+                            }
+                        }
+                    }
+                }
+
+                if !dataLines.isEmpty {
+                    let payload = dataLines.joined(separator: "\n")
+                    if let payloadData = payload.data(using: .utf8) {
+                        let event = try decoder.decode(ExecutionEvent.self, from: payloadData)
+                        continuation.yield(event)
+                    }
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
     private func buildMultipartBody(
         boundary: String,
         fields: [String: String],

@@ -31,7 +31,7 @@ open VoiceAgentApp.xcodeproj
 4. Expected MVP behavior:
 - App creates run via `/v1/utterances`.
 - App can upload recorded audio via `/v1/audio`.
-- App polls `/v1/runs/{run_id}` until completion.
+- App streams `/v1/runs/{run_id}/events` with polling fallback.
 - App shows events and reads summary aloud.
 
 ## Notes

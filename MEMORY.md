@@ -96,3 +96,6 @@
 - Generated `ios/VoiceAgentApp.xcodeproj` and verified:
   - simulator build succeeds (`xcodebuild ... build`)
   - test target succeeds (`xcodebuild ... test`)
+- Added native iOS SSE client parsing for `/v1/runs/{run_id}/events` in `APIClient.swift`.
+- Updated iOS view model to prefer streaming run events with polling fallback.
+- Re-verified simulator build and tests after SSE integration.
