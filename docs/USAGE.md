@@ -124,8 +124,15 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
 Codex executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (default).
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
+- `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
 - `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for both `local` and `codex` runs.
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
+
+Cancel a running run:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer ${TOKEN}" http://127.0.0.1:8000/v1/runs/<run_id>/cancel
+```
 
 ## 5) Audio upload flow (`/v1/audio`)
 
@@ -147,6 +154,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/audio \
 Notes:
 - `transcript_hint` is optional and useful for deterministic MVP testing.
 - Default provider is OpenAI (`VOICE_AGENT_TRANSCRIBE_PROVIDER=openai`).
+- `VOICE_AGENT_MAX_AUDIO_MB=20` caps accepted audio payload size.
 - For real STT, ensure in `backend/.env`:
   - `OPENAI_API_KEY=<your-key>`
   - optional: `VOICE_AGENT_TRANSCRIBE_MODEL=whisper-1`
@@ -192,4 +200,4 @@ By default this writes:
 
 - Planner is a stub (rule-based), not a real LLM yet.
 - Codex executor success depends on local Codex CLI auth/model access.
-- iOS client is not implemented yet.
+- iOS client currently uses SSE with polling fallback; voice and chat UX are MVP-grade, not production polished.

@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-02-19
+Last updated: 2026-02-23
 
 ## 1) Snapshot
 
@@ -128,12 +128,12 @@ Working:
 - Native iOS app now receives run updates in real time via SSE.
 
 Not implemented yet:
-- Production-ready native iOS project wiring (Xcode target + signing + permissions setup).
+- Production-ready native iOS distribution path (TestFlight/App Store) and enterprise-device constraints handling.
 - LLM integration.
 - Production-ready speech-to-text tuning/retry/error UX (openai mode is implemented, not hardened).
 - SSH executor.
-- CI automation for running tests on push/PR.
 - Service hardening for internet exposure (reverse proxy/TLS/rate limiting).
+- Run history retention/cleanup policy for long-term operation.
 
 ## 4) Risks / Unknowns
 
@@ -145,14 +145,10 @@ Not implemented yet:
 ## 5) Immediate Next Steps
 
 1. Add automated tests for current backend flow and unrestricted executor path.
-2. Add simple backend LLM planner integration behind current planner stub.
-3. Add SSE endpoint for live run events.
-4. Add service auto-start setup (systemd/launchd) to installer.
-5. Build minimal iOS client loop:
-- speech capture + transcription
-- send utterance to backend
-- show events/final text
-- speak final response
+2. Add run cancellation and timeout UX controls in iOS (surface `/v1/runs/{id}/cancel`).
+3. Add simple backend LLM planner integration behind current planner stub.
+4. Add service hardening for internet exposure (TLS/reverse proxy and tighter auth options).
+5. Improve native iOS conversation UX and onboarding (QR pairing + clearer runtime status).
 
 ## 6) Definition of Done for MVP
 

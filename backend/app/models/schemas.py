@@ -47,6 +47,7 @@ class ExecutionEvent(BaseModel):
         "assistant.message",
         "run.completed",
         "run.failed",
+        "run.cancelled",
     ]
     action_index: int | None = None
     message: str
@@ -65,7 +66,7 @@ class RunRecord(BaseModel):
     session_id: str
     utterance_text: str
     working_directory: str | None = None
-    status: Literal["running", "completed", "failed", "rejected"]
+    status: Literal["running", "completed", "failed", "rejected", "cancelled"]
     plan: ActionPlan | None = None
     events: list[ExecutionEvent] = Field(default_factory=list)
     summary: str

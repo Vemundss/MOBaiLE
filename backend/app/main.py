@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import subprocess
 import threading
 import time
 import uuid
+from queue import Empty, Queue
 from pathlib import Path
 from typing import Iterator, Literal
 
@@ -50,10 +52,16 @@ _load_env_defaults()
 
 app = FastAPI(title="Voice Agent Backend", version="0.1.0")
 RUNS_LOCK = threading.Lock()
+ACTIVE_PROCS_LOCK = threading.Lock()
+ACTIVE_PROCS: dict[str, subprocess.Popen[str]] = {}
+RUN_CANCELLED: set[str] = set()
 DEFAULT_WORKDIR = Path(
     os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))
 ).expanduser().resolve()
 DEFAULT_WORKDIR.mkdir(parents=True, exist_ok=True)
+CODEX_TIMEOUT_SEC = int(os.getenv("VOICE_AGENT_CODEX_TIMEOUT_SEC", "900"))
+MAX_AUDIO_MB = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
+MAX_AUDIO_BYTES = int(MAX_AUDIO_MB * 1024 * 1024)
 TRANSCRIBER = Transcriber()
 API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN", "")
 RUN_STORE = RunStore(
@@ -159,7 +167,22 @@ async def create_audio_run(
     transcript_hint: str | None = Form(None),
     working_directory: str | None = Form(None),
 ) -> AudioRunResponse:
+    content_length_header = audio.headers.get("content-length")
+    if content_length_header:
+        try:
+            if int(content_length_header) > MAX_AUDIO_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"audio payload too large (max {MAX_AUDIO_MB:g} MB)",
+                )
+        except ValueError:
+            pass
     audio_bytes = await audio.read()
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"audio payload too large (max {MAX_AUDIO_MB:g} MB)",
+        )
     try:
         transcript_text = TRANSCRIBER.transcribe(
             audio_bytes=audio_bytes,
@@ -194,6 +217,24 @@ def get_run(run_id: str) -> RunRecord:
     return run
 
 
+@app.post("/v1/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict[str, str]:
+    with RUNS_LOCK:
+        run = RUNS.get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="run not found")
+        if run.status in {"completed", "failed", "rejected", "cancelled"}:
+            raise HTTPException(status_code=409, detail=f"run already terminal ({run.status})")
+        RUN_CANCELLED.add(run_id)
+
+    with ACTIVE_PROCS_LOCK:
+        proc = ACTIVE_PROCS.get(run_id)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+
+    return {"run_id": run_id, "status": "cancel_requested"}
+
+
 @app.get("/v1/runs/{run_id}/events")
 def stream_run_events(run_id: str) -> StreamingResponse:
     with RUNS_LOCK:
@@ -216,7 +257,7 @@ def stream_run_events(run_id: str) -> StreamingResponse:
                 payload = json.dumps(event.model_dump())
                 yield f"event: {event.type}\ndata: {payload}\n\n"
 
-            done = status in {"completed", "failed", "rejected"}
+            done = status in {"completed", "failed", "rejected", "cancelled"}
             if done and not pending_events:
                 break
 
@@ -232,6 +273,10 @@ def stream_run_events(run_id: str) -> StreamingResponse:
 def _run_local_plan(run_id: str, plan: ActionPlan, workdir: Path) -> None:
     executor = LocalExecutor(workdir)
     success = _execute_plan(run_id, plan, executor)
+    with RUNS_LOCK:
+        current_status = RUNS.get(run_id).status if run_id in RUNS else None
+    if current_status == "cancelled":
+        return
     summary = "Run completed successfully" if success else "Run failed"
     _append_event(
         run_id,
@@ -268,22 +313,68 @@ def _run_codex(run_id: str, prompt: str, workdir: Path) -> None:
         _set_run_status(run_id, "failed", "Run failed")
         return
 
+    with ACTIVE_PROCS_LOCK:
+        ACTIVE_PROCS[run_id] = proc
+
     assert proc.stdout is not None
-    for line in proc.stdout:
-        message = line.rstrip()
-        if message:
-            _append_event(
-                run_id,
-                ExecutionEvent(type="action.stdout", action_index=0, message=message),
-            )
-            structured = _codex_structured_message(message, prompt)
-            if structured:
+    line_queue: Queue[str | None] = Queue()
+
+    def _drain_stdout() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line_queue.put(line.rstrip())
+        line_queue.put(None)
+
+    reader = threading.Thread(target=_drain_stdout, daemon=True)
+    reader.start()
+
+    timed_out = False
+    cancelled = False
+    deadline = time.monotonic() + CODEX_TIMEOUT_SEC
+    while True:
+        try:
+            line = line_queue.get(timeout=0.2)
+        except Empty:
+            line = None
+
+        if line is not None:
+            message = line.rstrip()
+            if message:
                 _append_event(
                     run_id,
-                    ExecutionEvent(type="assistant.message", action_index=0, message=structured),
+                    ExecutionEvent(type="action.stdout", action_index=0, message=message),
                 )
+                structured = _codex_structured_message(message, prompt)
+                if structured:
+                    _append_event(
+                        run_id,
+                        ExecutionEvent(type="assistant.message", action_index=0, message=structured),
+                    )
+        else:
+            if proc.poll() is not None:
+                break
 
+        if _is_cancelled(run_id):
+            cancelled = True
+            break
+        if time.monotonic() > deadline:
+            timed_out = True
+            break
+
+    if cancelled or timed_out:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
     exit_code = proc.wait()
+    if not cancelled and _is_cancelled(run_id):
+        cancelled = True
+    with ACTIVE_PROCS_LOCK:
+        ACTIVE_PROCS.pop(run_id, None)
+
     _append_event(
         run_id,
         ExecutionEvent(
@@ -292,6 +383,18 @@ def _run_codex(run_id: str, prompt: str, workdir: Path) -> None:
             message=f"codex exec finished (exit={exit_code})",
         ),
     )
+
+    if cancelled:
+        summary = "Run cancelled by user"
+        _append_event(run_id, ExecutionEvent(type="run.cancelled", message=summary))
+        _set_run_status(run_id, "cancelled", summary)
+        return
+    if timed_out:
+        summary = f"Run timed out after {CODEX_TIMEOUT_SEC}s"
+        _append_event(run_id, ExecutionEvent(type="run.failed", message=summary))
+        _set_run_status(run_id, "failed", summary)
+        return
+
     success = exit_code == 0
     summary = "Run completed successfully" if success else "Run failed"
     _append_event(
@@ -303,6 +406,13 @@ def _run_codex(run_id: str, prompt: str, workdir: Path) -> None:
 
 def _execute_plan(run_id: str, plan: ActionPlan, executor: LocalExecutor) -> bool:
     for idx, action in enumerate(plan.actions):
+        if _is_cancelled(run_id):
+            _append_event(
+                run_id,
+                ExecutionEvent(type="run.cancelled", message="Run cancelled by user"),
+            )
+            _set_run_status(run_id, "cancelled", "Run cancelled by user")
+            return False
         _append_event(
             run_id,
             ExecutionEvent(
@@ -349,7 +459,7 @@ def _execute_plan(run_id: str, plan: ActionPlan, executor: LocalExecutor) -> boo
 def _store_run(run: RunRecord) -> None:
     with RUNS_LOCK:
         RUNS[run.run_id] = run
-        RUN_STORE.upsert(run)
+        RUN_STORE.upsert_run(run)
 
 
 def _append_event(run_id: str, event: ExecutionEvent) -> None:
@@ -358,7 +468,7 @@ def _append_event(run_id: str, event: ExecutionEvent) -> None:
         if run is None:
             return
         run.events.append(event)
-        RUN_STORE.upsert(run)
+        RUN_STORE.append_event(run_id, event)
 
 
 def _set_run_status(run_id: str, status: str, summary: str) -> None:
@@ -368,7 +478,9 @@ def _set_run_status(run_id: str, status: str, summary: str) -> None:
             return
         run.status = status
         run.summary = summary
-        RUN_STORE.upsert(run)
+        if status in {"completed", "failed", "rejected", "cancelled"}:
+            RUN_CANCELLED.discard(run_id)
+        RUN_STORE.update_run_status(run_id, status, summary)
 
 
 def _resolve_workdir(raw_path: str | None) -> Path:
@@ -421,3 +533,8 @@ def _codex_structured_message(message: str, user_prompt: str) -> str | None:
     if text.isdigit():
         return None
     return text
+
+
+def _is_cancelled(run_id: str) -> bool:
+    with RUNS_LOCK:
+        return run_id in RUN_CANCELLED

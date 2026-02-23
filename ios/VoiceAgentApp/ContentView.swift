@@ -44,6 +44,13 @@ struct ContentView: View {
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
                             }
+                            HStack {
+                                Text("Timeout (sec)")
+                                    .foregroundStyle(.secondary)
+                                TextField("300", text: $vm.runTimeoutSeconds)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                            }
                             .font(.footnote.monospaced())
                             Picker("Executor", selection: $vm.executor) {
                                 Text("Local").tag("local")

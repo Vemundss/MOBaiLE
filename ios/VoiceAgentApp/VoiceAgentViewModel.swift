@@ -7,6 +7,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var apiToken: String = ""
     @Published var sessionID: String = "iphone-app"
     @Published var workingDirectory: String = "~"
+    @Published var runTimeoutSeconds: String = "300"
     @Published var executor: String = "local"
     @Published var promptText: String = "create a hello python script and run it"
     @Published var isLoading: Bool = false
@@ -116,12 +117,18 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func observeRun(runID: String) async throws {
-        statusText = "Polling run..."
-        try await pollRunUntilDone(runID: runID)
+        statusText = "Streaming events..."
+        do {
+            try await streamRunUntilDone(runID: runID, timeoutSec: normalizedRunTimeoutSeconds)
+        } catch {
+            statusText = "Stream interrupted, polling..."
+            try await pollRunUntilDone(runID: runID, timeoutSec: normalizedRunTimeoutSeconds)
+        }
     }
 
-    private func pollRunUntilDone(runID: String) async throws {
-        for _ in 0..<120 {
+    private func pollRunUntilDone(runID: String, timeoutSec: TimeInterval) async throws {
+        let pollCount = max(1, Int(timeoutSec / 0.5))
+        for _ in 0..<pollCount {
             let run = try await client.fetchRun(
                 serverURL: normalizedServerURL,
                 token: apiToken,
@@ -133,7 +140,7 @@ final class VoiceAgentViewModel: ObservableObject {
             resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
             appendNewEventMessages(from: run.events)
 
-            if run.status == "completed" || run.status == "failed" || run.status == "rejected" {
+            if isTerminalStatus(run.status) {
                 isLoading = false
                 didCompleteRun = true
                 appendConversation(role: "assistant", text: run.summary)
@@ -145,6 +152,47 @@ final class VoiceAgentViewModel: ObservableObject {
         isLoading = false
         errorText = "Timed out waiting for run completion."
         appendConversation(role: "assistant", text: "Timed out waiting for run completion.")
+    }
+
+    private func streamRunUntilDone(runID: String, timeoutSec: TimeInterval) async throws {
+        let deadline = Date().addingTimeInterval(timeoutSec)
+        let stream = client.streamRunEvents(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            runID: runID
+        )
+        for try await event in stream {
+            events.append(event)
+            if let text = conversationText(for: event) {
+                appendConversation(role: "assistant", text: text)
+            }
+            if Date() > deadline {
+                throw NSError(
+                    domain: "VoiceAgentApp",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Run timed out while streaming events."]
+                )
+            }
+            if event.type == "run.completed" || event.type == "run.failed" || event.type == "run.cancelled" {
+                let run = try await client.fetchRun(
+                    serverURL: normalizedServerURL,
+                    token: apiToken,
+                    runID: runID
+                )
+                summaryText = run.summary
+                resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
+                isLoading = false
+                didCompleteRun = true
+                appendConversation(role: "assistant", text: run.summary)
+                speak(run.summary)
+                return
+            }
+        }
+        throw NSError(
+            domain: "VoiceAgentApp",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "Event stream ended before run reached a terminal state."]
+        )
     }
 
     func startNewChat() {
@@ -175,6 +223,16 @@ final class VoiceAgentViewModel: ObservableObject {
         return value.isEmpty ? nil : value
     }
 
+    private var normalizedRunTimeoutSeconds: TimeInterval {
+        let value = runTimeoutSeconds.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Double(value), parsed >= 10 else { return 300 }
+        return parsed
+    }
+
+    private func isTerminalStatus(_ status: String) -> Bool {
+        status == "completed" || status == "failed" || status == "rejected" || status == "cancelled"
+    }
+
     private func appendNewEventMessages(from runEvents: [ExecutionEvent]) {
         guard runEvents.count > processedEventCount else { return }
         for idx in processedEventCount..<runEvents.count {
@@ -201,6 +259,8 @@ final class VoiceAgentViewModel: ObservableObject {
         case "action.stderr":
             return "stderr: \(message)"
         case "run.failed":
+            return message
+        case "run.cancelled":
             return message
         default:
             return nil

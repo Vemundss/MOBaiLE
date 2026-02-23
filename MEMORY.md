@@ -101,3 +101,25 @@
 - Re-verified simulator build and tests after SSE integration.
 - Added `scripts/pairing_qr.sh` for local QR generation from pairing data.
 - Verified QR generation to `backend/pairing-qr.png` with `qrencode`.
+
+## 2026-02-23
+
+- Added structured assistant event emission for codex runs:
+  - backend emits `assistant.message` alongside raw `action.stdout` for cleaner client rendering.
+- Added backend run control and reliability improvements:
+  - `POST /v1/runs/{run_id}/cancel` endpoint to request cancellation of active runs.
+  - codex run timeout via `VOICE_AGENT_CODEX_TIMEOUT_SEC` (default 900s).
+  - terminal `cancelled` run status and `run.cancelled` event.
+- Added audio payload guardrails:
+  - `VOICE_AGENT_MAX_AUDIO_MB` limit (default 20 MB) with HTTP 413 for oversized uploads.
+- Refactored run storage to normalized SQLite tables:
+  - `runs` + `run_events` schema replaces full-payload rewrite model.
+  - legacy `payload_json` rows are migrated on startup.
+- Updated iOS run observation strategy:
+  - SSE-first event handling with polling fallback.
+  - configurable run timeout in app settings (`Timeout (sec)`).
+- Extended backend tests for:
+  - oversized audio rejection
+  - codex cancellation flow
+  - codex timeout handling
+- Updated docs (`docs/USAGE.md`, `STATUS.md`) to match current implementation.
