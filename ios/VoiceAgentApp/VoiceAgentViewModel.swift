@@ -154,12 +154,18 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func observeRun(runID: String) async throws {
-        statusText = "Streaming events..."
+        statusText = "Running..."
+        let timeoutSec = normalizedRunTimeoutSeconds
+        let streamTask = Task {
+            try await streamRunUntilDone(runID: runID, timeoutSec: timeoutSec)
+        }
         do {
-            try await streamRunUntilDone(runID: runID, timeoutSec: normalizedRunTimeoutSeconds)
+            // Keep polling as a watchdog so terminal state is reflected even if SSE stalls.
+            try await pollRunUntilDone(runID: runID, timeoutSec: timeoutSec)
+            streamTask.cancel()
         } catch {
-            statusText = "Stream interrupted, polling..."
-            try await pollRunUntilDone(runID: runID, timeoutSec: normalizedRunTimeoutSeconds)
+            streamTask.cancel()
+            throw error
         }
     }
 
@@ -263,6 +269,9 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func applyTerminalRunStateIfNeeded(_ run: RunRecord) {
+        if didCompleteRun && summaryText == run.summary {
+            return
+        }
         summaryText = run.summary
         resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
         isLoading = false
