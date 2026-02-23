@@ -31,5 +31,10 @@ Persistence:
 - Run records are stored in SQLite (default path `data/runs.db`).
 - Override with `VOICE_AGENT_DB_PATH`.
 
+Working directory:
+- Default execution directory is `VOICE_AGENT_DEFAULT_WORKDIR` (defaults to `~`).
+- Per-run override is supported via `working_directory` on `/v1/utterances` and `/v1/audio`.
+- `local` writes planner files under `<working_directory>/workspace/...`.
+
 Tests:
 - `uv run pytest -q`

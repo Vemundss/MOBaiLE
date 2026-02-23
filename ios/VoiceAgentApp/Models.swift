@@ -5,12 +5,14 @@ struct UtteranceRequest: Encodable {
     let utteranceText: String
     let mode: String
     let executor: String
+    let workingDirectory: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case utteranceText = "utterance_text"
         case mode
         case executor
+        case workingDirectory = "working_directory"
     }
 }
 
@@ -57,6 +59,7 @@ struct RunRecord: Decodable {
     let runId: String
     let sessionId: String
     let utteranceText: String
+    let workingDirectory: String?
     let status: String
     let summary: String
     let events: [ExecutionEvent]
@@ -65,6 +68,7 @@ struct RunRecord: Decodable {
         case runId = "run_id"
         case sessionId = "session_id"
         case utteranceText = "utterance_text"
+        case workingDirectory = "working_directory"
         case status
         case summary
         case events

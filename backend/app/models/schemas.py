@@ -10,6 +10,7 @@ class UtteranceRequest(BaseModel):
     utterance_text: str = Field(min_length=1)
     mode: Literal["assistant", "execute"] = "execute"
     executor: Literal["local", "codex"] = "local"
+    working_directory: str | None = None
 
 
 class Action(BaseModel):
@@ -62,6 +63,7 @@ class RunRecord(BaseModel):
     run_id: str
     session_id: str
     utterance_text: str
+    working_directory: str | None = None
     status: Literal["running", "completed", "failed", "rejected"]
     plan: ActionPlan | None = None
     events: list[ExecutionEvent] = Field(default_factory=list)

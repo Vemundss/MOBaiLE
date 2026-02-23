@@ -74,7 +74,7 @@ uv run python ../scripts/backend_smoke.py
 
 Expected behavior:
 - A run is created (`status=accepted`, message `Run started`).
-- Backend writes `backend/sandbox/workspace/hello.py`.
+- Backend writes `<working_directory>/workspace/hello.py`.
 - Backend executes the script and returns `hello from voice agent` in event output.
 - Script polls `GET /v1/runs/{run_id}` until terminal status.
 
@@ -91,7 +91,8 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
     "session_id": "demo-session",
     "utterance_text": "create a hello python script and run it",
     "mode": "execute",
-    "executor": "local"
+    "executor": "local",
+    "working_directory": "~/MOBaiLE-workspace"
   }'
 ```
 
@@ -123,6 +124,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
 Codex executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (default).
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
+- `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for both `local` and `codex` runs.
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
 
 ## 5) Audio upload flow (`/v1/audio`)
@@ -137,6 +139,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/audio \
   -H "Authorization: Bearer ${TOKEN}" \
   -F 'session_id=audio-session' \
   -F 'executor=local' \
+  -F 'working_directory=~/MOBaiLE-workspace' \
   -F 'transcript_hint=create a hello python script and run it' \
   -F 'audio=@/tmp/voice_sample.wav;type=audio/wav'
 ```

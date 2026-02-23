@@ -69,6 +69,7 @@ final class APIClient {
         token: String,
         sessionID: String,
         executor: String,
+        workingDirectory: String?,
         audioFileURL: URL
     ) async throws -> AudioRunResponse {
         guard let url = URL(string: serverURL + "/v1/audio") else {
@@ -87,7 +88,8 @@ final class APIClient {
             boundary: boundary,
             fields: [
                 "session_id": sessionID,
-                "executor": executor
+                "executor": executor,
+                "working_directory": workingDirectory ?? ""
             ],
             fileData: audioData,
             fileFieldName: "audio",

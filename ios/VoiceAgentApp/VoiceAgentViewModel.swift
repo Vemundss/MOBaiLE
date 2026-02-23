@@ -6,6 +6,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var serverURL: String = "http://127.0.0.1:8000"
     @Published var apiToken: String = ""
     @Published var sessionID: String = "iphone-app"
+    @Published var workingDirectory: String = "~"
     @Published var executor: String = "local"
     @Published var promptText: String = "create a hello python script and run it"
     @Published var isLoading: Bool = false
@@ -15,6 +16,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var transcriptText: String = ""
     @Published var errorText: String = ""
     @Published var events: [ExecutionEvent] = []
+    @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
 
     private let client = APIClient()
@@ -25,6 +27,7 @@ final class VoiceAgentViewModel: ObservableObject {
         errorText = ""
         summaryText = ""
         events = []
+        resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
         statusText = "Starting run..."
 
@@ -36,7 +39,8 @@ final class VoiceAgentViewModel: ObservableObject {
                     sessionId: sessionID,
                     utteranceText: promptText,
                     mode: "execute",
-                    executor: executor
+                    executor: executor,
+                    workingDirectory: normalizedWorkingDirectory
                 )
             )
             runID = response.runId
@@ -69,6 +73,7 @@ final class VoiceAgentViewModel: ObservableObject {
         summaryText = ""
         transcriptText = ""
         events = []
+        resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
 
         guard let audioFile = recorder.stop() else {
@@ -84,6 +89,7 @@ final class VoiceAgentViewModel: ObservableObject {
                 token: apiToken,
                 sessionID: sessionID,
                 executor: executor,
+                workingDirectory: normalizedWorkingDirectory,
                 audioFileURL: audioFile
             )
             runID = response.runId
@@ -112,6 +118,7 @@ final class VoiceAgentViewModel: ObservableObject {
             statusText = "Run status: \(run.status)"
             summaryText = run.summary
             events = run.events
+            resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
 
             if run.status == "completed" || run.status == "failed" || run.status == "rejected" {
                 isLoading = false
@@ -133,5 +140,10 @@ final class VoiceAgentViewModel: ObservableObject {
 
     private var normalizedServerURL: String {
         serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private var normalizedWorkingDirectory: String? {
+        let value = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }

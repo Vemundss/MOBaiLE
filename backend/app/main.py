@@ -50,8 +50,10 @@ _load_env_defaults()
 
 app = FastAPI(title="Voice Agent Backend", version="0.1.0")
 RUNS_LOCK = threading.Lock()
-EXECUTOR = LocalExecutor(Path(__file__).resolve().parent.parent / "sandbox")
-CODEX_EXECUTOR = CodexExecutor(Path(__file__).resolve().parents[2])
+DEFAULT_WORKDIR = Path(
+    os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))
+).expanduser().resolve()
+DEFAULT_WORKDIR.mkdir(parents=True, exist_ok=True)
 TRANSCRIBER = Transcriber()
 API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN", "")
 RUN_STORE = RunStore(
@@ -94,12 +96,14 @@ async def require_api_token(request: Request, call_next):
 @app.post("/v1/utterances", response_model=UtteranceResponse)
 def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
     run_id = str(uuid.uuid4())
+    workdir = _resolve_workdir(request.working_directory)
     if request.executor == "codex":
         _store_run(
             RunRecord(
                 run_id=run_id,
                 session_id=request.session_id,
                 utterance_text=request.utterance_text,
+                working_directory=str(workdir),
                 status="running",
                 plan=None,
                 events=[],
@@ -108,7 +112,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
         )
         threading.Thread(
             target=_run_codex,
-            args=(run_id, request.utterance_text),
+            args=(run_id, request.utterance_text, workdir),
             daemon=True,
         ).start()
         return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
@@ -121,6 +125,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
                 run_id=run_id,
                 session_id=request.session_id,
                 utterance_text=request.utterance_text,
+                working_directory=str(workdir),
                 status="rejected",
                 plan=plan,
                 events=[ExecutionEvent(type="run.failed", message=message)],
@@ -134,13 +139,14 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
             run_id=run_id,
             session_id=request.session_id,
             utterance_text=request.utterance_text,
+            working_directory=str(workdir),
             status="running",
             plan=plan,
             events=[],
             summary="Run started",
         )
     )
-    threading.Thread(target=_run_local_plan, args=(run_id, plan), daemon=True).start()
+    threading.Thread(target=_run_local_plan, args=(run_id, plan, workdir), daemon=True).start()
     return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
 
 
@@ -151,6 +157,7 @@ async def create_audio_run(
     executor: Literal["local", "codex"] = Form("codex"),
     mode: Literal["assistant", "execute"] = Form("execute"),
     transcript_hint: str | None = Form(None),
+    working_directory: str | None = Form(None),
 ) -> AudioRunResponse:
     audio_bytes = await audio.read()
     try:
@@ -167,6 +174,7 @@ async def create_audio_run(
             utterance_text=transcript_text,
             executor=executor,
             mode=mode,
+            working_directory=working_directory,
         )
     )
     return AudioRunResponse(
@@ -221,8 +229,9 @@ def stream_run_events(run_id: str) -> StreamingResponse:
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-def _run_local_plan(run_id: str, plan: ActionPlan) -> None:
-    success = _execute_plan(run_id, plan)
+def _run_local_plan(run_id: str, plan: ActionPlan, workdir: Path) -> None:
+    executor = LocalExecutor(workdir)
+    success = _execute_plan(run_id, plan, executor)
     summary = "Run completed successfully" if success else "Run failed"
     _append_event(
         run_id,
@@ -234,13 +243,18 @@ def _run_local_plan(run_id: str, plan: ActionPlan) -> None:
     _set_run_status(run_id, "completed" if success else "failed", summary)
 
 
-def _run_codex(run_id: str, prompt: str) -> None:
+def _run_codex(run_id: str, prompt: str, workdir: Path) -> None:
+    codex_executor = CodexExecutor(workdir)
     _append_event(
         run_id,
-        ExecutionEvent(type="action.started", action_index=0, message="starting codex exec"),
+        ExecutionEvent(
+            type="action.started",
+            action_index=0,
+            message=f"starting codex exec (cwd={workdir})",
+        ),
     )
     try:
-        proc = CODEX_EXECUTOR.start(prompt)
+        proc = codex_executor.start(prompt)
     except FileNotFoundError:
         _append_event(
             run_id,
@@ -281,7 +295,7 @@ def _run_codex(run_id: str, prompt: str) -> None:
     _set_run_status(run_id, "completed" if success else "failed", summary)
 
 
-def _execute_plan(run_id: str, plan: ActionPlan) -> bool:
+def _execute_plan(run_id: str, plan: ActionPlan, executor: LocalExecutor) -> bool:
     for idx, action in enumerate(plan.actions):
         _append_event(
             run_id,
@@ -291,7 +305,7 @@ def _execute_plan(run_id: str, plan: ActionPlan) -> bool:
                 message=f"starting {action.type}",
             )
         )
-        result = EXECUTOR.execute(action)
+        result = executor.execute(action)
         if result.stdout:
             _append_event(
                 run_id,
@@ -349,3 +363,15 @@ def _set_run_status(run_id: str, status: str, summary: str) -> None:
         run.status = status
         run.summary = summary
         RUN_STORE.upsert(run)
+
+
+def _resolve_workdir(raw_path: str | None) -> Path:
+    if raw_path and raw_path.strip():
+        requested = Path(raw_path.strip()).expanduser()
+        if not requested.is_absolute():
+            requested = (DEFAULT_WORKDIR / requested).resolve()
+        else:
+            requested = requested.resolve()
+        requested.mkdir(parents=True, exist_ok=True)
+        return requested
+    return DEFAULT_WORKDIR
