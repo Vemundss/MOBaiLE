@@ -10,12 +10,12 @@ def plan_from_utterance(utterance_text: str) -> ActionPlan:
             actions=[
                 Action(
                     type="write_file",
-                    path="workspace/hello.py",
+                    path="hello.py",
                     content="print('hello from voice agent')\n",
                 ),
                 Action(
                     type="run_command",
-                    command="python3 workspace/hello.py",
+                    command="python3 hello.py",
                     timeout_sec=30,
                 ),
             ],

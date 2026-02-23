@@ -74,7 +74,7 @@ uv run python ../scripts/backend_smoke.py
 
 Expected behavior:
 - A run is created (`status=accepted`, message `Run started`).
-- Backend writes `<working_directory>/workspace/hello.py`.
+- Backend writes `<working_directory>/hello.py`.
 - Backend executes the script and returns `hello from voice agent` in event output.
 - Script polls `GET /v1/runs/{run_id}` until terminal status.
 
