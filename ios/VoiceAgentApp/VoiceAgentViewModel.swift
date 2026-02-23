@@ -189,6 +189,10 @@ final class VoiceAgentViewModel: ObservableObject {
     private func conversationText(for event: ExecutionEvent) -> String? {
         let message = event.message.trimmingCharacters(in: .whitespacesAndNewlines)
         switch event.type {
+        case "assistant.message":
+            if message.isEmpty { return nil }
+            if message == lastSubmittedUserText { return nil }
+            return message
         case "action.stdout":
             if message.isEmpty { return nil }
             if isCodexNoise(message) { return nil }

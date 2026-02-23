@@ -44,6 +44,7 @@ class ExecutionEvent(BaseModel):
         "action.stdout",
         "action.stderr",
         "action.completed",
+        "assistant.message",
         "run.completed",
         "run.failed",
     ]

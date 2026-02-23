@@ -276,6 +276,12 @@ def _run_codex(run_id: str, prompt: str, workdir: Path) -> None:
                 run_id,
                 ExecutionEvent(type="action.stdout", action_index=0, message=message),
             )
+            structured = _codex_structured_message(message, prompt)
+            if structured:
+                _append_event(
+                    run_id,
+                    ExecutionEvent(type="assistant.message", action_index=0, message=structured),
+                )
 
     exit_code = proc.wait()
     _append_event(
@@ -375,3 +381,43 @@ def _resolve_workdir(raw_path: str | None) -> Path:
         requested.mkdir(parents=True, exist_ok=True)
         return requested
     return DEFAULT_WORKDIR
+
+
+def _codex_structured_message(message: str, user_prompt: str) -> str | None:
+    text = message.strip()
+    if not text:
+        return None
+    if text == user_prompt.strip():
+        return None
+
+    lower = text.lower()
+    noisy_exact = {
+        "user",
+        "codex",
+        "exec",
+        "thinking",
+        "output:",
+        "tokens used",
+        "--------",
+    }
+    if lower in noisy_exact:
+        return None
+    noisy_prefixes = (
+        "openai codex v",
+        "workdir:",
+        "model:",
+        "provider:",
+        "approval:",
+        "sandbox:",
+        "reasoning effort:",
+        "reasoning summaries:",
+        "session id:",
+        "mcp startup:",
+    )
+    if lower.startswith(noisy_prefixes):
+        return None
+    if text.startswith("**") and text.endswith("**"):
+        return None
+    if text.isdigit():
+        return None
+    return text
