@@ -77,6 +77,7 @@ final class VoiceAgentViewModel: ObservableObject {
     func cancelCurrentRun() async {
         let activeRun = runID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !activeRun.isEmpty else { return }
+        errorText = ""
         do {
             _ = try await client.cancelRun(
                 serverURL: normalizedServerURL,
@@ -84,6 +85,27 @@ final class VoiceAgentViewModel: ObservableObject {
                 runID: activeRun
             )
             statusText = "Cancelling run..."
+        } catch let apiError as APIError {
+            switch apiError {
+            case let .httpError(code, _):
+                if code == 409 {
+                    do {
+                        let run = try await client.fetchRun(
+                            serverURL: normalizedServerURL,
+                            token: apiToken,
+                            runID: activeRun
+                        )
+                        applyTerminalRunStateIfNeeded(run)
+                        return
+                    } catch {
+                        errorText = error.localizedDescription
+                        return
+                    }
+                }
+                errorText = apiError.localizedDescription
+            default:
+                errorText = apiError.localizedDescription
+            }
         } catch {
             errorText = error.localizedDescription
         }
@@ -156,10 +178,7 @@ final class VoiceAgentViewModel: ObservableObject {
             appendNewEventMessages(from: run.events)
 
             if isTerminalStatus(run.status) {
-                isLoading = false
-                didCompleteRun = true
-                appendConversation(role: "assistant", text: run.summary)
-                speak(run.summary)
+                applyTerminalRunStateIfNeeded(run)
                 return
             }
             try await Task.sleep(nanoseconds: 500_000_000)
@@ -194,12 +213,7 @@ final class VoiceAgentViewModel: ObservableObject {
                     token: apiToken,
                     runID: runID
                 )
-                summaryText = run.summary
-                resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
-                isLoading = false
-                didCompleteRun = true
-                appendConversation(role: "assistant", text: run.summary)
-                speak(run.summary)
+                applyTerminalRunStateIfNeeded(run)
                 return
             }
         }
@@ -246,6 +260,16 @@ final class VoiceAgentViewModel: ObservableObject {
 
     private func isTerminalStatus(_ status: String) -> Bool {
         status == "completed" || status == "failed" || status == "rejected" || status == "cancelled"
+    }
+
+    private func applyTerminalRunStateIfNeeded(_ run: RunRecord) {
+        summaryText = run.summary
+        resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
+        isLoading = false
+        didCompleteRun = true
+        statusText = "Run status: \(run.status)"
+        appendConversation(role: "assistant", text: run.summary)
+        speak(run.summary)
     }
 
     private func appendNewEventMessages(from runEvents: [ExecutionEvent]) {

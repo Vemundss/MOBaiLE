@@ -16,7 +16,7 @@ struct ContentView: View {
                             .background(Color(.tertiarySystemBackground))
                             .clipShape(Capsule())
                         Spacer()
-                        Button(showConnectionSettings ? "Hide Settings" : "Show Settings") {
+                        Button(showConnectionSettings ? "Done" : "Settings") {
                             showConnectionSettings.toggle()
                         }
                         .font(.caption.weight(.semibold))
@@ -117,30 +117,37 @@ struct ContentView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                     HStack(spacing: 8) {
-                        Button(vm.isLoading ? "Running..." : "Send") {
-                            Task { await vm.sendPrompt() }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(vm.isLoading || vm.apiToken.isEmpty || vm.serverURL.isEmpty || vm.promptText.isEmpty)
-
-                        Button(vm.isRecording ? "Recording..." : "Record") {
-                            Task { await vm.startRecording() }
+                        Button {
+                            Task {
+                                if vm.isRecording {
+                                    await vm.stopRecordingAndSend()
+                                } else {
+                                    await vm.startRecording()
+                                }
+                            }
+                        } label: {
+                            Label(
+                                vm.isRecording ? "Stop Rec" : "Record",
+                                systemImage: vm.isRecording ? "stop.circle.fill" : "mic.fill"
+                            )
                         }
                         .buttonStyle(.bordered)
-                        .disabled(vm.isLoading || vm.isRecording || vm.apiToken.isEmpty || vm.serverURL.isEmpty)
+                        .disabled(vm.isLoading || vm.apiToken.isEmpty || vm.serverURL.isEmpty)
 
-                        Button("Stop + Send") {
-                            Task { await vm.stopRecordingAndSend() }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(vm.isLoading || !vm.isRecording || vm.apiToken.isEmpty || vm.serverURL.isEmpty)
+                        Spacer()
 
                         if vm.isLoading && !vm.runID.isEmpty {
                             Button("Cancel") {
                                 Task { await vm.cancelCurrentRun() }
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.borderedProminent)
                             .tint(.red)
+                        } else {
+                            Button("Send") {
+                                Task { await vm.sendPrompt() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(vm.apiToken.isEmpty || vm.serverURL.isEmpty || vm.promptText.isEmpty || vm.isRecording)
                         }
                     }
                 }
@@ -148,15 +155,15 @@ struct ContentView: View {
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                HStack {
+                HStack(alignment: .top) {
                     if !vm.runID.isEmpty {
-                        Text("Run: \(vm.runID)")
-                            .font(.caption.monospaced())
+                        Text("Run \(vm.runID)")
+                            .font(.caption2.monospaced())
                             .textSelection(.enabled)
                     }
                     Spacer()
                     Text(vm.statusText)
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 if !vm.errorText.isEmpty {
