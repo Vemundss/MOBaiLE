@@ -146,11 +146,12 @@ curl -s -X POST http://127.0.0.1:8000/v1/audio \
 
 Notes:
 - `transcript_hint` is optional and useful for deterministic MVP testing.
-- Default provider is mock (`VOICE_AGENT_TRANSCRIBE_PROVIDER=mock`).
-- For real STT, set in `backend/.env`:
-  - `VOICE_AGENT_TRANSCRIBE_PROVIDER=openai`
+- Default provider is OpenAI (`VOICE_AGENT_TRANSCRIBE_PROVIDER=openai`).
+- For real STT, ensure in `backend/.env`:
   - `OPENAI_API_KEY=<your-key>`
   - optional: `VOICE_AGENT_TRANSCRIBE_MODEL=whisper-1`
+- To force deterministic local behavior, opt into mock mode:
+  - `VOICE_AGENT_TRANSCRIBE_PROVIDER=mock`
 - Response includes `transcript_text` and run metadata (`run_id`, `status`, `message`).
 
 ## 6) Run automated tests

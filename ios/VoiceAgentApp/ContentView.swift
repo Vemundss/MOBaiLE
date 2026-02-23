@@ -5,31 +5,23 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Connection")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            VStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     TextField("Server URL", text: $vm.serverURL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .font(.subheadline.monospaced())
+                        .font(.footnote.monospaced())
                     SecureField("API Token", text: $vm.apiToken)
-                        .font(.subheadline.monospaced())
-                    TextField("Session ID", text: $vm.sessionID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.subheadline.monospaced())
-                    TextField("Working directory (e.g. ~ or /Users/...)", text: $vm.workingDirectory)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.subheadline.monospaced())
-                }
-                .padding()
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-                VStack(spacing: 8) {
+                        .font(.footnote.monospaced())
+                    HStack {
+                        TextField("Session ID", text: $vm.sessionID)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Working dir", text: $vm.workingDirectory)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    .font(.footnote.monospaced())
                     HStack {
                         Picker("Executor", selection: $vm.executor) {
                             Text("Local").tag("local")
@@ -37,9 +29,60 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
                     }
+                    if !vm.resolvedWorkingDirectory.isEmpty {
+                        Text("cwd: \(vm.resolvedWorkingDirectory)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(vm.conversation) { message in
+                                HStack {
+                                    if message.role == "user" {
+                                        Spacer(minLength: 44)
+                                    }
+                                    Text(message.text)
+                                        .font(.body)
+                                        .padding(10)
+                                        .foregroundStyle(message.role == "user" ? Color.white : Color.primary)
+                                        .background(
+                                            message.role == "user"
+                                                ? Color.blue
+                                                : Color(.secondarySystemBackground)
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    if message.role != "user" {
+                                        Spacer(minLength: 44)
+                                    }
+                                }
+                                .id(message.id)
+                            }
+                            if vm.conversation.isEmpty {
+                                Text("Conversation will appear here.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onChange(of: vm.conversation.count) {
+                        if let last = vm.conversation.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                }
+
+                VStack(spacing: 8) {
                     TextEditor(text: $vm.promptText)
-                        .frame(minHeight: 72, maxHeight: 120)
+                        .frame(minHeight: 64, maxHeight: 120)
                         .padding(6)
                         .background(Color(.tertiarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -63,70 +106,27 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .disabled(vm.isLoading || !vm.isRecording || vm.apiToken.isEmpty || vm.serverURL.isEmpty)
                     }
-                    .font(.subheadline.weight(.semibold))
                 }
-                .padding()
+                .padding(10)
                 .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 6) {
+                HStack {
                     if !vm.runID.isEmpty {
-                        Text("Run ID: \(vm.runID)")
+                        Text("Run: \(vm.runID)")
                             .font(.caption.monospaced())
                             .textSelection(.enabled)
                     }
+                    Spacer()
                     Text(vm.statusText)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                    if !vm.resolvedWorkingDirectory.isEmpty {
-                        Text("Working dir: \(vm.resolvedWorkingDirectory)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    if !vm.summaryText.isEmpty {
-                        Text(vm.summaryText)
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    if !vm.transcriptText.isEmpty {
-                        Text("Transcript: \(vm.transcriptText)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !vm.errorText.isEmpty {
-                        Text(vm.errorText)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
-
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        if vm.events.isEmpty {
-                            Text("No events yet.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            ForEach(vm.events.indices, id: \.self) { idx in
-                                let event = vm.events[idx]
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(event.type)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Text(event.message)
-                                        .font(.body)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                        }
-                    }
-                    .padding(.bottom, 8)
+                if !vm.errorText.isEmpty {
+                    Text(vm.errorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding()

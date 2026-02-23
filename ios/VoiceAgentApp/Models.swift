@@ -1,5 +1,11 @@
 import Foundation
 
+struct ConversationMessage: Identifiable, Equatable {
+    let id: UUID = UUID()
+    let role: String
+    let text: String
+}
+
 struct UtteranceRequest: Encodable {
     let sessionId: String
     let utteranceText: String

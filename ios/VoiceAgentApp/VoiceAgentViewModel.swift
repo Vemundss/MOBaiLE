@@ -16,20 +16,24 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var transcriptText: String = ""
     @Published var errorText: String = ""
     @Published var events: [ExecutionEvent] = []
+    @Published var conversation: [ConversationMessage] = []
     @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
 
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
     private let recorder = AudioRecorderService()
+    private var processedEventCount: Int = 0
 
     func sendPrompt() async {
         errorText = ""
         summaryText = ""
         events = []
+        processedEventCount = 0
         resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
         statusText = "Starting run..."
+        appendConversation(role: "user", text: promptText)
 
         do {
             let response = try await client.createUtterance(
@@ -73,6 +77,7 @@ final class VoiceAgentViewModel: ObservableObject {
         summaryText = ""
         transcriptText = ""
         events = []
+        processedEventCount = 0
         resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
 
@@ -94,6 +99,7 @@ final class VoiceAgentViewModel: ObservableObject {
             )
             runID = response.runId
             transcriptText = response.transcriptText
+            appendConversation(role: "user", text: response.transcriptText)
             statusText = "Audio run started (\(response.runId))"
             try await observeRun(runID: response.runId)
         } catch {
@@ -119,9 +125,11 @@ final class VoiceAgentViewModel: ObservableObject {
             summaryText = run.summary
             events = run.events
             resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
+            appendNewEventMessages(from: run.events)
 
             if run.status == "completed" || run.status == "failed" || run.status == "rejected" {
                 isLoading = false
+                appendConversation(role: "assistant", text: run.summary)
                 speak(run.summary)
                 return
             }
@@ -129,6 +137,7 @@ final class VoiceAgentViewModel: ObservableObject {
         }
         isLoading = false
         errorText = "Timed out waiting for run completion."
+        appendConversation(role: "assistant", text: "Timed out waiting for run completion.")
     }
 
     private func speak(_ text: String) {
@@ -145,5 +154,64 @@ final class VoiceAgentViewModel: ObservableObject {
     private var normalizedWorkingDirectory: String? {
         let value = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+
+    private func appendNewEventMessages(from runEvents: [ExecutionEvent]) {
+        guard runEvents.count > processedEventCount else { return }
+        for idx in processedEventCount..<runEvents.count {
+            let event = runEvents[idx]
+            if let text = conversationText(for: event) {
+                appendConversation(role: "assistant", text: text)
+            }
+        }
+        processedEventCount = runEvents.count
+    }
+
+    private func conversationText(for event: ExecutionEvent) -> String? {
+        let message = event.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch event.type {
+        case "action.stdout":
+            if message.isEmpty { return nil }
+            if isCodexNoise(message) { return nil }
+            return message
+        case "action.stderr":
+            return "stderr: \(message)"
+        case "run.failed":
+            return message
+        default:
+            return nil
+        }
+    }
+
+    private func appendConversation(role: String, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        conversation.append(ConversationMessage(role: role, text: trimmed))
+    }
+
+    private func isCodexNoise(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        if lower == "user" || lower == "codex" || lower == "exec" || lower == "thinking" {
+            return true
+        }
+        if lower == "output:" || lower == "tokens used" || lower == "--------" {
+            return true
+        }
+        if lower.hasPrefix("openai codex v") ||
+            lower.hasPrefix("workdir:") ||
+            lower.hasPrefix("model:") ||
+            lower.hasPrefix("provider:") ||
+            lower.hasPrefix("approval:") ||
+            lower.hasPrefix("sandbox:") ||
+            lower.hasPrefix("reasoning effort:") ||
+            lower.hasPrefix("reasoning summaries:") ||
+            lower.hasPrefix("session id:") ||
+            lower.hasPrefix("mcp startup:") {
+            return true
+        }
+        if message.hasPrefix("**") && message.hasSuffix("**") {
+            return true
+        }
+        return false
     }
 }

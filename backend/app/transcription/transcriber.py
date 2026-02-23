@@ -18,12 +18,13 @@ class Transcriber:
     """Transcription adapter with pluggable providers.
 
     Providers:
-    - mock (default): deterministic local behavior for development.
+    - openai (default): real speech-to-text via OpenAI audio transcription API.
+    - mock: deterministic local behavior for development.
     - openai: calls OpenAI audio transcription endpoint.
     """
 
     def __init__(self) -> None:
-        self.provider = os.getenv("VOICE_AGENT_TRANSCRIBE_PROVIDER", "mock").strip().lower()
+        self.provider = os.getenv("VOICE_AGENT_TRANSCRIBE_PROVIDER", "openai").strip().lower()
         self.default_mock_text = os.getenv("VOICE_AGENT_TRANSCRIBE_MOCK_TEXT", "").strip()
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.openai_model = os.getenv("VOICE_AGENT_TRANSCRIBE_MODEL", "whisper-1").strip()
@@ -39,7 +40,11 @@ class Transcriber:
     ) -> str:
         if self.provider == "openai":
             return self._transcribe_openai(audio_bytes=audio_bytes, filename=filename, text_hint=text_hint)
-        return self._transcribe_mock(audio_bytes=audio_bytes, filename=filename, text_hint=text_hint)
+        if self.provider == "mock":
+            return self._transcribe_mock(audio_bytes=audio_bytes, filename=filename, text_hint=text_hint)
+        raise TranscriptionError(
+            f"unknown transcription provider '{self.provider}' (expected 'openai' or 'mock')"
+        )
 
     def _transcribe_mock(
         self,
