@@ -19,6 +19,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var conversation: [ConversationMessage] = []
     @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
+    @Published var didCompleteRun: Bool = false
 
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
@@ -27,6 +28,7 @@ final class VoiceAgentViewModel: ObservableObject {
     private var lastSubmittedUserText: String = ""
 
     func sendPrompt() async {
+        didCompleteRun = false
         errorText = ""
         summaryText = ""
         events = []
@@ -73,6 +75,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func stopRecordingAndSend() async {
         guard isRecording else { return }
+        didCompleteRun = false
         isRecording = false
         statusText = "Uploading audio..."
         errorText = ""
@@ -132,6 +135,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
             if run.status == "completed" || run.status == "failed" || run.status == "rejected" {
                 isLoading = false
+                didCompleteRun = true
                 appendConversation(role: "assistant", text: run.summary)
                 speak(run.summary)
                 return
@@ -141,6 +145,18 @@ final class VoiceAgentViewModel: ObservableObject {
         isLoading = false
         errorText = "Timed out waiting for run completion."
         appendConversation(role: "assistant", text: "Timed out waiting for run completion.")
+    }
+
+    func startNewChat() {
+        runID = ""
+        summaryText = ""
+        transcriptText = ""
+        errorText = ""
+        statusText = "Idle"
+        events = []
+        conversation = []
+        processedEventCount = 0
+        didCompleteRun = false
     }
 
     private func speak(_ text: String) {

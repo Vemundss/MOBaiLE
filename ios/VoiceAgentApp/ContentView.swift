@@ -95,6 +95,11 @@ struct ContentView: View {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
+                    .onChange(of: vm.didCompleteRun) {
+                        if vm.didCompleteRun {
+                            showConnectionSettings = false
+                        }
+                    }
                 }
 
                 VStack(spacing: 8) {
@@ -148,6 +153,14 @@ struct ContentView: View {
             }
             .padding()
             .navigationTitle("MOBaiLE")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New Chat") {
+                        vm.startNewChat()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
         }
     }
 }
