@@ -134,6 +134,14 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(vm.isLoading || !vm.isRecording || vm.apiToken.isEmpty || vm.serverURL.isEmpty)
+
+                        if vm.isLoading && !vm.runID.isEmpty {
+                            Button("Cancel") {
+                                Task { await vm.cancelCurrentRun() }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        }
                     }
                 }
                 .padding(10)

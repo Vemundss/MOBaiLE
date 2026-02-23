@@ -48,6 +48,16 @@ struct AudioRunResponse: Decodable {
     }
 }
 
+struct CancelRunResponse: Decodable {
+    let runId: String
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case status
+    }
+}
+
 struct ExecutionEvent: Decodable, Identifiable {
     var id: String { "\(type)-\(actionIndex ?? -1)-\(message)" }
     let type: String

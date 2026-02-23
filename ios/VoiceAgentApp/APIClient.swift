@@ -162,6 +162,25 @@ final class APIClient {
         }
     }
 
+    func cancelRun(
+        serverURL: String,
+        token: String,
+        runID: String
+    ) async throws -> CancelRunResponse {
+        guard let url = URL(string: serverURL + "/v1/runs/\(runID)/cancel") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(CancelRunResponse.self, from: data)
+    }
+
     private func buildMultipartBody(
         boundary: String,
         fields: [String: String],

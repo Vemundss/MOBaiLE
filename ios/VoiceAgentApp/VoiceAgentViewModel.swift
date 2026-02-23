@@ -74,6 +74,21 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
+    func cancelCurrentRun() async {
+        let activeRun = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !activeRun.isEmpty else { return }
+        do {
+            _ = try await client.cancelRun(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                runID: activeRun
+            )
+            statusText = "Cancelling run..."
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
     func stopRecordingAndSend() async {
         guard isRecording else { return }
         didCompleteRun = false
