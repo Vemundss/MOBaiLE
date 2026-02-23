@@ -2,38 +2,55 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var vm = VoiceAgentViewModel()
+    @State private var showConnectionSettings: Bool = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("Server URL", text: $vm.serverURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.footnote.monospaced())
-                    SecureField("API Token", text: $vm.apiToken)
-                        .font(.footnote.monospaced())
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        TextField("Session ID", text: $vm.sessionID)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("Working dir", text: $vm.workingDirectory)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                    .font(.footnote.monospaced())
-                    HStack {
-                        Picker("Executor", selection: $vm.executor) {
-                            Text("Local").tag("local")
-                            Text("Codex").tag("codex")
+                        Text(vm.executor.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(.tertiarySystemBackground))
+                            .clipShape(Capsule())
+                        Spacer()
+                        Button(showConnectionSettings ? "Hide Settings" : "Show Settings") {
+                            showConnectionSettings.toggle()
                         }
-                        .pickerStyle(.segmented)
+                        .font(.caption.weight(.semibold))
                     }
                     if !vm.resolvedWorkingDirectory.isEmpty {
                         Text("cwd: \(vm.resolvedWorkingDirectory)")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                             .textSelection(.enabled)
+                    }
+                    if showConnectionSettings {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("Server URL", text: $vm.serverURL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.footnote.monospaced())
+                            SecureField("API Token", text: $vm.apiToken)
+                                .font(.footnote.monospaced())
+                            HStack {
+                                TextField("Session ID", text: $vm.sessionID)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                TextField("Working dir", text: $vm.workingDirectory)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                            .font(.footnote.monospaced())
+                            Picker("Executor", selection: $vm.executor) {
+                                Text("Local").tag("local")
+                                Text("Codex").tag("codex")
+                            }
+                            .pickerStyle(.segmented)
+                        }
                     }
                 }
                 .padding(10)
@@ -130,7 +147,7 @@ struct ContentView: View {
                 }
             }
             .padding()
-            .navigationTitle("Voice Agent MVP")
+            .navigationTitle("MOBaiLE")
         }
     }
 }

@@ -24,6 +24,7 @@ final class VoiceAgentViewModel: ObservableObject {
     private let speaker = AVSpeechSynthesizer()
     private let recorder = AudioRecorderService()
     private var processedEventCount: Int = 0
+    private var lastSubmittedUserText: String = ""
 
     func sendPrompt() async {
         errorText = ""
@@ -34,6 +35,7 @@ final class VoiceAgentViewModel: ObservableObject {
         isLoading = true
         statusText = "Starting run..."
         appendConversation(role: "user", text: promptText)
+        lastSubmittedUserText = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         do {
             let response = try await client.createUtterance(
@@ -100,6 +102,7 @@ final class VoiceAgentViewModel: ObservableObject {
             runID = response.runId
             transcriptText = response.transcriptText
             appendConversation(role: "user", text: response.transcriptText)
+            lastSubmittedUserText = response.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
             statusText = "Audio run started (\(response.runId))"
             try await observeRun(runID: response.runId)
         } catch {
@@ -173,6 +176,7 @@ final class VoiceAgentViewModel: ObservableObject {
         case "action.stdout":
             if message.isEmpty { return nil }
             if isCodexNoise(message) { return nil }
+            if message == lastSubmittedUserText { return nil }
             return message
         case "action.stderr":
             return "stderr: \(message)"
@@ -186,6 +190,9 @@ final class VoiceAgentViewModel: ObservableObject {
     private func appendConversation(role: String, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        if let last = conversation.last, last.role == role, last.text == trimmed {
+            return
+        }
         conversation.append(ConversationMessage(role: role, text: trimmed))
     }
 
