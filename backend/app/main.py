@@ -61,6 +61,13 @@ DEFAULT_WORKDIR = Path(
 ).expanduser().resolve()
 DEFAULT_WORKDIR.mkdir(parents=True, exist_ok=True)
 CODEX_TIMEOUT_SEC = int(os.getenv("VOICE_AGENT_CODEX_TIMEOUT_SEC", "900"))
+CODEX_USE_CONTEXT = os.getenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+CODEX_CONTEXT_FILE = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "AGENT_CONTEXT.md").strip()
 MAX_AUDIO_MB = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
 MAX_AUDIO_BYTES = int(MAX_AUDIO_MB * 1024 * 1024)
 TRANSCRIBER = Transcriber()
@@ -304,6 +311,7 @@ def _run_local_plan(run_id: str, plan: ActionPlan, workdir: Path) -> None:
 
 def _run_codex(run_id: str, prompt: str, workdir: Path) -> None:
     codex_executor = CodexExecutor(workdir)
+    codex_prompt = _build_codex_prompt(prompt)
     _append_event(
         run_id,
         ExecutionEvent(
@@ -313,7 +321,7 @@ def _run_codex(run_id: str, prompt: str, workdir: Path) -> None:
         ),
     )
     try:
-        proc = codex_executor.start(prompt)
+        proc = codex_executor.start(codex_prompt)
     except FileNotFoundError:
         _append_event(
             run_id,
@@ -552,3 +560,27 @@ def _codex_structured_message(message: str, user_prompt: str) -> str | None:
 def _is_cancelled(run_id: str) -> bool:
     with RUNS_LOCK:
         return run_id in RUN_CANCELLED
+
+
+def _build_codex_prompt(user_prompt: str) -> str:
+    if not CODEX_USE_CONTEXT:
+        return user_prompt
+    context = _load_codex_context()
+    if not context:
+        return user_prompt
+    return (
+        "You are running through MOBaiLE.\n\n"
+        "MOBaiLE runtime context:\n"
+        f"{context}\n\n"
+        "User request:\n"
+        f"{user_prompt}"
+    )
+
+
+def _load_codex_context() -> str:
+    path = Path(CODEX_CONTEXT_FILE)
+    if not path.is_absolute():
+        path = (Path(__file__).resolve().parent.parent / path).resolve()
+    if not path.exists() or not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8").strip()

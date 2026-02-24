@@ -30,6 +30,19 @@ def make_client(
     return TestClient(module.app), api_token
 
 
+def test_codex_prompt_context_injection(monkeypatch, tmp_path: Path):
+    context_file = tmp_path / "ctx.md"
+    context_file.write_text("You are in test context.", encoding="utf-8")
+    monkeypatch.setenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true")
+    monkeypatch.setenv("VOICE_AGENT_CODEX_CONTEXT_FILE", str(context_file))
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+    built = module._build_codex_prompt("create hello script")
+    assert "MOBaiLE runtime context" in built
+    assert "You are in test context." in built
+    assert "create hello script" in built
+
+
 def test_auth_required(monkeypatch, tmp_path: Path):
     client, token = make_client(monkeypatch, tmp_path)
     assert client.get("/health").status_code == 200

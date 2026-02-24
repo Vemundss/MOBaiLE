@@ -125,8 +125,14 @@ Codex executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (default).
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
 - `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
+- `VOICE_AGENT_CODEX_USE_CONTEXT=true` prepends MOBaiLE context to Codex prompts.
+- `VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md` points to context file under `backend/`.
 - `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for both `local` and `codex` runs.
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
+
+Notes:
+- Context injection affects Codex runs launched via MOBaiLE backend only.
+- Direct terminal usage (`codex exec ...`) is unchanged unless you configure that separately.
 
 Cancel a running run:
 
