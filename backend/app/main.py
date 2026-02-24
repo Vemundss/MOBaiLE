@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import secrets
 import subprocess
@@ -11,8 +12,8 @@ from queue import Empty, Queue
 from pathlib import Path
 from typing import Iterator, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.executors.codex_executor import CodexExecutor
 from app.executors.local_executor import LocalExecutor
@@ -215,6 +216,19 @@ def get_run(run_id: str) -> RunRecord:
     if not run:
         raise HTTPException(status_code=404, detail="run not found")
     return run
+
+
+@app.get("/v1/files")
+def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
+    target = Path(path.strip()).expanduser()
+    if not target.is_absolute():
+        target = (DEFAULT_WORKDIR / target).resolve()
+    else:
+        target = target.resolve()
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(str(target), media_type=media_type or "application/octet-stream")
 
 
 @app.post("/v1/runs/{run_id}/cancel")

@@ -21,6 +21,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
     @Published var didCompleteRun: Bool = false
+    @Published var activeRunExecutor: String = "local"
 
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
@@ -37,8 +38,11 @@ final class VoiceAgentViewModel: ObservableObject {
         resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
         statusText = "Starting run..."
-        appendConversation(role: "user", text: promptText)
-        lastSubmittedUserText = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentPrompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        appendConversation(role: "user", text: sentPrompt)
+        lastSubmittedUserText = sentPrompt
+        promptText = ""
+        activeRunExecutor = executor
 
         do {
             let response = try await client.createUtterance(
@@ -46,7 +50,7 @@ final class VoiceAgentViewModel: ObservableObject {
                 token: apiToken,
                 requestBody: UtteranceRequest(
                     sessionId: sessionID,
-                    utteranceText: promptText,
+                    utteranceText: sentPrompt,
                     mode: "execute",
                     executor: executor,
                     workingDirectory: normalizedWorkingDirectory
@@ -144,6 +148,7 @@ final class VoiceAgentViewModel: ObservableObject {
             transcriptText = response.transcriptText
             appendConversation(role: "user", text: response.transcriptText)
             lastSubmittedUserText = response.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+            activeRunExecutor = executor
             statusText = "Audio run started (\(response.runId))"
             try await observeRun(runID: response.runId)
         } catch {
@@ -240,6 +245,7 @@ final class VoiceAgentViewModel: ObservableObject {
         conversation = []
         processedEventCount = 0
         didCompleteRun = false
+        activeRunExecutor = executor
     }
 
     private func speak(_ text: String) {
@@ -301,6 +307,7 @@ final class VoiceAgentViewModel: ObservableObject {
             return message
         case "action.stdout":
             if message.isEmpty { return nil }
+            if activeRunExecutor == "codex" { return nil }
             if isCodexNoise(message) { return nil }
             if message == lastSubmittedUserText { return nil }
             return message
@@ -323,6 +330,10 @@ final class VoiceAgentViewModel: ObservableObject {
                 return
             }
             if role == "assistant" {
+                if last.text.count > 1600 {
+                    conversation.append(ConversationMessage(role: role, text: trimmed))
+                    return
+                }
                 let merged = "\(last.text)\n\n\(trimmed)"
                 conversation[conversation.count - 1] = ConversationMessage(
                     id: last.id,

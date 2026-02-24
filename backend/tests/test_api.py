@@ -117,6 +117,19 @@ def test_audio_rejects_large_payload(monkeypatch, tmp_path: Path):
     assert "audio payload too large" in resp.json()["detail"]
 
 
+def test_file_fetch_endpoint(monkeypatch, tmp_path: Path):
+    file_path = tmp_path / "sample.txt"
+    file_path.write_text("hello-file", encoding="utf-8")
+    client, token = make_client(monkeypatch, tmp_path, provider="mock")
+    resp = client.get(
+        "/v1/files",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(file_path)},
+    )
+    assert resp.status_code == 200
+    assert resp.text == "hello-file"
+
+
 def test_cancel_codex_run(monkeypatch, tmp_path: Path):
     fake_codex = tmp_path / "codex"
     fake_codex.write_text(
