@@ -31,18 +31,7 @@ struct ContentView: View {
                                 if message.role == "user" {
                                     Spacer(minLength: 52)
                                 }
-                                Text(message.text)
-                                    .font(.body)
-                                    .lineSpacing(1.5)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 9)
-                                    .foregroundStyle(message.role == "user" ? Color.white : Color.primary)
-                                    .background(
-                                        message.role == "user"
-                                            ? Color.blue
-                                            : Color(.secondarySystemBackground)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                MessageBubble(message: message)
                                 if message.role != "user" {
                                     Spacer(minLength: 52)
                                 }
@@ -217,4 +206,124 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+}
+
+private struct MessageBubble: View {
+    let message: ConversationMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(segments) { segment in
+                switch segment.kind {
+                case .markdown:
+                    MarkdownText(text: segment.content, isUser: isUser)
+                case .code:
+                    CodeBlock(text: segment.content)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .foregroundStyle(isUser ? Color.white : Color.primary)
+        .background(
+            isUser
+                ? Color.blue
+                : Color(.secondarySystemBackground)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var isUser: Bool {
+        message.role == "user"
+    }
+
+    private var segments: [MessageSegment] {
+        parseSegments(from: message.text)
+    }
+}
+
+private struct MarkdownText: View {
+    let text: String
+    let isUser: Bool
+
+    var body: some View {
+        if let rendered = try? AttributedString(markdown: text) {
+            Text(rendered)
+                .font(.body)
+                .lineSpacing(1.5)
+                .foregroundStyle(isUser ? Color.white : Color.primary)
+        } else {
+            Text(text)
+                .font(.body)
+                .lineSpacing(1.5)
+                .foregroundStyle(isUser ? Color.white : Color.primary)
+        }
+    }
+}
+
+private struct CodeBlock: View {
+    let text: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(text)
+                .font(.system(.footnote, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+        }
+        .background(Color.black.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct MessageSegment: Identifiable {
+    enum Kind {
+        case markdown
+        case code
+    }
+
+    let id = UUID()
+    let kind: Kind
+    let content: String
+}
+
+private func parseSegments(from text: String) -> [MessageSegment] {
+    var segments: [MessageSegment] = []
+    var remaining = text[...]
+
+    while let open = remaining.range(of: "```") {
+        let before = String(remaining[..<open.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !before.isEmpty {
+            segments.append(MessageSegment(kind: .markdown, content: before))
+        }
+
+        let afterOpen = remaining[open.upperBound...]
+        guard let close = afterOpen.range(of: "```") else {
+            let tail = String(remaining).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !tail.isEmpty {
+                segments.append(MessageSegment(kind: .markdown, content: tail))
+            }
+            return segments
+        }
+
+        var code = String(afterOpen[..<close.lowerBound])
+        if let firstNewline = code.firstIndex(of: "\n") {
+            let firstLine = code[..<firstNewline]
+            if !firstLine.contains(" ") && firstLine.count <= 20 {
+                code = String(code[code.index(after: firstNewline)...])
+            }
+        }
+        code = code.trimmingCharacters(in: .newlines)
+        if !code.isEmpty {
+            segments.append(MessageSegment(kind: .code, content: code))
+        }
+
+        remaining = afterOpen[close.upperBound...]
+    }
+
+    let tail = String(remaining).trimmingCharacters(in: .whitespacesAndNewlines)
+    if !tail.isEmpty {
+        segments.append(MessageSegment(kind: .markdown, content: tail))
+    }
+    return segments
 }

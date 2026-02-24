@@ -318,8 +318,19 @@ final class VoiceAgentViewModel: ObservableObject {
     private func appendConversation(role: String, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        if let last = conversation.last, last.role == role, last.text == trimmed {
-            return
+        if let last = conversation.last, last.role == role {
+            if last.text == trimmed {
+                return
+            }
+            if role == "assistant" {
+                let merged = "\(last.text)\n\n\(trimmed)"
+                conversation[conversation.count - 1] = ConversationMessage(
+                    id: last.id,
+                    role: last.role,
+                    text: merged
+                )
+                return
+            }
         }
         conversation.append(ConversationMessage(role: role, text: trimmed))
     }

@@ -1,9 +1,15 @@
 import Foundation
 
 struct ConversationMessage: Identifiable, Equatable {
-    let id: UUID = UUID()
+    let id: UUID
     let role: String
     let text: String
+
+    init(id: UUID = UUID(), role: String, text: String) {
+        self.id = id
+        self.role = role
+        self.text = text
+    }
 }
 
 struct UtteranceRequest: Encodable {
