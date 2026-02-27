@@ -1,11 +1,17 @@
 # Project Status
 
-Last updated: 2026-02-23
+Last updated: 2026-02-27
 
 ## 1) Snapshot
 
-Project stage: MVP vertical slice implementation.
-Current objective: complete phone-to-backend-to-executor loop for remote "vibe coding".
+Project stage: Product stabilization and expansion (post-MVP).
+Current objective: turn the working vertical slice into a stable, user-friendly, feature-rich product baseline.
+
+Strategic shift (2026-02-24):
+- Move from patchy output cleanup to typed response contracts.
+- Treat chat UX as a product surface, not a raw log stream.
+- Build domain adapters (calendar/email/files) for deterministic behavior.
+- Keep unrestricted execution support, but with explicit controls, diagnostics, and clear UX boundaries.
 
 Updates (2026-02-18 to 2026-02-19):
 - Created an initial lean monorepo scaffold:
@@ -99,6 +105,14 @@ Updates (2026-02-18 to 2026-02-19):
   - `ios/project.yml` (xcodegen spec)
   - generated `ios/VoiceAgentApp.xcodeproj`
   - simulator build + test verified via `xcodebuild`
+- Chat UX stabilization update (2026-02-27):
+  - backend now unwraps valid `assistant_response` JSON emitted by Codex to avoid nested/raw JSON bubbles.
+  - codex assistant line merging improved to reduce run-on chunks and preserve readable grouping.
+  - iOS envelope parsing hardened (direct JSON, escaped JSON strings, embedded JSON extraction).
+  - iOS markdown rendering switched to whitespace-preserving inline parsing for more stable line breaks.
+  - image path extraction hardened for quoted/backticked/file:// paths before proxying through `/v1/files`.
+  - chat contract expanded with first-class `artifacts` plus message/event IDs and timestamps for stable reconciliation.
+  - iOS chat now renders section cards and artifact cards (image/file `Open` actions) instead of flattening all content into plain text.
 
 ## 2) What Exists
 
@@ -106,6 +120,7 @@ Updates (2026-02-18 to 2026-02-19):
 - `ARCHITECTURE.md`: detailed architecture and phased implementation plan.
 - `STATUS.md`: current state tracker (this file).
 - `MEMORY.md`: persistent project memory log.
+- `NEW_FEATURES.md`: prioritized feature checklist for ongoing product polish.
 
 ## 3) Working vs Not Working
 
@@ -126,6 +141,24 @@ Working:
 - Native iOS scaffold exists for direct backend testing in Xcode.
 - Native iOS project builds and tests successfully on simulator.
 - Native iOS app now receives run updates in real time via SSE.
+- Native iOS app now supports local thread/session history:
+  - create new chat
+  - switch between past threads
+  - rename/delete threads
+  - persisted locally in app storage.
+- Advanced controls are now developer-gated:
+  - default UX is codex + concise mode.
+  - local executor / verbose mode / logs UI are hidden unless Developer Mode is enabled.
+- Launch-hardening baseline is now implemented:
+  - security mode model (`safe` vs `full-access`) with mode-switch script.
+  - safe-mode default for new installs.
+  - codex unrestricted behavior tied to mode by default.
+  - `/v1/files` restricted to allowed roots in safe mode.
+  - workdir constraints enforced in safe mode (`VOICE_AGENT_WORKDIR_ROOT`).
+  - event message size cap to reduce log/db blow-up risk.
+  - one-time pairing exchange endpoint (`POST /v1/pair/exchange`) with rate limiting.
+  - QR pairing now uses short-lived `pair_code` (not raw API token).
+  - iOS stores API token in Keychain (not UserDefaults).
 
 Not implemented yet:
 - Production-ready native iOS distribution path (TestFlight/App Store) and enterprise-device constraints handling.
@@ -144,11 +177,11 @@ Not implemented yet:
 
 ## 5) Immediate Next Steps
 
-1. Add automated tests for current backend flow and unrestricted executor path.
-2. Add run cancellation and timeout UX controls in iOS (surface `/v1/runs/{id}/cancel`).
-3. Add simple backend LLM planner integration behind current planner stub.
-4. Add service hardening for internet exposure (TLS/reverse proxy and tighter auth options).
-5. Improve native iOS conversation UX and onboarding (QR pairing + clearer runtime status).
+1. Replace heuristic chat shaping with typed assistant payload contract.
+2. Implement backend calendar adapter + typed agenda response for robust rendering.
+3. Split UI rendering into structured cards (calendar/email/files) + fallback markdown.
+4. Finalize chat/log separation UX with concise/verbose modes and persistent diagnostics.
+5. Expand integration tests around conversation quality (format stability, no context leaks, deterministic cards).
 
 ## 6) Definition of Done for MVP
 
@@ -165,3 +198,6 @@ Update this file after each meaningful milestone:
 - What works now.
 - What broke or is blocked.
 - Exact next actions.
+
+Product-mode rule:
+- New features should ship with tests + docs + explicit UX behavior, not only implementation patches.

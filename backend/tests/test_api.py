@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import time
 from io import BytesIO
@@ -43,6 +44,91 @@ def test_codex_prompt_context_injection(monkeypatch, tmp_path: Path):
     assert "create hello script" in built
 
 
+def test_codex_structured_message_filters_noise(monkeypatch, tmp_path: Path):
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+    user_prompt = "create a python file"
+
+    assert module._codex_structured_message("/bin/zsh -lc \"python3 hello.py\"", user_prompt) is None
+    assert module._codex_structured_message("tokens used", user_prompt) is None
+    assert module._codex_structured_message("You are running through MOBaiLE.", user_prompt) is None
+    assert module._codex_structured_message("MOBaiLE runtime context:", user_prompt) is None
+    assert module._codex_structured_message("You are the coding agent used by MOBaiLE.", user_prompt) is None
+    assert module._codex_structured_message("Product intent: MOBaiLE makes a user's computer available from their phone.", user_prompt) is None
+    assert module._codex_structured_message("Keep responses concise and grouped; avoid verbose step-by-step chatter.", user_prompt) is None
+    assert module._codex_structured_message("```text", user_prompt) is None
+    assert module._codex_structured_message("Created `hello.py` and ran it successfully.", user_prompt) is None
+    assert module._codex_structured_message("1,147", user_prompt) is None
+    assert module._codex_structured_message("Done. Created hello.py.", user_prompt) == "Done. Created hello.py."
+
+
+def test_codex_assistant_extractor_emits_only_assistant_blocks(monkeypatch, tmp_path: Path):
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+    extractor = module._CodexAssistantExtractor("hello")
+    lines = [
+        "OpenAI Codex v0.0",
+        "user",
+        "hello",
+        "codex",
+        "I checked your calendar for today.",
+        "- 10:00 Standup",
+        "exec",
+        "/bin/zsh -lc \"date\"",
+        "codex",
+        "Done.",
+    ]
+    out: list[str] = []
+    for line in lines:
+        out.extend(extractor.consume(line))
+    out.extend(extractor.flush())
+    assert any("I checked your calendar" in item for item in out)
+    assert all("/bin/zsh" not in item for item in out)
+    assert any(item == "Done." for item in out)
+
+
+def test_parse_chat_envelope_payload_handles_wrapped_json(monkeypatch, tmp_path: Path):
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+    payload = '{"type":"assistant_response","version":"1.0","summary":"ok","sections":[],"agenda_items":[]}'
+    parsed = module._parse_chat_envelope_payload(payload)
+    assert parsed is not None
+    assert parsed["type"] == "assistant_response"
+    wrapped = json.dumps(payload)
+    parsed_wrapped = module._parse_chat_envelope_payload(wrapped)
+    assert parsed_wrapped is not None
+    assert parsed_wrapped["summary"] == "ok"
+
+
+def test_merge_assistant_lines_adds_structure(monkeypatch, tmp_path: Path):
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+    merged = module._merge_assistant_lines(
+        [
+            "What I Did:",
+            "Created /Users/test/hello.py",
+            "Result",
+            "Hello, world!",
+        ]
+    )
+    assert "What I Did:\nCreated /Users/test/hello.py" in merged
+    assert "Result Hello, world!" in merged
+
+
+def test_coerce_assistant_text_to_envelope_extracts_artifacts(monkeypatch, tmp_path: Path):
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+    envelope = module._coerce_assistant_text_to_envelope(
+        "## What I Did\nCreated /Users/test/hello.py\n\n## Result\n![plot](/Users/test/plot.png)"
+    )
+    assert envelope.type == "assistant_response"
+    assert envelope.message_id
+    assert envelope.created_at
+    assert len(envelope.sections) >= 1
+    assert any(item.path == "/Users/test/hello.py" for item in envelope.artifacts)
+    assert any(item.path == "/Users/test/plot.png" and item.type == "image" for item in envelope.artifacts)
+
+
 def test_auth_required(monkeypatch, tmp_path: Path):
     client, token = make_client(monkeypatch, tmp_path)
     assert client.get("/health").status_code == 200
@@ -55,6 +141,120 @@ def test_auth_required(monkeypatch, tmp_path: Path):
         ).status_code
         == 422
     )
+
+
+def test_codex_guardrails_enforce_rejects_dangerous(monkeypatch, tmp_path: Path):
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={"VOICE_AGENT_CODEX_GUARDRAILS": "enforce"},
+    )
+    resp = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "guardrails-1",
+            "utterance_text": "please run rm -rf /tmp/test",
+            "executor": "codex",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "rejected"
+    run = client.get(f"/v1/runs/{payload['run_id']}", headers={"Authorization": f"Bearer {token}"})
+    assert run.status_code == 200
+    assert run.json()["status"] == "rejected"
+
+
+def test_list_session_runs_and_diagnostics(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path)
+    create = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "sess-list",
+            "utterance_text": "create a hello python script and run it",
+            "executor": "local",
+        },
+    )
+    assert create.status_code == 200
+    run_id = create.json()["run_id"]
+
+    final = None
+    for _ in range(40):
+        run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+        payload = run_resp.json()
+        final = payload["status"]
+        if final != "running":
+            break
+        time.sleep(0.05)
+    assert final == "completed"
+
+    listing = client.get(
+        "/v1/sessions/sess-list/runs?limit=5",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert listing.status_code == 200
+    listed = listing.json()
+    assert len(listed) >= 1
+    assert listed[0]["run_id"] == run_id
+
+    diag = client.get(
+        f"/v1/runs/{run_id}/diagnostics",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert diag.status_code == 200
+    diagnostics = diag.json()
+    assert diagnostics["run_id"] == run_id
+    assert diagnostics["event_count"] >= 1
+    assert "action.started" in diagnostics["event_type_counts"]
+    assert payload["events"][0].get("event_id")
+    assert payload["events"][0].get("created_at")
+
+
+def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path, provider="mock")
+    module = importlib.import_module("app.main")
+
+    def fake_events():
+        return [
+            module.AgendaItem(
+                start="09:00",
+                end="10:00",
+                title="Standup",
+                calendar="Work",
+                location="Room A",
+            )
+        ]
+
+    monkeypatch.setattr(module, "_fetch_today_calendar_events", fake_events)
+
+    resp = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "cal1",
+            "utterance_text": "Check my calendar today",
+            "executor": "codex",
+        },
+    )
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+
+    final = None
+    payload = None
+    for _ in range(40):
+        run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+        payload = run_resp.json()
+        final = payload["status"]
+        if final != "running":
+            break
+        time.sleep(0.05)
+    assert final == "completed"
+    assert payload is not None
+    chat_events = [e for e in payload["events"] if e["type"] == "chat.message"]
+    assert len(chat_events) >= 1
+    assert "\"assistant_response\"" in chat_events[0]["message"]
 
 
 def test_local_utterance_flow(monkeypatch, tmp_path: Path):
@@ -133,7 +333,12 @@ def test_audio_rejects_large_payload(monkeypatch, tmp_path: Path):
 def test_file_fetch_endpoint(monkeypatch, tmp_path: Path):
     file_path = tmp_path / "sample.txt"
     file_path.write_text("hello-file", encoding="utf-8")
-    client, token = make_client(monkeypatch, tmp_path, provider="mock")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path), "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS": "true"},
+    )
     resp = client.get(
         "/v1/files",
         headers={"Authorization": f"Bearer {token}"},
@@ -141,6 +346,77 @@ def test_file_fetch_endpoint(monkeypatch, tmp_path: Path):
     )
     assert resp.status_code == 200
     assert resp.text == "hello-file"
+
+
+def test_file_fetch_rejects_outside_allowed_roots(monkeypatch, tmp_path: Path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("nope", encoding="utf-8")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_FILE_ROOTS": str(tmp_path / "allowed"),
+            "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS": "true",
+        },
+    )
+    resp = client.get(
+        "/v1/files",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(outside)},
+    )
+    assert resp.status_code == 403
+
+
+def test_workdir_restricted_in_safe_mode(monkeypatch, tmp_path: Path):
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_SECURITY_MODE": "safe"},
+    )
+    resp = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "safe1",
+            "utterance_text": "create a hello python script and run it",
+            "executor": "local",
+            "working_directory": "/tmp",
+        },
+    )
+    assert resp.status_code == 400
+    assert "working_directory" in resp.json()["detail"]
+
+
+def test_pair_exchange_returns_api_token_and_rotates_code(monkeypatch, tmp_path: Path):
+    pairing_file = tmp_path / "pairing.json"
+    pairing_file.write_text(
+        (
+            '{'
+            '"server_url":"http://127.0.0.1:8000",'
+            '"api_token":"abc-token",'
+            '"session_id":"iphone-app",'
+            '"pair_code":"pair-1234",'
+            '"pair_code_expires_at":"2999-01-01T00:00:00Z"'
+            '}'
+        ),
+        encoding="utf-8",
+    )
+    client, _ = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        api_token="abc-token",
+        extra_env={"VOICE_AGENT_PAIRING_FILE": str(pairing_file)},
+    )
+    resp = client.post("/v1/pair/exchange", json={"pair_code": "pair-1234", "session_id": "ios1"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["api_token"] == "abc-token"
+    assert payload["session_id"] == "ios1"
+    updated = pairing_file.read_text(encoding="utf-8")
+    assert '"pair_code":"pair-1234"' not in updated.replace(" ", "")
 
 
 def test_cancel_codex_run(monkeypatch, tmp_path: Path):

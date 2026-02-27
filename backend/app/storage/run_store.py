@@ -36,6 +36,7 @@ class RunStore:
                 CREATE TABLE IF NOT EXISTS runs (
                     run_id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
+                    executor TEXT NOT NULL DEFAULT 'local',
                     utterance_text TEXT NOT NULL,
                     working_directory TEXT,
                     status TEXT NOT NULL,
@@ -46,11 +47,18 @@ class RunStore:
                 )
                 """
             )
+            columns = conn.execute("PRAGMA table_info(runs)").fetchall()
+            column_names = {row["name"] for row in columns}
+            if "executor" not in column_names:
+                conn.execute(
+                    "ALTER TABLE runs ADD COLUMN executor TEXT NOT NULL DEFAULT 'local'"
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS run_events (
                     run_id TEXT NOT NULL,
                     seq INTEGER NOT NULL,
+                    event_id TEXT,
                     type TEXT NOT NULL,
                     action_index INTEGER,
                     message TEXT NOT NULL,
@@ -60,6 +68,10 @@ class RunStore:
                 )
                 """
             )
+            columns = conn.execute("PRAGMA table_info(run_events)").fetchall()
+            column_names = {row["name"] for row in columns}
+            if "event_id" not in column_names:
+                conn.execute("ALTER TABLE run_events ADD COLUMN event_id TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_run_events_run_id_seq ON run_events(run_id, seq)"
             )
@@ -104,13 +116,13 @@ class RunStore:
         with self._connect() as conn:
             run_rows = conn.execute(
                 """
-                SELECT run_id, session_id, utterance_text, working_directory, status, plan_json, summary
+                SELECT run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, created_at, updated_at
                 FROM runs
                 """
             ).fetchall()
             event_rows = conn.execute(
                 """
-                SELECT run_id, seq, type, action_index, message
+                SELECT run_id, seq, event_id, type, action_index, message, created_at
                 FROM run_events
                 ORDER BY run_id, seq
                 """
@@ -120,9 +132,11 @@ class RunStore:
         for row in event_rows:
             events_by_run.setdefault(row["run_id"], []).append(
                 ExecutionEvent(
+                    event_id=row["event_id"],
                     type=row["type"],
                     action_index=row["action_index"],
                     message=row["message"],
+                    created_at=row["created_at"],
                 )
             )
 
@@ -137,25 +151,90 @@ class RunStore:
             runs[row["run_id"]] = RunRecord(
                 run_id=row["run_id"],
                 session_id=row["session_id"],
+                executor=row["executor"] or "local",
                 utterance_text=row["utterance_text"],
                 working_directory=row["working_directory"],
                 status=row["status"],
                 plan=plan,
                 events=events_by_run.get(row["run_id"], []),
                 summary=row["summary"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
             )
         return runs
+
+    def list_runs_for_session(self, session_id: str, limit: int = 20) -> list[RunRecord]:
+        with self._connect() as conn:
+            run_rows = conn.execute(
+                """
+                SELECT run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, created_at, updated_at
+                FROM runs
+                WHERE session_id = ?
+                ORDER BY datetime(updated_at) DESC
+                LIMIT ?
+                """,
+                (session_id, limit),
+            ).fetchall()
+            run_ids = [row["run_id"] for row in run_rows]
+            event_rows = conn.execute(
+                f"""
+                SELECT run_id, seq, event_id, type, action_index, message, created_at
+                FROM run_events
+                WHERE run_id IN ({",".join(["?"] * len(run_ids))})
+                ORDER BY run_id, seq
+                """,
+                run_ids,
+            ).fetchall() if run_ids else []
+
+        events_by_run: dict[str, list[ExecutionEvent]] = {}
+        for row in event_rows:
+            events_by_run.setdefault(row["run_id"], []).append(
+                ExecutionEvent(
+                    event_id=row["event_id"],
+                    type=row["type"],
+                    action_index=row["action_index"],
+                    message=row["message"],
+                    created_at=row["created_at"],
+                )
+            )
+
+        results: list[RunRecord] = []
+        for row in run_rows:
+            plan: ActionPlan | None = None
+            plan_json = row["plan_json"]
+            if plan_json:
+                try:
+                    plan = ActionPlan.model_validate_json(plan_json)
+                except Exception:
+                    plan = None
+            results.append(
+                RunRecord(
+                    run_id=row["run_id"],
+                    session_id=row["session_id"],
+                    executor=row["executor"] or "local",
+                    utterance_text=row["utterance_text"],
+                    working_directory=row["working_directory"],
+                    status=row["status"],
+                    plan=plan,
+                    events=events_by_run.get(row["run_id"], []),
+                    summary=row["summary"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+            )
+        return results
 
     def _upsert_run_conn(self, conn: sqlite3.Connection, run: RunRecord) -> None:
         plan_json = run.plan.model_dump_json() if run.plan is not None else None
         conn.execute(
             """
             INSERT INTO runs (
-                run_id, session_id, utterance_text, working_directory, status, plan_json, summary, updated_at
+                run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(run_id) DO UPDATE SET
                 session_id=excluded.session_id,
+                executor=excluded.executor,
                 utterance_text=excluded.utterance_text,
                 working_directory=excluded.working_directory,
                 status=excluded.status,
@@ -166,6 +245,7 @@ class RunStore:
             (
                 run.run_id,
                 run.session_id,
+                run.executor,
                 run.utterance_text,
                 run.working_directory,
                 run.status,
@@ -183,8 +263,16 @@ class RunStore:
     ) -> None:
         conn.execute(
             """
-            INSERT INTO run_events (run_id, seq, type, action_index, message)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO run_events (run_id, seq, event_id, type, action_index, message, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
             """,
-            (run_id, seq, event.type, event.action_index, event.message),
+            (
+                run_id,
+                seq,
+                event.event_id,
+                event.type,
+                event.action_index,
+                event.message,
+                event.created_at,
+            ),
         )
