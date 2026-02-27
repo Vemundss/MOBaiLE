@@ -12,6 +12,9 @@ struct ContentView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 10) {
+                        BrandHeaderView()
+                            .padding(.top, 6)
+
                         HStack(spacing: 8) {
                             Text(vm.executor.uppercased())
                                 .font(.caption2.weight(.semibold))
@@ -135,8 +138,8 @@ struct ContentView: View {
                     .padding(.bottom, 8)
                 }
             }
-            .navigationTitle("MOBaiLE")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -275,6 +278,70 @@ struct ContentView: View {
             return runID
         }
         return String(runID.prefix(8))
+    }
+}
+
+private struct BrandHeaderView: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            MobaileLogoMark()
+                .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("MOBaiLE")
+                    .font(.title2.weight(.black))
+                Text("your pocket coding buddy")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+}
+
+private struct MobaileLogoMark: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.92, green: 0.95, blue: 1.0), Color(red: 0.83, green: 0.90, blue: 1.0)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            Circle()
+                .fill(Color.white.opacity(0.95))
+                .padding(6)
+            Circle()
+                .fill(Color(red: 0.27, green: 0.46, blue: 0.88))
+                .frame(width: 6, height: 6)
+                .offset(x: -7, y: -2)
+            Circle()
+                .fill(Color(red: 0.27, green: 0.46, blue: 0.88))
+                .frame(width: 6, height: 6)
+                .offset(x: 7, y: -2)
+            Capsule()
+                .fill(Color(red: 0.30, green: 0.53, blue: 0.94))
+                .frame(width: 14, height: 3.5)
+                .offset(y: 7)
+            Circle()
+                .fill(Color(red: 1.0, green: 0.74, blue: 0.86))
+                .frame(width: 4, height: 4)
+                .offset(x: -12, y: 7)
+            Circle()
+                .fill(Color(red: 1.0, green: 0.74, blue: 0.86))
+                .frame(width: 4, height: 4)
+                .offset(x: 12, y: 7)
+            Circle()
+                .fill(Color(red: 0.30, green: 0.53, blue: 0.94))
+                .frame(width: 6, height: 6)
+                .offset(y: -14)
+            Rectangle()
+                .fill(Color(red: 0.30, green: 0.53, blue: 0.94))
+                .frame(width: 2.5, height: 6)
+                .offset(y: -10)
+        }
+        .shadow(color: Color.black.opacity(0.10), radius: 5, y: 2)
     }
 }
 
