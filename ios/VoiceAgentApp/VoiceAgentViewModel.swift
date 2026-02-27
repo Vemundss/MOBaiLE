@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Security
 
 @MainActor
 final class VoiceAgentViewModel: ObservableObject {
@@ -8,7 +9,9 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var sessionID: String = "iphone-app"
     @Published var workingDirectory: String = "~"
     @Published var runTimeoutSeconds: String = "300"
-    @Published var executor: String = "local"
+    @Published var executor: String = "codex"
+    @Published var responseMode: String = "concise"
+    @Published var developerMode: Bool = false
     @Published var promptText: String = "create a hello python script and run it"
     @Published var isLoading: Bool = false
     @Published var statusText: String = "Idle"
@@ -21,13 +24,37 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
     @Published var didCompleteRun: Bool = false
-    @Published var activeRunExecutor: String = "local"
+    @Published var activeRunExecutor: String = "codex"
+    @Published var threads: [ChatThread] = []
+    @Published var activeThreadID: UUID?
+    @Published var backendSecurityMode: String = "unknown"
+    @Published var backendWorkdirRoot: String = ""
 
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
     private let recorder = AudioRecorderService()
+    private let defaults = UserDefaults.standard
     private var processedEventCount: Int = 0
     private var lastSubmittedUserText: String = ""
+    private var didBootstrapSession = false
+
+    private enum DefaultsKey {
+        static let serverURL = "mobaile.server_url"
+        static let apiToken = "mobaile.api_token_legacy"
+        static let sessionID = "mobaile.session_id"
+        static let workingDirectory = "mobaile.working_directory"
+        static let runTimeoutSeconds = "mobaile.run_timeout_seconds"
+        static let executor = "mobaile.executor"
+        static let responseMode = "mobaile.response_mode"
+        static let developerMode = "mobaile.developer_mode"
+        static let threads = "mobaile.threads"
+        static let activeThreadID = "mobaile.active_thread_id"
+    }
+
+    init() {
+        loadSettings()
+        loadThreads()
+    }
 
     func sendPrompt() async {
         didCompleteRun = false
@@ -42,7 +69,7 @@ final class VoiceAgentViewModel: ObservableObject {
         appendConversation(role: "user", text: sentPrompt)
         lastSubmittedUserText = sentPrompt
         promptText = ""
-        activeRunExecutor = executor
+        activeRunExecutor = effectiveExecutor
 
         do {
             let response = try await client.createUtterance(
@@ -52,17 +79,20 @@ final class VoiceAgentViewModel: ObservableObject {
                     sessionId: sessionID,
                     utteranceText: sentPrompt,
                     mode: "execute",
-                    executor: executor,
+                    executor: effectiveExecutor,
                     workingDirectory: normalizedWorkingDirectory
                 )
             )
             runID = response.runId
             statusText = "Run started (\(response.runId))"
+            persistActiveThreadSnapshot()
             try await observeRun(runID: response.runId)
         } catch {
+            maybeAutoFixWorkingDirectory(from: error)
             errorText = error.localizedDescription
             statusText = "Failed"
             isLoading = false
+            persistActiveThreadSnapshot()
         }
     }
 
@@ -140,7 +170,7 @@ final class VoiceAgentViewModel: ObservableObject {
                 serverURL: normalizedServerURL,
                 token: apiToken,
                 sessionID: sessionID,
-                executor: executor,
+                executor: effectiveExecutor,
                 workingDirectory: normalizedWorkingDirectory,
                 audioFileURL: audioFile
             )
@@ -148,13 +178,16 @@ final class VoiceAgentViewModel: ObservableObject {
             transcriptText = response.transcriptText
             appendConversation(role: "user", text: response.transcriptText)
             lastSubmittedUserText = response.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
-            activeRunExecutor = executor
+            activeRunExecutor = effectiveExecutor
             statusText = "Audio run started (\(response.runId))"
+            persistActiveThreadSnapshot()
             try await observeRun(runID: response.runId)
         } catch {
+            maybeAutoFixWorkingDirectory(from: error)
             errorText = error.localizedDescription
             statusText = "Failed"
             isLoading = false
+            persistActiveThreadSnapshot()
         }
     }
 
@@ -236,6 +269,7 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func startNewChat() {
+        createNewThread()
         runID = ""
         summaryText = ""
         transcriptText = ""
@@ -245,7 +279,184 @@ final class VoiceAgentViewModel: ObservableObject {
         conversation = []
         processedEventCount = 0
         didCompleteRun = false
-        activeRunExecutor = executor
+        activeRunExecutor = effectiveExecutor
+        persistActiveThreadSnapshot()
+    }
+
+    func persistSettings() {
+        if !developerMode {
+            if executor != "codex" {
+                executor = "codex"
+            }
+            if responseMode != "concise" {
+                responseMode = "concise"
+            }
+        }
+        defaults.set(serverURL, forKey: DefaultsKey.serverURL)
+        if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            KeychainStore.save(value: apiToken, service: "MOBaiLE", account: "api_token")
+            defaults.removeObject(forKey: DefaultsKey.apiToken)
+        }
+        defaults.set(sessionID, forKey: DefaultsKey.sessionID)
+        defaults.set(workingDirectory, forKey: DefaultsKey.workingDirectory)
+        defaults.set(runTimeoutSeconds, forKey: DefaultsKey.runTimeoutSeconds)
+        defaults.set(executor, forKey: DefaultsKey.executor)
+        defaults.set(responseMode, forKey: DefaultsKey.responseMode)
+        defaults.set(developerMode, forKey: DefaultsKey.developerMode)
+    }
+
+    func bootstrapSessionIfNeeded() async {
+        guard !didBootstrapSession else { return }
+        didBootstrapSession = true
+        guard !normalizedServerURL.isEmpty, !apiToken.isEmpty, !sessionID.isEmpty else { return }
+        do {
+            if let cfg = try? await client.fetchRuntimeConfig(
+                serverURL: normalizedServerURL,
+                token: apiToken
+            ) {
+                backendSecurityMode = cfg.securityMode
+                backendWorkdirRoot = cfg.workdirRoot ?? ""
+            }
+            let runs = try await client.fetchSessionRuns(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                sessionID: sessionID,
+                limit: 1
+            )
+            guard let latest = runs.first else { return }
+            runID = latest.runId
+            statusText = "Run status: \(latest.status)"
+            if latest.status == "running" {
+                isLoading = true
+                activeRunExecutor = latest.executor ?? executor
+                try await observeRun(runID: latest.runId)
+            }
+            persistActiveThreadSnapshot()
+        } catch {
+            // Ignore bootstrap errors to avoid blocking first render.
+        }
+    }
+
+    func applyPairingURL(_ url: URL) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "mobaile" else { return }
+        guard let host = url.host?.lowercased(), host == "pair" else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+
+        var updatedServer: String?
+        var updatedToken: String?
+        var pairCode: String?
+        var updatedSession: String?
+
+        for item in components.queryItems ?? [] {
+            switch item.name {
+            case "server_url":
+                if let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                    updatedServer = value
+                }
+            case "api_token":
+                if let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                    updatedToken = value
+                }
+            case "pair_code":
+                if let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                    pairCode = value
+                }
+            case "session_id":
+                if let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                    updatedSession = value
+                }
+            default:
+                continue
+            }
+        }
+
+        guard let server = updatedServer else {
+            errorText = "Invalid pairing QR. Missing server URL."
+            return
+        }
+
+        serverURL = server
+        if let session = updatedSession {
+            sessionID = session
+        }
+        if let oneTimeCode = pairCode {
+            Task {
+                await exchangePairCode(serverURL: server, pairCode: oneTimeCode, sessionID: updatedSession)
+            }
+            return
+        }
+        if let token = updatedToken {
+            apiToken = token
+            persistSettings()
+            errorText = ""
+            statusText = "Paired successfully"
+            persistActiveThreadSnapshot()
+            return
+        }
+        errorText = "Invalid pairing QR. Missing pairing code or API token."
+    }
+
+    var sortedThreads: [ChatThread] {
+        threads.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    func switchToThread(_ threadID: UUID) {
+        guard let thread = threads.first(where: { $0.id == threadID }) else { return }
+        activeThreadID = threadID
+        conversation = thread.conversation
+        runID = thread.runID
+        summaryText = thread.summaryText
+        transcriptText = thread.transcriptText
+        statusText = thread.statusText
+        resolvedWorkingDirectory = thread.resolvedWorkingDirectory
+        activeRunExecutor = thread.activeRunExecutor
+        errorText = ""
+        events = []
+        processedEventCount = 0
+        didCompleteRun = isTerminalStatusText(thread.statusText)
+        defaults.set(threadID.uuidString, forKey: DefaultsKey.activeThreadID)
+    }
+
+    func createNewThread() {
+        let thread = ChatThread(
+            id: UUID(),
+            title: "New Chat",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "",
+            summaryText: "",
+            transcriptText: "",
+            statusText: "Idle",
+            resolvedWorkingDirectory: resolvedWorkingDirectory,
+            activeRunExecutor: effectiveExecutor
+        )
+        threads.append(thread)
+        activeThreadID = thread.id
+        defaults.set(thread.id.uuidString, forKey: DefaultsKey.activeThreadID)
+        persistThreads()
+    }
+
+    func renameThread(_ threadID: UUID, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let idx = threads.firstIndex(where: { $0.id == threadID }) else { return }
+        threads[idx].title = trimmed
+        threads[idx].updatedAt = Date()
+        persistThreads()
+    }
+
+    func deleteThread(_ threadID: UUID) {
+        threads.removeAll { $0.id == threadID }
+        if threads.isEmpty {
+            createNewThread()
+            switchToThread(activeThreadID ?? threads[0].id)
+            return
+        }
+        if activeThreadID == threadID {
+            let next = sortedThreads.first?.id ?? threads[0].id
+            switchToThread(next)
+        }
+        persistThreads()
     }
 
     private func speak(_ text: String) {
@@ -261,7 +472,28 @@ final class VoiceAgentViewModel: ObservableObject {
 
     private var normalizedWorkingDirectory: String? {
         let value = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
+        if value.isEmpty {
+            return nil
+        }
+        let root = backendWorkdirRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value == "~" || value == "." {
+            return root.isEmpty ? value : root
+        }
+        if value.hasPrefix("/") {
+            return value
+        }
+        if !root.isEmpty {
+            return root + "/" + value
+        }
+        return value
+    }
+
+    private var effectiveExecutor: String {
+        developerMode ? executor : "codex"
+    }
+
+    private var effectiveResponseMode: String {
+        developerMode ? responseMode : "concise"
     }
 
     private var normalizedRunTimeoutSeconds: TimeInterval {
@@ -283,8 +515,8 @@ final class VoiceAgentViewModel: ObservableObject {
         isLoading = false
         didCompleteRun = true
         statusText = "Run status: \(run.status)"
-        appendConversation(role: "assistant", text: run.summary)
         speak(run.summary)
+        persistActiveThreadSnapshot()
     }
 
     private func appendNewEventMessages(from runEvents: [ExecutionEvent]) {
@@ -300,19 +532,40 @@ final class VoiceAgentViewModel: ObservableObject {
 
     private func conversationText(for event: ExecutionEvent) -> String? {
         let message = event.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isContextLeak(message) { return nil }
         switch event.type {
+        case "chat.message":
+            if message.isEmpty { return nil }
+            if let envelope = parseEnvelope(message),
+               envelope.sections.isEmpty,
+               envelope.agendaItems.isEmpty,
+               envelope.summary.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "run completed successfully" {
+                return nil
+            }
+            return message
         case "assistant.message":
             if message.isEmpty { return nil }
             if message == lastSubmittedUserText { return nil }
             return message
+        case "log.message":
+            if effectiveResponseMode != "verbose" { return nil }
+            if message.isEmpty { return nil }
+            return "log: \(message)"
         case "action.stdout":
+            if effectiveResponseMode != "verbose" { return nil }
             if message.isEmpty { return nil }
             if activeRunExecutor == "codex" { return nil }
             if isCodexNoise(message) { return nil }
             if message == lastSubmittedUserText { return nil }
             return message
         case "action.stderr":
+            if effectiveResponseMode != "verbose" { return nil }
             return "stderr: \(message)"
+        case "action.completed":
+            if effectiveResponseMode == "verbose" { return nil }
+            if activeRunExecutor == "codex" { return nil }
+            if message.isEmpty { return nil }
+            return message
         case "run.failed":
             return message
         case "run.cancelled":
@@ -323,27 +576,155 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func appendConversation(role: String, text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prepared = role == "assistant" ? normalizeAssistantText(text) : text
+        let trimmed = prepared.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         if let last = conversation.last, last.role == role {
             if last.text == trimmed {
                 return
             }
             if role == "assistant" {
-                if last.text.count > 1600 {
-                    conversation.append(ConversationMessage(role: role, text: trimmed))
-                    return
-                }
-                let merged = "\(last.text)\n\n\(trimmed)"
-                conversation[conversation.count - 1] = ConversationMessage(
-                    id: last.id,
-                    role: last.role,
-                    text: merged
-                )
+                // Keep assistant updates as separate bubbles for readability.
+                conversation.append(ConversationMessage(role: role, text: trimmed))
+                persistActiveThreadSnapshot()
                 return
             }
         }
         conversation.append(ConversationMessage(role: role, text: trimmed))
+        if role == "user",
+           let idx = activeThreadIndex(),
+           threads[idx].title == "New Chat" {
+            threads[idx].title = suggestThreadTitle(from: trimmed)
+        }
+        persistActiveThreadSnapshot()
+    }
+
+    private func normalizeAssistantText(_ text: String) -> String {
+        var out = text.replacingOccurrences(of: "\r\n", with: "\n")
+        out = out.replacingOccurrences(of: "\r", with: "\n")
+        return out
+    }
+
+    private func loadSettings() {
+        if let value = defaults.string(forKey: DefaultsKey.serverURL), !value.isEmpty {
+            serverURL = value
+        }
+        if let keychainToken = KeychainStore.load(service: "MOBaiLE", account: "api_token"),
+           !keychainToken.isEmpty {
+            apiToken = keychainToken
+        } else if let value = defaults.string(forKey: DefaultsKey.apiToken), !value.isEmpty {
+            apiToken = value
+            KeychainStore.save(value: value, service: "MOBaiLE", account: "api_token")
+            defaults.removeObject(forKey: DefaultsKey.apiToken)
+        }
+        if let value = defaults.string(forKey: DefaultsKey.sessionID), !value.isEmpty {
+            sessionID = value
+        }
+        if let value = defaults.string(forKey: DefaultsKey.workingDirectory), !value.isEmpty {
+            workingDirectory = value
+        }
+        if let value = defaults.string(forKey: DefaultsKey.runTimeoutSeconds), !value.isEmpty {
+            runTimeoutSeconds = value
+        }
+        if let value = defaults.string(forKey: DefaultsKey.executor), !value.isEmpty {
+            executor = value
+        }
+        if let value = defaults.string(forKey: DefaultsKey.responseMode), !value.isEmpty {
+            responseMode = value
+        }
+        developerMode = defaults.bool(forKey: DefaultsKey.developerMode)
+        if !developerMode {
+            executor = "codex"
+            responseMode = "concise"
+        }
+    }
+
+    private func exchangePairCode(serverURL: String, pairCode: String, sessionID: String?) async {
+        do {
+            let response = try await client.exchangePairingCode(
+                serverURL: normalized(serverURL),
+                pairCode: pairCode,
+                sessionID: sessionID ?? self.sessionID
+            )
+            self.apiToken = response.apiToken
+            self.sessionID = response.sessionId
+            self.backendSecurityMode = response.securityMode
+            if let cfg = try? await client.fetchRuntimeConfig(
+                serverURL: normalizedServerURL,
+                token: response.apiToken
+            ) {
+                self.backendSecurityMode = cfg.securityMode
+                self.backendWorkdirRoot = cfg.workdirRoot ?? ""
+            }
+            self.persistSettings()
+            self.errorText = ""
+            self.statusText = "Paired successfully (\(response.securityMode))"
+            self.persistActiveThreadSnapshot()
+        } catch {
+            self.errorText = error.localizedDescription
+            self.statusText = "Pairing failed"
+        }
+    }
+
+    private func normalized(_ rawURL: String) -> String {
+        rawURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func loadThreads() {
+        if let data = defaults.data(forKey: DefaultsKey.threads),
+           let decoded = try? JSONDecoder().decode([ChatThread].self, from: data),
+           !decoded.isEmpty {
+            threads = decoded
+        } else {
+            createNewThread()
+        }
+
+        if let rawID = defaults.string(forKey: DefaultsKey.activeThreadID),
+           let uuid = UUID(uuidString: rawID),
+           threads.contains(where: { $0.id == uuid }) {
+            switchToThread(uuid)
+            return
+        }
+        if let first = sortedThreads.first {
+            switchToThread(first.id)
+        }
+    }
+
+    private func persistThreads() {
+        guard let encoded = try? JSONEncoder().encode(threads) else { return }
+        defaults.set(encoded, forKey: DefaultsKey.threads)
+    }
+
+    private func persistActiveThreadSnapshot() {
+        guard let idx = activeThreadIndex() else { return }
+        threads[idx].conversation = conversation
+        threads[idx].runID = runID
+        threads[idx].summaryText = summaryText
+        threads[idx].transcriptText = transcriptText
+        threads[idx].statusText = statusText
+        threads[idx].resolvedWorkingDirectory = resolvedWorkingDirectory
+        threads[idx].activeRunExecutor = activeRunExecutor
+        threads[idx].updatedAt = Date()
+        persistThreads()
+    }
+
+    private func activeThreadIndex() -> Int? {
+        guard let id = activeThreadID else { return nil }
+        return threads.firstIndex(where: { $0.id == id })
+    }
+
+    private func suggestThreadTitle(from text: String) -> String {
+        let collapsed = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if collapsed.count <= 42 {
+            return collapsed
+        }
+        let cut = collapsed.index(collapsed.startIndex, offsetBy: 42)
+        return String(collapsed[..<cut]) + "..."
+    }
+
+    private func isTerminalStatusText(_ value: String) -> Bool {
+        let lower = value.lowercased()
+        return lower.contains("completed") || lower.contains("failed") || lower.contains("cancelled") || lower.contains("rejected")
     }
 
     private func isCodexNoise(_ message: String) -> Bool {
@@ -370,5 +751,94 @@ final class VoiceAgentViewModel: ObservableObject {
             return true
         }
         return false
+    }
+
+    private func isContextLeak(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        let markers = [
+            "you are the coding agent used by mobaile",
+            "you run on the user's server/computer",
+            "your stdout is streamed to a phone ui",
+            "product intent:",
+            "output style for phone ux:",
+            "environment notes:",
+            "keep responses concise and grouped",
+            "do not repeat or summarize this runtime context",
+        ]
+        return markers.contains { lower.contains($0) }
+    }
+
+    private func parseEnvelope(_ rawText: String) -> ChatEnvelope? {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let data = trimmed.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(ChatEnvelope.self, from: data) {
+            return parsed
+        }
+        if let data = trimmed.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(String.self, from: data),
+           let second = decoded.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(ChatEnvelope.self, from: second) {
+            return parsed
+        }
+        return nil
+    }
+
+    private func maybeAutoFixWorkingDirectory(from error: Error) {
+        guard let apiError = error as? APIError else { return }
+        guard case let .httpError(code, body) = apiError else { return }
+        guard code == 400 else { return }
+        let marker = "working_directory must stay inside "
+        guard let markerRange = body.range(of: marker) else { return }
+        let tail = body[markerRange.upperBound...]
+        var corrected = ""
+        for ch in tail {
+            if ch == "\"" || ch == "}" || ch == "," {
+                break
+            }
+            corrected.append(ch)
+        }
+        corrected = corrected.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !corrected.isEmpty else { return }
+        backendWorkdirRoot = corrected
+        workingDirectory = corrected
+        persistSettings()
+    }
+}
+
+private enum KeychainStore {
+    static func save(value: String, service: String, account: String) {
+        guard let data = value.data(using: .utf8) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        let attrs: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
+        ]
+        SecItemAdd(attrs as CFDictionary, nil)
+    }
+
+    static func load(service: String, account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return value
     }
 }

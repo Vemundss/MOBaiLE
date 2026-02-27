@@ -186,9 +186,15 @@ struct RunDiagnostics: Decodable {
 
 struct RuntimeConfig: Decodable {
     let securityMode: String
+    let workdirRoot: String?
+    let allowAbsoluteFileReads: Bool?
+    let fileRoots: [String]?
 
     enum CodingKeys: String, CodingKey {
         case securityMode = "security_mode"
+        case workdirRoot = "workdir_root"
+        case allowAbsoluteFileReads = "allow_absolute_file_reads"
+        case fileRoots = "file_roots"
     }
 }
 
