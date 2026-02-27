@@ -6,6 +6,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BACKEND_DIR="${REPO_ROOT}/backend"
 ENV_FILE="${BACKEND_DIR}/.env"
 PAIRING_FILE="${BACKEND_DIR}/pairing.json"
+SECURITY_MODE="safe"
+PAIR_CODE_TTL_MIN="30"
 
 require_cmd() {
   local cmd="$1"
@@ -26,6 +28,22 @@ print(secrets.token_hex(24))
 PY
 }
 
+gen_pair_code() {
+  python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(10))
+PY
+}
+
+pair_code_expiry() {
+  PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+import os
+ttl = int(os.environ["PAIR_TTL_MIN"])
+print((datetime.now(timezone.utc) + timedelta(minutes=ttl)).isoformat().replace("+00:00", "Z"))
+PY
+}
+
 detect_url() {
   local url=""
   if command -v tailscale >/dev/null 2>&1; then
@@ -43,8 +61,49 @@ detect_url() {
 
 write_env_file() {
   local token="$1"
+  local codex_unrestricted="false"
+  local allow_abs_reads="false"
+  if [[ "${SECURITY_MODE}" == "full-access" ]]; then
+    codex_unrestricted="true"
+    allow_abs_reads="true"
+  fi
   if [[ -f "${ENV_FILE}" ]]; then
     echo "Keeping existing ${ENV_FILE}"
+    local tmp_env
+    tmp_env="$(mktemp)"
+    awk \
+      -v mode="${SECURITY_MODE}" \
+      -v codex="${codex_unrestricted}" \
+      -v reads="${allow_abs_reads}" \
+      '
+      BEGIN {
+        seen_mode=0
+        seen_codex=0
+        seen_reads=0
+      }
+      /^VOICE_AGENT_SECURITY_MODE=/ {
+        print "VOICE_AGENT_SECURITY_MODE=" mode
+        seen_mode=1
+        next
+      }
+      /^VOICE_AGENT_CODEX_UNRESTRICTED=/ {
+        print "VOICE_AGENT_CODEX_UNRESTRICTED=" codex
+        seen_codex=1
+        next
+      }
+      /^VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=/ {
+        print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
+        seen_reads=1
+        next
+      }
+      { print }
+      END {
+        if (!seen_mode) print "VOICE_AGENT_SECURITY_MODE=" mode
+        if (!seen_codex) print "VOICE_AGENT_CODEX_UNRESTRICTED=" codex
+        if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
+      }
+      ' "${ENV_FILE}" > "${tmp_env}"
+    mv "${tmp_env}" "${ENV_FILE}"
     return
   fi
   cat > "${ENV_FILE}" <<EOF
@@ -52,10 +111,15 @@ write_env_file() {
 VOICE_AGENT_API_TOKEN=${token}
 VOICE_AGENT_HOST=0.0.0.0
 VOICE_AGENT_PORT=8000
+VOICE_AGENT_SECURITY_MODE=${SECURITY_MODE}
 VOICE_AGENT_CODEX_BINARY=codex
-VOICE_AGENT_CODEX_UNRESTRICTED=true
+VOICE_AGENT_CODEX_UNRESTRICTED=${codex_unrestricted}
+VOICE_AGENT_CODEX_GUARDRAILS=warn
+VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]
 VOICE_AGENT_CODEX_USE_CONTEXT=true
 VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md
+VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=${allow_abs_reads}
+VOICE_AGENT_PAIR_CODE_TTL_MIN=${PAIR_CODE_TTL_MIN}
 # Optional model override:
 # VOICE_AGENT_CODEX_MODEL=gpt-5.1
 # Transcription provider: openai (default) or mock
@@ -73,11 +137,41 @@ EOF
 }
 
 main() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode)
+        SECURITY_MODE="$2"
+        shift 2
+        ;;
+      --pair-ttl-min)
+        PAIR_CODE_TTL_MIN="$2"
+        shift 2
+        ;;
+      -h|--help)
+        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>]"
+        exit 0
+        ;;
+      *)
+        echo "Unknown argument: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  if [[ "${SECURITY_MODE}" != "safe" && "${SECURITY_MODE}" != "full-access" ]]; then
+    echo "Invalid --mode '${SECURITY_MODE}'. Expected safe or full-access." >&2
+    exit 1
+  fi
+
   require_cmd python3
   require_cmd uv
 
   local token
   token="$(gen_token)"
+  local pair_code
+  pair_code="$(gen_pair_code)"
+  local pair_code_expires_at
+  pair_code_expires_at="$(pair_code_expiry)"
   write_env_file "${token}"
 
   echo "Syncing backend environment with uv..."
@@ -96,7 +190,10 @@ main() {
   cat > "${PAIRING_FILE}" <<EOF
 {
   "server_url": "${server_url}",
-  "api_token": "${token}"
+  "api_token": "${token}",
+  "session_id": "iphone-app",
+  "pair_code": "${pair_code}",
+  "pair_code_expires_at": "${pair_code_expires_at}"
 }
 EOF
 
@@ -117,12 +214,18 @@ EOF
   echo "Pairing info written to:"
   echo "  ${PAIRING_FILE}"
   echo
+  echo "Runtime security mode:"
+  echo "  ${SECURITY_MODE}"
+  echo
   echo "Use in iOS app onboarding:"
   echo "  server_url: ${server_url}"
-  echo "  api_token: ${token}"
+  echo "  pair_code: ${pair_code} (expires ${pair_code_expires_at})"
+  echo "  session_id: iphone-app"
+  echo "  # fallback admin token: ${token}"
   echo
-  echo "Generate pairing QR (optional):"
+  echo "Generate pairing QR deep link (recommended):"
   echo "  bash ./scripts/pairing_qr.sh"
+  echo "  # then scan with iPhone Camera and open in MOBaiLE"
 }
 
 main "$@"
