@@ -159,7 +159,7 @@ Notes:
 - Context injection affects Codex runs launched via MOBaiLE backend only.
 - Direct terminal usage (`codex exec ...`) is unchanged unless you configure that separately.
 - Per-run request controls:
-  - `response_mode=concise|verbose` controls streamed chat detail density.
+  - `response_mode=concise` is the current supported mobile chat mode.
   - `response_profile=guided|minimal` controls prompt shaping:
     - `guided`: applies MOBaiLE formatting/context guidance.
     - `minimal`: only runtime-awareness hint, otherwise near-default Codex behavior.
@@ -189,6 +189,22 @@ Get run diagnostics:
 ```bash
 curl -s -H "Authorization: Bearer ${TOKEN}" \
   "http://127.0.0.1:8000/v1/runs/<run_id>/diagnostics"
+```
+
+List an existing directory (read-only):
+
+```bash
+curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8000/v1/directories?path=/absolute/or/relative/path"
+```
+
+Create a directory explicitly:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/directories \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/absolute/or/relative/path"}'
 ```
 
 ## 5) Audio upload flow (`/v1/audio`)
@@ -260,6 +276,11 @@ Phone onboarding with QR:
 1. Open iPhone Camera and scan the generated QR.
 2. Tap the `mobaile://pair...` banner.
 3. iOS opens MOBaiLE, exchanges one-time pair code with backend, then stores API token locally.
+
+Notes:
+- App now confirms pairing details before applying server/session changes.
+- Non-local servers must use `https://` for pairing.
+- Legacy `api_token` pairing links are disabled by default (developer-mode fallback only).
 
 If needed, generate raw JSON QR instead:
 

@@ -391,6 +391,52 @@ def test_directory_listing_endpoint(monkeypatch, tmp_path: Path):
     assert payload["truncated"] is False
 
 
+def test_directory_listing_creates_missing_path(monkeypatch, tmp_path: Path):
+    missing = tmp_path / "new-folder"
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path)},
+    )
+    resp = client.get(
+        "/v1/directories",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(missing)},
+    )
+    assert resp.status_code == 404
+    assert not missing.exists()
+
+
+def test_directory_create_endpoint(monkeypatch, tmp_path: Path):
+    missing = tmp_path / "new-folder"
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path)},
+    )
+    create = client.post(
+        "/v1/directories",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"path": str(missing)},
+    )
+    assert create.status_code == 200
+    payload = create.json()
+    assert payload["path"] == str(missing)
+    assert payload["created"] is True
+    assert missing.exists()
+    assert missing.is_dir()
+
+    list_resp = client.get(
+        "/v1/directories",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(missing)},
+    )
+    assert list_resp.status_code == 200
+    assert list_resp.json()["entries"] == []
+
+
 def test_directory_listing_rejects_outside_allowed_roots(monkeypatch, tmp_path: Path):
     allowed = tmp_path / "allowed"
     allowed.mkdir(parents=True, exist_ok=True)
@@ -558,3 +604,106 @@ def test_codex_run_timeout(monkeypatch, tmp_path: Path):
     assert final == "failed"
     assert payload is not None
     assert "timed out" in payload["summary"].lower()
+
+
+def test_codex_thread_resume_by_client_thread_id(monkeypatch, tmp_path: Path):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [[ \"${1:-}\" != \"exec\" ]]; then exit 1; fi\n"
+        "shift\n"
+        "resume_id=\"\"\n"
+        "if [[ \"${1:-}\" == \"resume\" ]]; then\n"
+        "  resume_id=\"${2:-}\"\n"
+        "  shift 2\n"
+        "fi\n"
+        "while [[ $# -gt 0 ]]; do\n"
+        "  case \"$1\" in\n"
+        "    --json|--skip-git-repo-check|--dangerously-bypass-approvals-and-sandbox)\n"
+        "      shift\n"
+        "      ;;\n"
+        "    --model)\n"
+        "      shift 2\n"
+        "      ;;\n"
+        "    *)\n"
+        "      break\n"
+        "      ;;\n"
+        "  esac\n"
+        "done\n"
+        "if [[ -n \"$resume_id\" ]]; then\n"
+        "  thread=\"$resume_id\"\n"
+        "  text=\"resumed memory\"\n"
+        "else\n"
+        "  thread=\"thread-abc\"\n"
+        "  text=\"started memory\"\n"
+        "fi\n"
+        "echo \"{\\\"type\\\":\\\"thread.started\\\",\\\"thread_id\\\":\\\"${thread}\\\"}\"\n"
+        "echo \"{\\\"type\\\":\\\"item.completed\\\",\\\"item\\\":{\\\"id\\\":\\\"item_1\\\",\\\"type\\\":\\\"agent_message\\\",\\\"text\\\":\\\"${text}\\\"}}\"\n"
+        "echo '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}'\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_CODEX_BINARY": "codex",
+            "VOICE_AGENT_CODEX_TIMEOUT_SEC": "60",
+        },
+    )
+
+    create_first = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "session-resume",
+            "thread_id": "chat-1",
+            "utterance_text": "first prompt",
+            "executor": "codex",
+        },
+    )
+    assert create_first.status_code == 200
+    first_run_id = create_first.json()["run_id"]
+
+    first_payload = None
+    for _ in range(80):
+        first_run = client.get(f"/v1/runs/{first_run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert first_run.status_code == 200
+        first_payload = first_run.json()
+        if first_payload["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert first_payload is not None
+    assert first_payload["status"] == "completed"
+    first_chat_messages = [e["message"] for e in first_payload["events"] if e["type"] == "chat.message"]
+    assert any("started memory" in msg for msg in first_chat_messages)
+
+    create_second = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "session-resume",
+            "thread_id": "chat-1",
+            "utterance_text": "second prompt",
+            "executor": "codex",
+        },
+    )
+    assert create_second.status_code == 200
+    second_run_id = create_second.json()["run_id"]
+
+    second_payload = None
+    for _ in range(80):
+        second_run = client.get(f"/v1/runs/{second_run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert second_run.status_code == 200
+        second_payload = second_run.json()
+        if second_payload["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert second_payload is not None
+    assert second_payload["status"] == "completed"
+    second_chat_messages = [e["message"] for e in second_payload["events"] if e["type"] == "chat.message"]
+    assert any("resumed memory" in msg for msg in second_chat_messages)

@@ -24,7 +24,7 @@ open VoiceAgentApp.xcodeproj
 3. In app UI:
 - Set `Server URL` to your reachable backend URL (not `127.0.0.1` when running on phone).
 - Set `API Token` from `backend/.env` (`VOICE_AGENT_API_TOKEN`).
-- Choose executor (`local` first, then `codex`).
+- Default mode uses `codex`; enable Developer Mode if you want to switch executor manually.
 - Tap `Send Prompt` for text flow.
 - Or use `Start Recording` -> `Stop & Send Audio` for `/v1/audio` flow.
 

@@ -4,138 +4,119 @@
   <img src="ios/VoiceAgentApp/mobaile_logo.png" alt="MOBaiLE logo" width="180" />
 </p>
 
-MOBaiLE turns your iPhone into a voice remote for your computer.
-Speak a task, MOBaiLE transcribes it, plans it through a backend control plane, executes safely on a target machine, and streams progress/results back to your phone.
+MOBaiLE lets you control coding tasks on your computer from your iPhone.
+You can type or speak a request, and the backend runs it safely on your machine while the app shows live progress.
 
-If you have ever wanted "Siri, but for real work on my actual machine," this is the repo.
+## Quick Start (Layman-Friendly)
 
-## What problem it solves
+If you just want it working, copy these steps.
 
-- Removes command-line friction when you are away from your keyboard.
-- Gives one control plane for voice input, execution, and run history.
-- Supports both safe and full-access execution modes depending on trust level.
-- Keeps interaction conversational while still exposing diagnostics and logs.
+### 1) Install the backend server in one command
 
-## Setup
-
-### 1) Prerequisites
-
-- macOS or Linux
-- Python `3.11+`
-- [`uv`](https://docs.astral.sh/uv/)
-
-### 2) Clone and install backend (recommended: safe mode)
+This installs everything, sets up tokens, and prepares pairing:
 
 ```bash
-git clone https://github.com/vemundss/MOBaiLE.git
-cd MOBaiLE
-bash ./scripts/install_backend.sh --mode safe
-bash ./scripts/doctor.sh
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
 ```
 
-### 3) Start backend API
+What this does for you:
+- installs missing backend prerequisites (`uv`) if needed
+- clones MOBaiLE to `~/MOBaiLE`
+- installs backend dependencies
+- creates backend config + API token + pairing info
+- on macOS: installs and starts a background service
+- generates pairing QR at `~/MOBaiLE/backend/pairing-qr.png`
+
+If you already cloned this repo and prefer npm-style commands:
 
 ```bash
-cd backend
-bash ./run_backend.sh
+npm run setup:server
 ```
 
-Backend should now respond on:
-
-- `http://127.0.0.1:8000/health`
-- `http://127.0.0.1:8000/docs`
-
-### 4) Run iOS app
+### 2) Confirm backend is running
 
 ```bash
-cd ios
+curl http://127.0.0.1:8000/health
+```
+
+You should get a small JSON response with `"ok"` status.
+
+### 3) Open the iOS app project
+
+```bash
+cd ~/MOBaiLE/ios
 xcodegen generate
 open VoiceAgentApp.xcodeproj
 ```
 
-In app settings:
+In Xcode:
+1. Select scheme `VoiceAgentApp`
+2. Pick an iPhone simulator (or your device)
+3. Press Run
 
-1. Set `Server URL` to your reachable backend URL.
-2. Set `API Token` from `backend/.env` (`VOICE_AGENT_API_TOKEN`).
-3. Start with executor `local` (then try `codex`).
-4. Send text or voice input.
+### 4) Connect app to backend
 
-## Usage examples
+Easiest way:
+1. Open `~/MOBaiLE/backend/pairing-qr.png`
+2. Scan with iPhone camera
+3. Open the `mobaile://pair...` link
+4. Confirm pairing in-app
 
-### Example 1: Let the backend execute a simple request
+Manual fallback (Settings in app):
+1. `Server URL`: your backend URL
+2. `API Token`: from `~/MOBaiLE/backend/.env` (`VOICE_AGENT_API_TOKEN`)
+3. `Session ID`: keep default (`iphone-app`) unless you want a custom one
+
+## What You Need
+
+- A Mac (for iOS app build)
+- iPhone (for real mobile use; simulator also works for testing)
+- Internet access for dependency install
+- Xcode
+- `xcodegen` (`brew install xcodegen`)
+
+Optional for audio transcription:
+- OpenAI API key in `backend/.env` (`OPENAI_API_KEY`)
+- If you only use text prompts, this is not required
+
+Optional for npm shortcuts:
+- Node.js + npm
+
+## Common Issues (Fast Fixes)
+
+- `address already in use` on port `8000`:
+  - another backend is already running; stop it first or change port in `backend/.env`
+- App on real iPhone cannot reach `127.0.0.1`:
+  - use your computer's LAN/Tailscale URL instead
+- Pairing works but audio fails:
+  - add `OPENAI_API_KEY` to `backend/.env` (or switch transcription provider to `mock` for testing)
+
+## Useful Commands
+
+From repo root:
 
 ```bash
-TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' backend/.env)"
-curl -s -X POST http://127.0.0.1:8000/v1/utterances \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "session_id": "demo-session",
-    "utterance_text": "create a hello python script and run it",
-    "mode": "execute",
-    "executor": "local",
-    "working_directory": "~/MOBaiLE-workspace"
-  }'
+npm run setup:server          # bootstrap safe-mode backend
+npm run backend:start         # start backend in foreground
+npm run doctor                # connectivity and environment checks
+npm run pair:qr               # regenerate pairing QR
+npm run ios:open              # regenerate and open iOS project
 ```
 
-### Example 2: End-to-end smoke flow
+Without npm:
 
 ```bash
-cd backend
-uv run python ../scripts/backend_smoke.py
-```
-
-### Example 3: Bootstrap a pairing-ready host/server
-
-```bash
-bash ./scripts/bootstrap_server.sh --mode safe
-```
-
-This performs clone/update, install, health checks, and pairing QR generation.  
-Then scan `backend/pairing-qr.png` and open the `mobaile://pair...` link on iPhone.
-
-## Test, rerun, and nice-to-know
-
-### Run tests
-
-```bash
-cd backend
-uv run pytest -q
-```
-
-### Re-check local environment
-
-```bash
+bash ./scripts/install_backend.sh --mode safe
+cd backend && bash ./run_backend.sh
 bash ./scripts/doctor.sh
 ```
 
-### Use macOS background service (optional)
+## Technical Details (Advanced)
 
-```bash
-bash ./scripts/service_macos.sh install
-bash ./scripts/service_macos.sh status
-bash ./scripts/service_macos.sh logs
-```
-
-### Security modes
-
-- `safe` (recommended): restricted workdir + restricted file reads + non-unrestricted codex defaults.
-- `full-access`: relaxed restrictions for trusted private hosts only.
-
-### Repo map
-
-- `ios/` SwiftUI app
-- `backend/` FastAPI control plane
-- `scripts/` setup and operational helpers
-- `docs/` deeper usage guides
-
-### Further docs
-
-- Usage details: [`docs/USAGE.md`](docs/USAGE.md)
-- iPhone Shortcut MVP testing: [`docs/PHONE_SHORTCUT_MVP.md`](docs/PHONE_SHORTCUT_MVP.md)
-- iOS notes: [`ios/README.md`](ios/README.md)
-- Backend details: [`backend/README.md`](backend/README.md)
+- Usage guide: [`docs/USAGE.md`](docs/USAGE.md)
+- Backend details and endpoints: [`backend/README.md`](backend/README.md)
+- iOS details: [`ios/README.md`](ios/README.md)
+- Scripts reference: [`scripts/README.md`](scripts/README.md)
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Current status: [`STATUS.md`](STATUS.md)
 - Planned features: [`NEW_FEATURES.md`](NEW_FEATURES.md)
-- Agent/contributor intent: [`AGENT_INTENT.md`](AGENT_INTENT.md)

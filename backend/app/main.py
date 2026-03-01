@@ -28,6 +28,8 @@ from app.models.schemas import (
     ChatArtifact,
     ChatEnvelope,
     ChatSection,
+    DirectoryCreateRequest,
+    DirectoryCreateResponse,
     DirectoryEntry,
     DirectoryListingResponse,
     ExecutionEvent,
@@ -258,6 +260,8 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
                 run_id,
                 request.utterance_text,
                 workdir,
+                request.session_id,
+                request.thread_id,
                 request.response_profile,
                 guardrail_message if guardrail_status == "warn" else None,
             ),
@@ -302,6 +306,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
 @app.post("/v1/audio", response_model=AudioRunResponse)
 async def create_audio_run(
     session_id: str = Form(...),
+    thread_id: str | None = Form(None),
     audio: UploadFile = File(...),
     executor: Literal["local", "codex"] = Form("codex"),
     mode: Literal["assistant", "execute"] = Form("execute"),
@@ -310,6 +315,7 @@ async def create_audio_run(
     response_mode: Literal["concise", "verbose"] = Form("concise"),
     response_profile: Literal["guided", "minimal"] = Form("guided"),
 ) -> AudioRunResponse:
+    normalized_thread_id = (thread_id or "").strip() or None
     content_length_header = audio.headers.get("content-length")
     if content_length_header:
         try:
@@ -338,6 +344,7 @@ async def create_audio_run(
         result = create_utterance(
             UtteranceRequest(
                 session_id=session_id,
+                thread_id=normalized_thread_id,
                 utterance_text=transcript_text,
                 executor=executor,
                 mode=mode,
@@ -464,7 +471,9 @@ def list_directory(path: str | None = Query(None)) -> DirectoryListingResponse:
 
     if not _is_path_allowed(target):
         raise HTTPException(status_code=403, detail="directory path is outside allowed roots")
-    if not target.exists() or not target.is_dir():
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="directory not found")
+    if not target.is_dir():
         raise HTTPException(status_code=404, detail="directory not found")
 
     try:
@@ -486,6 +495,31 @@ def list_directory(path: str | None = Query(None)) -> DirectoryListingResponse:
             )
         )
     return DirectoryListingResponse(path=str(target), entries=entries, truncated=truncated)
+
+
+@app.post("/v1/directories", response_model=DirectoryCreateResponse)
+def create_directory(request: DirectoryCreateRequest) -> DirectoryCreateResponse:
+    raw = request.path.strip()
+    target = Path(raw).expanduser()
+    if target.is_absolute():
+        target = target.resolve()
+    else:
+        target = (DEFAULT_WORKDIR / target).resolve()
+
+    if not _is_path_allowed(target):
+        raise HTTPException(status_code=403, detail="directory path is outside allowed roots")
+    if target.exists() and not target.is_dir():
+        raise HTTPException(status_code=409, detail="path exists and is not a directory")
+
+    created = False
+    if not target.exists():
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            created = True
+        except OSError as exc:
+            raise HTTPException(status_code=403, detail="permission denied for directory path") from exc
+
+    return DirectoryCreateResponse(path=str(target), created=created)
 
 
 @app.post("/v1/runs/{run_id}/cancel")
@@ -718,11 +752,17 @@ def _run_codex(
     run_id: str,
     prompt: str,
     workdir: Path,
+    session_id: str,
+    client_thread_id: str | None = None,
     response_profile: Literal["guided", "minimal"] = "guided",
     guardrail_message: str | None = None,
 ) -> None:
     codex_executor = CodexExecutor(workdir)
     codex_prompt = _build_codex_prompt(prompt, response_profile=response_profile)
+    normalized_client_thread_id = (client_thread_id or "").strip() or None
+    resume_thread_id: str | None = None
+    if normalized_client_thread_id:
+        resume_thread_id = RUN_STORE.get_codex_thread_id(session_id, normalized_client_thread_id)
     _append_event(
         run_id,
         ExecutionEvent(
@@ -738,7 +778,7 @@ def _run_codex(
             sections=[ChatSection(title="Safety", body=guardrail_message)],
         )
     try:
-        proc = codex_executor.start(codex_prompt)
+        proc = codex_executor.start(codex_prompt, resume_thread_id=resume_thread_id)
     except FileNotFoundError:
         _append_event(
             run_id,
@@ -780,6 +820,31 @@ def _run_codex(
         if line is not None:
             message = line.rstrip()
             if message:
+                parsed = _parse_codex_json_event(message)
+                if parsed is not None:
+                    event_type = str(parsed.get("type", "")).strip()
+                    if event_type == "thread.started":
+                        codex_thread_id = str(parsed.get("thread_id", "")).strip()
+                        if codex_thread_id and normalized_client_thread_id:
+                            RUN_STORE.set_codex_thread_id(
+                                session_id=session_id,
+                                client_thread_id=normalized_client_thread_id,
+                                codex_thread_id=codex_thread_id,
+                            )
+                            _append_log_message(
+                                run_id,
+                                f"codex thread linked ({codex_thread_id})",
+                                action_index=0,
+                            )
+                    elif event_type == "item.completed":
+                        item = parsed.get("item")
+                        if isinstance(item, dict):
+                            item_type = str(item.get("type", "")).strip()
+                            item_text = str(item.get("text", "")).strip()
+                            if item_type == "agent_message" and item_text:
+                                _append_assistant_payload(run_id, item_text)
+                    continue
+
                 _append_log_message(run_id, message, action_index=0)
                 for structured in chat_extractor.consume(message):
                     _append_assistant_payload(run_id, structured)
@@ -1139,6 +1204,22 @@ class _CodexAssistantExtractor:
         ):
             return True
         return False
+
+
+def _parse_codex_json_event(raw_line: str) -> dict[str, object] | None:
+    text = raw_line.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    event_type = payload.get("type")
+    if not isinstance(event_type, str) or not event_type.strip():
+        return None
+    return payload
 
 
 def _is_cancelled(run_id: str) -> bool:

@@ -1,8 +1,14 @@
 # Scripts
 
-Utility scripts for local dev tasks (smoke tests, local setup, helpers).
+Quick ways to install and operate the backend.
 
-Bootstrap backend on a host/server (clone/update + install + service + pairing QR):
+## Fastest Backend Install (No Clone Needed)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
+```
+
+## If You Already Cloned the Repo
 
 ```bash
 bash ./scripts/bootstrap_server.sh --mode safe
@@ -10,7 +16,20 @@ bash ./scripts/bootstrap_server.sh --mode safe
 bash ./scripts/bootstrap_server.sh --mode full-access
 ```
 
-Install backend (one-command setup):
+## npm Command Wrappers (Optional)
+
+From repo root:
+
+```bash
+npm run setup:server
+npm run backend:start
+npm run doctor
+npm run pair:qr
+```
+
+## Direct Script Commands
+
+Install backend only:
 
 ```bash
 bash ./scripts/install_backend.sh --mode safe
@@ -58,11 +77,4 @@ Switch backend security mode after install:
 ```bash
 bash ./scripts/set_security_mode.sh safe
 bash ./scripts/set_security_mode.sh full-access
-```
-
-Smoke test:
-
-```bash
-cd backend
-uv run python ../scripts/backend_smoke.py
 ```

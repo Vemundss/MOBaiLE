@@ -6,6 +6,8 @@ struct ContentView: View {
     @State private var showConnectionSettings = false
     @State private var showLogs = false
     @State private var showThreads = false
+    @State private var newDirectoryName = ""
+    @State private var trustPairHost = false
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -69,8 +71,12 @@ struct ContentView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Text(vm.statusText)
-                                    .font(.caption2)
+                                if vm.isLoading {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                }
+                                Text(bottomRunStatusText)
+                                    .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -127,7 +133,12 @@ struct ContentView: View {
                                         Task { await vm.sendPrompt() }
                                     }
                                     .buttonStyle(.borderedProminent)
-                                    .disabled(vm.apiToken.isEmpty || vm.serverURL.isEmpty || vm.promptText.isEmpty || vm.isRecording)
+                                    .disabled(
+                                        vm.apiToken.isEmpty ||
+                                        vm.serverURL.isEmpty ||
+                                        vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                        vm.isRecording
+                                    )
                                 }
                             }
                         }
@@ -290,8 +301,28 @@ struct ContentView: View {
             .onChange(of: vm.agentGuidanceMode) { vm.persistSettings() }
             .onChange(of: vm.executor) { vm.persistSettings() }
             .onChange(of: vm.developerMode) { vm.persistSettings() }
+            .onChange(of: vm.pendingPairing) {
+                guard let pending = vm.pendingPairing else {
+                    trustPairHost = false
+                    return
+                }
+                trustPairHost = vm.isTrustedPairHost(pending.serverHost)
+            }
             .onOpenURL { url in
                 vm.applyPairingURL(url)
+            }
+            .sheet(item: Binding(
+                get: { vm.pendingPairing },
+                set: { if $0 == nil { vm.cancelPendingPairing() } }
+            )) { pending in
+                PairingConfirmationSheet(
+                    pending: pending,
+                    trustHost: $trustPairHost,
+                    onCancel: { vm.cancelPendingPairing() },
+                    onConfirm: {
+                        vm.confirmPendingPairing(trustHost: trustPairHost)
+                    }
+                )
             }
         }
     }
@@ -301,6 +332,16 @@ struct ContentView: View {
             return runID
         }
         return String(runID.prefix(8))
+    }
+
+    private var bottomRunStatusText: String {
+        if vm.runPhaseText == "Planning" || vm.runPhaseText == "Executing" || vm.runPhaseText == "Summarizing" {
+            return "Thinking"
+        }
+        if vm.runPhaseText != "Idle" {
+            return vm.runPhaseText
+        }
+        return vm.statusText
     }
 
     private var composerHeight: CGFloat {
@@ -338,7 +379,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if !vm.statusText.isEmpty {
+                if !vm.statusText.isEmpty && vm.statusText != "Idle" {
                     Text(vm.statusText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -378,6 +419,65 @@ struct ContentView: View {
 
     private var directoryBrowserPanel: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        if vm.directoryBreadcrumbs.isEmpty {
+                            Text(runtimeDirectoryLabel)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(vm.directoryBreadcrumbs) { crumb in
+                                Button(crumb.title) {
+                                    Task { await vm.openDirectory(path: crumb.path) }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                            }
+                        }
+                    }
+                }
+                Button {
+                    Task { await vm.navigateDirectoryUp() }
+                } label: {
+                    Image(systemName: "arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(!vm.canNavigateDirectoryUp || vm.isLoadingDirectoryBrowser)
+
+                Button {
+                    Task { await vm.refreshDirectoryBrowser() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(vm.isLoadingDirectoryBrowser)
+            }
+
+            HStack(spacing: 6) {
+                TextField("New folder", text: $newDirectoryName)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.caption2.monospaced())
+                    .textFieldStyle(.roundedBorder)
+                Button("Create") {
+                    Task {
+                        let created = await vm.createDirectoryInCurrentBrowser(name: newDirectoryName)
+                        if created {
+                            newDirectoryName = ""
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .disabled(
+                    vm.isLoadingDirectoryBrowser ||
+                    newDirectoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+
             if vm.isLoadingDirectoryBrowser {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -387,24 +487,44 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
             } else if !vm.directoryBrowserError.isEmpty {
-                Text(vm.directoryBrowserError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(vm.directoryBrowserError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    if !vm.directoryBrowserMissingPath.isEmpty {
+                        Button("Create missing directory") {
+                            Task { await vm.createDirectoryFromBrowser() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.mini)
+                    }
+                }
             } else if vm.directoryBrowserEntries.isEmpty {
                 Text("No files found in this folder.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(vm.directoryBrowserEntries.prefix(20)) { entry in
-                    HStack(spacing: 8) {
-                        Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
-                            .font(.caption2)
-                            .foregroundStyle(entry.isDirectory ? .blue : .secondary)
-                        Text(entry.name)
-                            .font(.caption2.monospaced())
-                            .lineLimit(1)
-                        Spacer()
+                    Button {
+                        Task { await vm.openDirectoryEntry(entry) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
+                                .font(.caption2)
+                                .foregroundStyle(entry.isDirectory ? .blue : .secondary)
+                            Text(entry.name)
+                                .font(.caption2.monospaced())
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if entry.isDirectory {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .disabled(!entry.isDirectory)
                 }
                 if vm.directoryBrowserTruncated {
                     Text("Showing first 20 entries.")
@@ -416,6 +536,60 @@ struct ContentView: View {
         .padding(8)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct PairingConfirmationSheet: View {
+    let pending: VoiceAgentViewModel.PendingPairing
+    @Binding var trustHost: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Server") {
+                    LabeledContent("Host", value: pending.serverHost.isEmpty ? pending.serverURL : pending.serverHost)
+                        .font(.footnote.monospaced())
+                    LabeledContent("URL", value: pending.serverURL)
+                        .font(.footnote.monospaced())
+                    LabeledContent("Security", value: pending.badgeText)
+                }
+
+                Section("Session") {
+                    LabeledContent("Session ID", value: pending.sessionID ?? "default")
+                    LabeledContent(
+                        "Method",
+                        value: pending.pairCode != nil ? "One-time pair code" : "Legacy token (developer mode)"
+                    )
+                }
+
+                Section("Trust") {
+                    Toggle("Trust this server", isOn: $trustHost)
+                    Text("Trusted hosts auto-enable this toggle the next time you pair.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Confirm Pairing")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Pair") {
+                        onConfirm()
+                        dismiss()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
+        }
     }
 }
 

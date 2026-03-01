@@ -15,9 +15,12 @@ class CodexExecutor:
         unrestricted = os.getenv("VOICE_AGENT_CODEX_UNRESTRICTED", default_unrestricted).strip().lower()
         self.unrestricted = unrestricted not in {"0", "false", "no", "off"}
 
-    def start(self, prompt: str) -> subprocess.Popen[str]:
+    def start(self, prompt: str, *, resume_thread_id: str | None = None) -> subprocess.Popen[str]:
         # Non-interactive invocation for Codex CLI.
-        cmd = [self.binary, "exec", "--skip-git-repo-check"]
+        cmd = [self.binary, "exec"]
+        if resume_thread_id:
+            cmd.extend(["resume", resume_thread_id])
+        cmd.extend(["--json", "--skip-git-repo-check"])
         if self.unrestricted:
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
         if self.model:

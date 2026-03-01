@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class UtteranceRequest(BaseModel):
     session_id: str = Field(min_length=1)
+    thread_id: str | None = Field(default=None, min_length=1)
     utterance_text: str = Field(min_length=1)
     mode: Literal["assistant", "execute"] = "execute"
     executor: Literal["local", "codex"] = "local"
@@ -146,6 +147,15 @@ class DirectoryListingResponse(BaseModel):
     path: str
     entries: list[DirectoryEntry]
     truncated: bool = False
+
+
+class DirectoryCreateRequest(BaseModel):
+    path: str = Field(min_length=1)
+
+
+class DirectoryCreateResponse(BaseModel):
+    path: str
+    created: bool
 
 
 class UtteranceResponse(BaseModel):

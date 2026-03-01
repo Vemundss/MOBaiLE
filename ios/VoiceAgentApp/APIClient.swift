@@ -164,10 +164,30 @@ final class APIClient {
         return try jsonDecoder.decode(DirectoryListingResponse.self, from: data)
     }
 
+    func createDirectory(
+        serverURL: String,
+        token: String,
+        path: String
+    ) async throws -> DirectoryCreateResponse {
+        guard let url = URL(string: serverURL + "/v1/directories") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try jsonEncoder.encode(DirectoryCreateRequest(path: path))
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(DirectoryCreateResponse.self, from: data)
+    }
+
     func createAudioRun(
         serverURL: String,
         token: String,
         sessionID: String,
+        threadID: String?,
         executor: String,
         workingDirectory: String?,
         responseMode: String?,
@@ -186,15 +206,20 @@ final class APIClient {
         request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let audioData = try Data(contentsOf: audioFileURL)
+        var fields: [String: String] = [
+            "session_id": sessionID,
+            "executor": executor,
+            "working_directory": workingDirectory ?? "",
+            "response_mode": responseMode ?? "",
+            "response_profile": responseProfile ?? ""
+        ]
+        let trimmedThreadID = (threadID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedThreadID.isEmpty {
+            fields["thread_id"] = trimmedThreadID
+        }
         request.httpBody = buildMultipartBody(
             boundary: boundary,
-            fields: [
-                "session_id": sessionID,
-                "executor": executor,
-                "working_directory": workingDirectory ?? "",
-                "response_mode": responseMode ?? "",
-                "response_profile": responseProfile ?? ""
-            ],
+            fields: fields,
             fileData: audioData,
             fileFieldName: "audio",
             fileName: audioFileURL.lastPathComponent,
@@ -213,51 +238,61 @@ final class APIClient {
     ) -> AsyncThrowingStream<ExecutionEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                guard let url = URL(string: serverURL + "/v1/runs/\(runID)/events") else {
-                    throw APIError.invalidURL
-                }
-
-                var request = URLRequest(url: url)
-                request.httpMethod = "GET"
-                request.timeoutInterval = 60
-                request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-                let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                guard let http = response as? HTTPURLResponse else {
-                    throw APIError.invalidResponse
-                }
-                guard (200...299).contains(http.statusCode) else {
-                    throw APIError.httpError(http.statusCode, "")
-                }
-
-                let decoder = JSONDecoder()
-                var dataLines: [String] = []
-
-                for try await line in bytes.lines {
-                    if line.hasPrefix("data: ") {
-                        dataLines.append(String(line.dropFirst(6)))
-                        continue
+                do {
+                    guard let url = URL(string: serverURL + "/v1/runs/\(runID)/events") else {
+                        throw APIError.invalidURL
                     }
-                    if line.isEmpty {
-                        if !dataLines.isEmpty {
-                            let payload = dataLines.joined(separator: "\n")
-                            dataLines.removeAll()
-                            if let payloadData = payload.data(using: .utf8) {
-                                let event = try decoder.decode(ExecutionEvent.self, from: payloadData)
-                                continuation.yield(event)
+
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "GET"
+                    request.timeoutInterval = 60
+                    request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw APIError.invalidResponse
+                    }
+                    guard (200...299).contains(http.statusCode) else {
+                        throw APIError.httpError(http.statusCode, "")
+                    }
+
+                    let decoder = JSONDecoder()
+                    var dataLines: [String] = []
+
+                    for try await line in bytes.lines {
+                        if line.hasPrefix("data:") {
+                            let raw = String(line.dropFirst(5))
+                            let normalized = raw.hasPrefix(" ") ? String(raw.dropFirst()) : raw
+                            dataLines.append(normalized)
+                            continue
+                        }
+                        if line.isEmpty {
+                            if !dataLines.isEmpty {
+                                let payload = dataLines.joined(separator: "\n")
+                                dataLines.removeAll()
+                                if let payloadData = payload.data(using: .utf8) {
+                                    let event = try decoder.decode(ExecutionEvent.self, from: payloadData)
+                                    continuation.yield(event)
+                                }
                             }
                         }
                     }
-                }
 
-                if !dataLines.isEmpty {
-                    let payload = dataLines.joined(separator: "\n")
-                    if let payloadData = payload.data(using: .utf8) {
-                        let event = try decoder.decode(ExecutionEvent.self, from: payloadData)
-                        continuation.yield(event)
+                    if !dataLines.isEmpty {
+                        let payload = dataLines.joined(separator: "\n")
+                        if let payloadData = payload.data(using: .utf8) {
+                            let event = try decoder.decode(ExecutionEvent.self, from: payloadData)
+                            continuation.yield(event)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    if Task.isCancelled {
+                        continuation.finish()
+                    } else {
+                        continuation.finish(throwing: error)
                     }
                 }
-                continuation.finish()
             }
 
             continuation.onTermination = { _ in

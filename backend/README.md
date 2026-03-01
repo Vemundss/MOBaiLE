@@ -18,6 +18,8 @@ Current implemented endpoints:
 - `POST /v1/audio` (multipart upload + transcript-to-run bridge)
 - `GET /v1/runs/{run_id}` (retrieve run record and events)
 - `GET /v1/runs/{run_id}/events` (SSE event stream)
+- `GET /v1/directories` (list existing directory contents)
+- `POST /v1/directories` (create directory explicitly)
 
 Auth:
 - `/v1/*` endpoints require `Authorization: Bearer <VOICE_AGENT_API_TOKEN>`.

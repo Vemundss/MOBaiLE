@@ -75,6 +75,20 @@ class RunStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_run_events_run_id_seq ON run_events(run_id, seq)"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS codex_thread_map (
+                    session_id TEXT NOT NULL,
+                    client_thread_id TEXT NOT NULL,
+                    codex_thread_id TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (session_id, client_thread_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_codex_thread_map_updated_at ON codex_thread_map(updated_at)"
+            )
 
             if legacy_rows:
                 for row in legacy_rows:
@@ -223,6 +237,36 @@ class RunStore:
                 )
             )
         return results
+
+    def get_codex_thread_id(self, session_id: str, client_thread_id: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT codex_thread_id
+                FROM codex_thread_map
+                WHERE session_id = ? AND client_thread_id = ?
+                """,
+                (session_id, client_thread_id),
+            ).fetchone()
+        if row is None:
+            return None
+        value = str(row["codex_thread_id"]).strip()
+        return value or None
+
+    def set_codex_thread_id(self, session_id: str, client_thread_id: str, codex_thread_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO codex_thread_map (
+                    session_id, client_thread_id, codex_thread_id, updated_at
+                )
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id, client_thread_id) DO UPDATE SET
+                    codex_thread_id=excluded.codex_thread_id,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (session_id, client_thread_id, codex_thread_id),
+            )
 
     def _upsert_run_conn(self, conn: sqlite3.Connection, run: RunRecord) -> None:
         plan_json = run.plan.model_dump_json() if run.plan is not None else None

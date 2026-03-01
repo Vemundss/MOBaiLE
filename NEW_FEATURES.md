@@ -5,7 +5,7 @@ This file tracks product-facing improvements and implementation status.
 ## Current Focus
 
 - [x] Thread/session history in iOS chat (`switch`, `new`, `rename`, `delete`)
-- [x] Developer Mode gating for advanced controls (`local`, `verbose`, run logs)
+- [x] Developer Mode gating for advanced controls (`local`, run logs)
 - [ ] Structured assistant rendering v2 (sections + artifacts as first-class UI cards)
   - [x] Robust envelope decoding (direct JSON + escaped JSON string + embedded JSON extraction)
   - [x] Server-side envelope unwrapping to avoid nested/raw JSON in chat bubbles

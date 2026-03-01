@@ -27,6 +27,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
 
 struct UtteranceRequest: Encodable {
     let sessionId: String
+    let threadID: String?
     let utteranceText: String
     let mode: String
     let executor: String
@@ -36,6 +37,7 @@ struct UtteranceRequest: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
+        case threadID = "thread_id"
         case utteranceText = "utterance_text"
         case mode
         case executor
@@ -219,6 +221,15 @@ struct DirectoryListingResponse: Decodable {
     let path: String
     let entries: [DirectoryEntry]
     let truncated: Bool
+}
+
+struct DirectoryCreateRequest: Encodable {
+    let path: String
+}
+
+struct DirectoryCreateResponse: Decodable {
+    let path: String
+    let created: Bool
 }
 
 struct ChatEnvelope: Decodable {
