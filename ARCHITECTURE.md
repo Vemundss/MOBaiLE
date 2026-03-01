@@ -4,6 +4,20 @@
 
 Build a voice-first iPhone assistant that can convert speech to text, reason over requests with an AI, execute coding operations on a machine (structured mode and/or unrestricted Codex mode), then stream results back to the user and speak them aloud.
 
+## 1.2) Product-Phase Direction (2026-02-24)
+
+The project is now moving from "MVP vertical slice" to "productization":
+
+- Primary target: stable and user-friendly daily-use app.
+- Secondary target: richer capabilities (calendar/email/files/dev workflows) with predictable behavior.
+- Engineering standard: typed interfaces first, heuristics only as fallback.
+
+Concrete architecture shift:
+- Separate chat-facing assistant output from raw runtime logs.
+- Define a typed response envelope for assistant content (summary, sections, cards/artifacts).
+- Introduce backend tools/adapters for recurring domains (calendar/email/files) instead of ad-hoc shell generation.
+- Keep run diagnostics/auditability as first-class requirements.
+
 ## 1.1) MVP Consensus (2026-02-19)
 
 Primary user outcome:
@@ -30,6 +44,8 @@ Boundary decision for MVP:
 - Explainability: each step is logged and inspectable.
 - Iterative delivery: ship a vertical slice first, then expand capabilities.
 - Reproducibility: everything needed to continue work is captured in repo docs.
+- Product reliability: prioritize predictable behavior over clever one-off fixes.
+- UX clarity: chat should present intent/result, while logs remain available but separate.
 
 ## 3) High-Level System Design
 
@@ -160,6 +176,26 @@ Primary safeguard is deployment isolation (dedicated machine/VM), plus strong au
 - Include timestamps and actor identity.
 
 ## 6) Implementation Roadmap
+
+## Phase Shift: MVP -> Product Stabilization
+
+Immediate program (current):
+1. Conversation pipeline hardening:
+   - chat/log channel split
+   - typed assistant response envelope
+   - deterministic rendering on iOS
+2. Domain adapters:
+   - calendar adapter (typed events)
+   - file/artifact adapter
+   - email adapter (next)
+3. Reliability and operations:
+   - stronger diagnostics
+   - clearer error semantics
+   - regression test expansion
+4. Security hardening for non-local usage:
+   - transport hardening (TLS/proxy/tunnel)
+   - token lifecycle/rotation defaults
+   - explicit risk controls for unrestricted executor mode
 
 ## Phase 0: Foundations (now)
 

@@ -11,6 +11,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var runTimeoutSeconds: String = "300"
     @Published var executor: String = "codex"
     @Published var responseMode: String = "concise"
+    @Published var agentGuidanceMode: String = "guided"
     @Published var developerMode: Bool = false
     @Published var promptText: String = "create a hello python script and run it"
     @Published var isLoading: Bool = false
@@ -29,12 +30,18 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var activeThreadID: UUID?
     @Published var backendSecurityMode: String = "unknown"
     @Published var backendWorkdirRoot: String = ""
+    @Published var showDirectoryBrowser: Bool = false
+    @Published var isLoadingDirectoryBrowser: Bool = false
+    @Published var directoryBrowserEntries: [DirectoryEntry] = []
+    @Published var directoryBrowserTruncated: Bool = false
+    @Published var directoryBrowserError: String = ""
 
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
     private let recorder = AudioRecorderService()
     private let defaults = UserDefaults.standard
-    private var processedEventCount: Int = 0
+    private var seenEventIDs: Set<String> = []
+    private var seenEventFingerprints: Set<String> = []
     private var lastSubmittedUserText: String = ""
     private var didBootstrapSession = false
 
@@ -46,6 +53,7 @@ final class VoiceAgentViewModel: ObservableObject {
         static let runTimeoutSeconds = "mobaile.run_timeout_seconds"
         static let executor = "mobaile.executor"
         static let responseMode = "mobaile.response_mode"
+        static let agentGuidanceMode = "mobaile.agent_guidance_mode"
         static let developerMode = "mobaile.developer_mode"
         static let threads = "mobaile.threads"
         static let activeThreadID = "mobaile.active_thread_id"
@@ -61,7 +69,8 @@ final class VoiceAgentViewModel: ObservableObject {
         errorText = ""
         summaryText = ""
         events = []
-        processedEventCount = 0
+        seenEventIDs = []
+        seenEventFingerprints = []
         resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
         statusText = "Starting run..."
@@ -80,7 +89,9 @@ final class VoiceAgentViewModel: ObservableObject {
                     utteranceText: sentPrompt,
                     mode: "execute",
                     executor: effectiveExecutor,
-                    workingDirectory: normalizedWorkingDirectory
+                    workingDirectory: normalizedWorkingDirectory,
+                    responseMode: effectiveResponseMode,
+                    responseProfile: effectiveAgentGuidanceMode
                 )
             )
             runID = response.runId
@@ -154,7 +165,8 @@ final class VoiceAgentViewModel: ObservableObject {
         summaryText = ""
         transcriptText = ""
         events = []
-        processedEventCount = 0
+        seenEventIDs = []
+        seenEventFingerprints = []
         resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
 
@@ -172,6 +184,8 @@ final class VoiceAgentViewModel: ObservableObject {
                 sessionID: sessionID,
                 executor: effectiveExecutor,
                 workingDirectory: normalizedWorkingDirectory,
+                responseMode: effectiveResponseMode,
+                responseProfile: effectiveAgentGuidanceMode,
                 audioFileURL: audioFile
             )
             runID = response.runId
@@ -217,9 +231,8 @@ final class VoiceAgentViewModel: ObservableObject {
             )
             statusText = "Run status: \(run.status)"
             summaryText = run.summary
-            events = run.events
             resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
-            appendNewEventMessages(from: run.events)
+            ingestEvents(run.events)
 
             if isTerminalStatus(run.status) {
                 applyTerminalRunStateIfNeeded(run)
@@ -240,10 +253,7 @@ final class VoiceAgentViewModel: ObservableObject {
             runID: runID
         )
         for try await event in stream {
-            events.append(event)
-            if let text = conversationText(for: event) {
-                appendConversation(role: "assistant", text: text)
-            }
+            ingestEvents([event])
             if Date() > deadline {
                 throw NSError(
                     domain: "VoiceAgentApp",
@@ -277,10 +287,53 @@ final class VoiceAgentViewModel: ObservableObject {
         statusText = "Idle"
         events = []
         conversation = []
-        processedEventCount = 0
+        seenEventIDs = []
+        seenEventFingerprints = []
         didCompleteRun = false
         activeRunExecutor = effectiveExecutor
         persistActiveThreadSnapshot()
+    }
+
+    func toggleDirectoryBrowser() async {
+        if showDirectoryBrowser {
+            showDirectoryBrowser = false
+            return
+        }
+        await refreshDirectoryBrowser()
+        showDirectoryBrowser = true
+    }
+
+    func refreshDirectoryBrowser() async {
+        let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedServerURL.isEmpty, !token.isEmpty else {
+            directoryBrowserEntries = []
+            directoryBrowserTruncated = false
+            directoryBrowserError = "Set server URL and API token to browse cwd."
+            isLoadingDirectoryBrowser = false
+            return
+        }
+
+        isLoadingDirectoryBrowser = true
+        directoryBrowserError = ""
+        do {
+            let response = try await client.fetchDirectoryListing(
+                serverURL: normalizedServerURL,
+                token: token,
+                path: directoryPathForListing
+            )
+            directoryBrowserEntries = response.entries
+            directoryBrowserTruncated = response.truncated
+            resolvedWorkingDirectory = response.path
+        } catch {
+            directoryBrowserEntries = []
+            directoryBrowserTruncated = false
+            directoryBrowserError = error.localizedDescription
+        }
+        isLoadingDirectoryBrowser = false
+    }
+
+    func hideDirectoryBrowser() {
+        showDirectoryBrowser = false
     }
 
     func persistSettings() {
@@ -288,9 +341,9 @@ final class VoiceAgentViewModel: ObservableObject {
             if executor != "codex" {
                 executor = "codex"
             }
-            if responseMode != "concise" {
-                responseMode = "concise"
-            }
+        }
+        if responseMode != "concise" {
+            responseMode = "concise"
         }
         defaults.set(serverURL, forKey: DefaultsKey.serverURL)
         if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -301,7 +354,8 @@ final class VoiceAgentViewModel: ObservableObject {
         defaults.set(workingDirectory, forKey: DefaultsKey.workingDirectory)
         defaults.set(runTimeoutSeconds, forKey: DefaultsKey.runTimeoutSeconds)
         defaults.set(executor, forKey: DefaultsKey.executor)
-        defaults.set(responseMode, forKey: DefaultsKey.responseMode)
+        defaults.set("concise", forKey: DefaultsKey.responseMode)
+        defaults.set(agentGuidanceMode, forKey: DefaultsKey.agentGuidanceMode)
         defaults.set(developerMode, forKey: DefaultsKey.developerMode)
     }
 
@@ -412,7 +466,8 @@ final class VoiceAgentViewModel: ObservableObject {
         activeRunExecutor = thread.activeRunExecutor
         errorText = ""
         events = []
-        processedEventCount = 0
+        seenEventIDs = []
+        seenEventFingerprints = []
         didCompleteRun = isTerminalStatusText(thread.statusText)
         defaults.set(threadID.uuidString, forKey: DefaultsKey.activeThreadID)
     }
@@ -493,7 +548,25 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private var effectiveResponseMode: String {
-        developerMode ? responseMode : "concise"
+        "concise"
+    }
+
+    private var effectiveAgentGuidanceMode: String {
+        agentGuidanceMode == "minimal" ? "minimal" : "guided"
+    }
+
+    private var directoryPathForListing: String? {
+        let resolved = resolvedWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !resolved.isEmpty {
+            return resolved
+        }
+        guard let requested = normalizedWorkingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !requested.isEmpty,
+              requested != "~",
+              requested != "." else {
+            return nil
+        }
+        return requested
     }
 
     private var normalizedRunTimeoutSeconds: TimeInterval {
@@ -519,15 +592,26 @@ final class VoiceAgentViewModel: ObservableObject {
         persistActiveThreadSnapshot()
     }
 
-    private func appendNewEventMessages(from runEvents: [ExecutionEvent]) {
-        guard runEvents.count > processedEventCount else { return }
-        for idx in processedEventCount..<runEvents.count {
-            let event = runEvents[idx]
+    private func ingestEvents(_ runEvents: [ExecutionEvent]) {
+        for event in runEvents {
+            let eventID = event.eventID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !eventID.isEmpty {
+                if seenEventIDs.contains(eventID) {
+                    continue
+                }
+                seenEventIDs.insert(eventID)
+            } else {
+                let fingerprint = "\(event.type)|\(event.actionIndex ?? -1)|\(event.message)"
+                if seenEventFingerprints.contains(fingerprint) {
+                    continue
+                }
+                seenEventFingerprints.insert(fingerprint)
+            }
+            events.append(event)
             if let text = conversationText(for: event) {
                 appendConversation(role: "assistant", text: text)
             }
         }
-        processedEventCount = runEvents.count
     }
 
     private func conversationText(for event: ExecutionEvent) -> String? {
@@ -547,22 +631,9 @@ final class VoiceAgentViewModel: ObservableObject {
             if message.isEmpty { return nil }
             if message == lastSubmittedUserText { return nil }
             return message
-        case "log.message":
-            if effectiveResponseMode != "verbose" { return nil }
-            if message.isEmpty { return nil }
-            return "log: \(message)"
-        case "action.stdout":
-            if effectiveResponseMode != "verbose" { return nil }
-            if message.isEmpty { return nil }
-            if activeRunExecutor == "codex" { return nil }
-            if isCodexNoise(message) { return nil }
-            if message == lastSubmittedUserText { return nil }
-            return message
-        case "action.stderr":
-            if effectiveResponseMode != "verbose" { return nil }
-            return "stderr: \(message)"
+        case "log.message", "action.stdout", "action.stderr":
+            return nil
         case "action.completed":
-            if effectiveResponseMode == "verbose" { return nil }
             if activeRunExecutor == "codex" { return nil }
             if message.isEmpty { return nil }
             return message
@@ -579,6 +650,16 @@ final class VoiceAgentViewModel: ObservableObject {
         let prepared = role == "assistant" ? normalizeAssistantText(text) : text
         let trimmed = prepared.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        if role == "assistant",
+           shouldCoalesceAssistantProgress(with: trimmed),
+           let last = conversation.last,
+           last.role == "assistant",
+           isProgressAssistantMessage(last.text),
+           !isTerminalStatusText(statusText) {
+            conversation[conversation.count - 1] = ConversationMessage(role: role, text: trimmed)
+            persistActiveThreadSnapshot()
+            return
+        }
         if let last = conversation.last, last.role == role {
             if last.text == trimmed {
                 return
@@ -603,6 +684,55 @@ final class VoiceAgentViewModel: ObservableObject {
         var out = text.replacingOccurrences(of: "\r\n", with: "\n")
         out = out.replacingOccurrences(of: "\r", with: "\n")
         return out
+    }
+
+    private func shouldCoalesceAssistantProgress(with text: String) -> Bool {
+        isProgressAssistantMessage(text)
+    }
+
+    private func isProgressAssistantMessage(_ text: String) -> Bool {
+        if let envelope = parseEnvelope(text) {
+            if !envelope.agendaItems.isEmpty || !envelope.artifacts.isEmpty {
+                return false
+            }
+            if envelope.sections.count > 1 {
+                return false
+            }
+            if let section = envelope.sections.first {
+                let lowerTitle = section.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if lowerTitle != "result" && lowerTitle != "status" {
+                    return false
+                }
+                return looksLikeProgressSentence(section.body)
+            }
+            return looksLikeProgressSentence(envelope.summary)
+        }
+        return looksLikeProgressSentence(text)
+    }
+
+    private func looksLikeProgressSentence(_ text: String) -> Bool {
+        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty else { return false }
+        if lower.contains("run completed successfully") || lower.contains("run failed") || lower.contains("```") {
+            return false
+        }
+        let markers = [
+            "checking ",
+            "querying ",
+            "pulling ",
+            "reading ",
+            "fetching ",
+            "reformatting ",
+            "processing ",
+            "running ",
+            "trying ",
+            "retrying ",
+            "i'll ",
+            "i will ",
+            "i'm ",
+            "working on",
+        ]
+        return markers.contains { lower.contains($0) }
     }
 
     private func loadSettings() {
@@ -630,12 +760,17 @@ final class VoiceAgentViewModel: ObservableObject {
             executor = value
         }
         if let value = defaults.string(forKey: DefaultsKey.responseMode), !value.isEmpty {
-            responseMode = value
+            responseMode = value == "verbose" ? "concise" : value
+        }
+        if responseMode != "concise" {
+            responseMode = "concise"
+        }
+        if let value = defaults.string(forKey: DefaultsKey.agentGuidanceMode), !value.isEmpty {
+            agentGuidanceMode = value
         }
         developerMode = defaults.bool(forKey: DefaultsKey.developerMode)
         if !developerMode {
             executor = "codex"
-            responseMode = "concise"
         }
     }
 
@@ -727,32 +862,6 @@ final class VoiceAgentViewModel: ObservableObject {
         return lower.contains("completed") || lower.contains("failed") || lower.contains("cancelled") || lower.contains("rejected")
     }
 
-    private func isCodexNoise(_ message: String) -> Bool {
-        let lower = message.lowercased()
-        if lower == "user" || lower == "codex" || lower == "exec" || lower == "thinking" {
-            return true
-        }
-        if lower == "output:" || lower == "tokens used" || lower == "--------" {
-            return true
-        }
-        if lower.hasPrefix("openai codex v") ||
-            lower.hasPrefix("workdir:") ||
-            lower.hasPrefix("model:") ||
-            lower.hasPrefix("provider:") ||
-            lower.hasPrefix("approval:") ||
-            lower.hasPrefix("sandbox:") ||
-            lower.hasPrefix("reasoning effort:") ||
-            lower.hasPrefix("reasoning summaries:") ||
-            lower.hasPrefix("session id:") ||
-            lower.hasPrefix("mcp startup:") {
-            return true
-        }
-        if message.hasPrefix("**") && message.hasSuffix("**") {
-            return true
-        }
-        return false
-    }
-
     private func isContextLeak(_ message: String) -> Bool {
         let lower = message.lowercased()
         let markers = [
@@ -760,7 +869,11 @@ final class VoiceAgentViewModel: ObservableObject {
             "you run on the user's server/computer",
             "your stdout is streamed to a phone ui",
             "product intent:",
+            "mobaile makes a user's computer available from their phone",
+            "primary users are software engineers who run coding agents while away from the computer",
+            "secondary use cases include normal remote productivity tasks",
             "output style for phone ux:",
+            "prefer short status + result summaries",
             "environment notes:",
             "keep responses concise and grouped",
             "do not repeat or summarize this runtime context",

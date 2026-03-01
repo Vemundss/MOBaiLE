@@ -7,13 +7,30 @@ This document explains how to run the current backend MVP locally.
 From project root:
 
 ```bash
-bash ./scripts/install_backend.sh
+bash ./scripts/install_backend.sh --mode safe
 bash ./scripts/doctor.sh
 bash ./scripts/service_macos.sh install   # macOS only
 ```
 
+Fresh host/server bootstrap (single command after clone):
+
+```bash
+bash ./scripts/bootstrap_server.sh --mode safe
+```
+
 `install_backend.sh` performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
-By default, Codex executor runs in unrestricted mode (`VOICE_AGENT_CODEX_UNRESTRICTED=true`).
+Safe mode defaults:
+- restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
+- restricted file reads (`VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false`)
+- workdir constrained to default root
+
+Full-access mode:
+
+```bash
+bash ./scripts/install_backend.sh --mode full-access
+```
+
+Use only on trusted private hosts.
 All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 
 ## Prerequisites
@@ -92,7 +109,9 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
     "utterance_text": "create a hello python script and run it",
     "mode": "execute",
     "executor": "local",
-    "working_directory": "~/MOBaiLE-workspace"
+    "working_directory": "~/MOBaiLE-workspace",
+    "response_mode": "concise",
+    "response_profile": "guided"
   }'
 ```
 
@@ -122,22 +141,54 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
 ```
 
 Codex executor config (`backend/.env`):
-- `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (default).
+- `VOICE_AGENT_SECURITY_MODE=safe|full-access` controls security defaults.
+- `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (recommended only for private trusted hosts).
+- `VOICE_AGENT_CODEX_GUARDRAILS=warn` adds prompt-level destructive-op detection (`off|warn|enforce`).
+- `VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]` explicit token to bypass guardrail warnings.
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
 - `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
 - `VOICE_AGENT_CODEX_USE_CONTEXT=true` prepends MOBaiLE context to Codex prompts.
 - `VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md` points to context file under `backend/`.
 - `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for both `local` and `codex` runs.
+- `VOICE_AGENT_WORKDIR_ROOT=/path` optionally constrains all requested working directories to a root.
+- `VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false` blocks absolute `/v1/files` access in safe mode.
+- `VOICE_AGENT_FILE_ROOTS=/path1,/path2` restricts readable file roots for `/v1/files`.
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
 
 Notes:
 - Context injection affects Codex runs launched via MOBaiLE backend only.
 - Direct terminal usage (`codex exec ...`) is unchanged unless you configure that separately.
+- Per-run request controls:
+  - `response_mode=concise|verbose` controls streamed chat detail density.
+  - `response_profile=guided|minimal` controls prompt shaping:
+    - `guided`: applies MOBaiLE formatting/context guidance.
+    - `minimal`: only runtime-awareness hint, otherwise near-default Codex behavior.
 
 Cancel a running run:
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer ${TOKEN}" http://127.0.0.1:8000/v1/runs/<run_id>/cancel
+```
+
+List latest runs in a session (for resume UX):
+
+```bash
+curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8000/v1/sessions/demo-session/runs?limit=10"
+```
+
+Query deterministic calendar tool (today):
+
+```bash
+curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8000/v1/tools/calendar/today"
+```
+
+Get run diagnostics:
+
+```bash
+curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8000/v1/runs/<run_id>/diagnostics"
 ```
 
 ## 5) Audio upload flow (`/v1/audio`)
@@ -152,6 +203,8 @@ curl -s -X POST http://127.0.0.1:8000/v1/audio \
   -H "Authorization: Bearer ${TOKEN}" \
   -F 'session_id=audio-session' \
   -F 'executor=local' \
+  -F 'response_mode=concise' \
+  -F 'response_profile=guided' \
   -F 'working_directory=~/MOBaiLE-workspace' \
   -F 'transcript_hint=create a hello python script and run it' \
   -F 'audio=@/tmp/voice_sample.wav;type=audio/wav'
@@ -201,9 +254,70 @@ bash ./scripts/pairing_qr.sh
 
 By default this writes:
 - `backend/pairing-qr.png`
+- QR payload format is `mobaile://pair?server_url=...&pair_code=...&session_id=...`
+
+Phone onboarding with QR:
+1. Open iPhone Camera and scan the generated QR.
+2. Tap the `mobaile://pair...` banner.
+3. iOS opens MOBaiLE, exchanges one-time pair code with backend, then stores API token locally.
+
+If needed, generate raw JSON QR instead:
+
+```bash
+bash ./scripts/pairing_qr.sh --format json
+```
+
+Pairing endpoint:
+- `POST /v1/pair/exchange` (unauthenticated, one-time code exchange, rate-limited)
+
+## 10) Rotate API token
+
+```bash
+bash ./scripts/rotate_api_token.sh
+bash ./scripts/service_macos.sh restart
+```
+
+This updates:
+- `backend/.env` (`VOICE_AGENT_API_TOKEN`)
+- `backend/pairing.json` (`api_token`, `pair_code`, `pair_code_expires_at`)
+
+## 11) Switch security mode
+
+```bash
+bash ./scripts/set_security_mode.sh safe
+bash ./scripts/set_security_mode.sh full-access
+```
+
+Then restart backend:
+
+```bash
+bash ./scripts/service_macos.sh restart
+```
+
+## 12) Remote phone access hardening (recommended)
+
+For use beyond local network:
+
+1. Do not expose raw `:8000` directly to the internet.
+2. Place backend behind TLS (e.g., Tailscale HTTPS, Cloudflare Tunnel, or reverse proxy with HTTPS).
+3. Keep bearer token secret and rotate it periodically (`rotate_api_token.sh`).
+4. Keep Codex guardrails at least `warn` in production-like usage.
+5. Use least-privilege OS account on server when possible.
 
 ## Current Limitations
 
 - Planner is a stub (rule-based), not a real LLM yet.
 - Codex executor success depends on local Codex CLI auth/model access.
 - iOS client currently uses SSE with polling fallback; voice and chat UX are MVP-grade, not production polished.
+
+## iOS Chat UX mode
+
+iOS chat is now always concise by default:
+- user-facing chat shows assistant summaries/structured cards.
+- noisy execution stream stays out of chat.
+- raw backend event output remains available in the `Logs` view (Developer Mode).
+- artifact `Open` actions now use authenticated in-app download/preview, so protected `/v1/files` resources open reliably.
+
+Event channel model:
+- `chat.message`: user-facing structured assistant envelope.
+- `log.message`: raw execution/log stream for diagnostics.

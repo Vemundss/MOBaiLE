@@ -28,6 +28,8 @@ from app.models.schemas import (
     ChatArtifact,
     ChatEnvelope,
     ChatSection,
+    DirectoryEntry,
+    DirectoryListingResponse,
     ExecutionEvent,
     PairExchangeRequest,
     PairExchangeResponse,
@@ -110,6 +112,7 @@ CODEX_DANGEROUS_CONFIRM_TOKEN = os.getenv(
 ).strip()
 MAX_AUDIO_MB = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
 MAX_AUDIO_BYTES = int(MAX_AUDIO_MB * 1024 * 1024)
+MAX_DIRECTORY_ENTRIES = int(os.getenv("VOICE_AGENT_MAX_DIRECTORY_ENTRIES", "200"))
 MAX_EVENT_MESSAGE_CHARS = int(os.getenv("VOICE_AGENT_MAX_EVENT_MESSAGE_CHARS", "16000"))
 TRANSCRIBER = Transcriber()
 API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN", "")
@@ -122,7 +125,6 @@ RUN_STORE = RunStore(
     )
 )
 RUNS: dict[str, RunRecord] = RUN_STORE.load_all()
-CODEX_CONTEXT_LEAK_MARKERS: list[str] | None = None
 PAIRING_FILE = Path(
     os.getenv(
         "VOICE_AGENT_PAIRING_FILE",
@@ -252,7 +254,13 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
         )
         threading.Thread(
             target=_run_codex,
-            args=(run_id, request.utterance_text, workdir, guardrail_message if guardrail_status == "warn" else None),
+            args=(
+                run_id,
+                request.utterance_text,
+                workdir,
+                request.response_profile,
+                guardrail_message if guardrail_status == "warn" else None,
+            ),
             daemon=True,
         ).start()
         return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
@@ -299,6 +307,8 @@ async def create_audio_run(
     mode: Literal["assistant", "execute"] = Form("execute"),
     transcript_hint: str | None = Form(None),
     working_directory: str | None = Form(None),
+    response_mode: Literal["concise", "verbose"] = Form("concise"),
+    response_profile: Literal["guided", "minimal"] = Form("guided"),
 ) -> AudioRunResponse:
     content_length_header = audio.headers.get("content-length")
     if content_length_header:
@@ -332,6 +342,8 @@ async def create_audio_run(
                 executor=executor,
                 mode=mode,
                 working_directory=working_directory,
+                response_mode=response_mode,
+                response_profile=response_profile,
             )
         )
     except HTTPException:
@@ -436,6 +448,44 @@ def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
         raise HTTPException(status_code=404, detail="file not found")
     media_type, _ = mimetypes.guess_type(str(target))
     return FileResponse(str(target), media_type=media_type or "application/octet-stream")
+
+
+@app.get("/v1/directories", response_model=DirectoryListingResponse)
+def list_directory(path: str | None = Query(None)) -> DirectoryListingResponse:
+    raw = (path or "").strip()
+    if raw:
+        target = Path(raw).expanduser()
+        if target.is_absolute():
+            target = target.resolve()
+        else:
+            target = (DEFAULT_WORKDIR / target).resolve()
+    else:
+        target = DEFAULT_WORKDIR
+
+    if not _is_path_allowed(target):
+        raise HTTPException(status_code=403, detail="directory path is outside allowed roots")
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(status_code=404, detail="directory not found")
+
+    try:
+        children = sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="permission denied for directory path") from exc
+
+    entries: list[DirectoryEntry] = []
+    truncated = False
+    for idx, child in enumerate(children):
+        if idx >= MAX_DIRECTORY_ENTRIES:
+            truncated = True
+            break
+        entries.append(
+            DirectoryEntry(
+                name=child.name,
+                path=str(child),
+                is_directory=child.is_dir(),
+            )
+        )
+    return DirectoryListingResponse(path=str(target), entries=entries, truncated=truncated)
 
 
 @app.post("/v1/runs/{run_id}/cancel")
@@ -664,9 +714,15 @@ def _run_local_plan(run_id: str, plan: ActionPlan, workdir: Path) -> None:
     _set_run_status(run_id, "completed" if success else "failed", summary)
 
 
-def _run_codex(run_id: str, prompt: str, workdir: Path, guardrail_message: str | None = None) -> None:
+def _run_codex(
+    run_id: str,
+    prompt: str,
+    workdir: Path,
+    response_profile: Literal["guided", "minimal"] = "guided",
+    guardrail_message: str | None = None,
+) -> None:
     codex_executor = CodexExecutor(workdir)
-    codex_prompt = _build_codex_prompt(prompt)
+    codex_prompt = _build_codex_prompt(prompt, response_profile=response_profile)
     _append_event(
         run_id,
         ExecutionEvent(
@@ -953,6 +1009,11 @@ def _codex_structured_message(message: str, user_prompt: str) -> str | None:
         "openai codex v",
         "you are running through mobaile",
         "mobaile runtime context:",
+        "runtime:",
+        "product intent:",
+        "output style for phone ux:",
+        "task-specific formatting:",
+        "environment notes:",
         "user request:",
         "workdir:",
         "model:",
@@ -969,11 +1030,17 @@ def _codex_structured_message(message: str, user_prompt: str) -> str | None:
     if "runtime context" in lower or "you are running through mobaile" in lower:
         return None
     context_leak_markers = (
+        "keep responses concise and grouped",
+        "avoid verbose step-by-step chatter",
         "you are the coding agent used by mobaile",
         "you run on the user's server/computer",
         "your stdout is streamed to a phone ui",
         "product intent:",
+        "mobaile makes a user's computer available from their phone",
+        "primary users are software engineers who run coding agents while away from the computer",
+        "secondary use cases include normal remote productivity tasks",
         "output style for phone ux:",
+        "prefer short status + result summaries",
         "environment notes:",
         "for created images, include markdown image syntax",
         "do not repeat or summarize this runtime context",
@@ -1079,12 +1146,20 @@ def _is_cancelled(run_id: str) -> bool:
         return run_id in RUN_CANCELLED
 
 
-def _build_codex_prompt(user_prompt: str) -> str:
-    if not CODEX_USE_CONTEXT:
-        return user_prompt
-    context = _load_codex_context()
-    if not context:
-        return user_prompt
+def _build_codex_prompt(user_prompt: str, response_profile: Literal["guided", "minimal"] = "guided") -> str:
+    if response_profile == "minimal":
+        context = (
+            "You are running through MOBaiLE.\n"
+            "- You run on the user's server/computer.\n"
+            "- Your stdout is streamed to a phone UI.\n"
+            "- Do not repeat this runtime context unless the user asks."
+        )
+    else:
+        if not CODEX_USE_CONTEXT:
+            return user_prompt
+        context = _load_codex_context()
+        if not context:
+            return user_prompt
     return (
         "You are running through MOBaiLE.\n\n"
         "MOBaiLE runtime context:\n"
@@ -1178,6 +1253,7 @@ def _parse_chat_envelope_payload(raw_text: str) -> dict[str, object] | None:
 
 def _merge_assistant_lines(lines: list[str]) -> str:
     merged_parts: list[str] = []
+    section_labels = {"what i did", "result", "next step", "output"}
     for line in lines:
         text = line.strip()
         if not text:
@@ -1187,6 +1263,12 @@ def _merge_assistant_lines(lines: list[str]) -> str:
             continue
 
         prev = merged_parts[-1]
+        if prev.strip().lower().rstrip(":") in section_labels:
+            merged_parts.append("\n" + text)
+            continue
+        if text.lower().rstrip(":") in section_labels:
+            merged_parts.append("\n\n## " + text.rstrip(":"))
+            continue
         if prev.endswith((":", ";")):
             merged_parts.append("\n" + text)
             continue
@@ -1199,7 +1281,7 @@ def _merge_assistant_lines(lines: list[str]) -> str:
         if prev.endswith((".", "!", "?", "`")):
             merged_parts.append("\n\n" + text)
             continue
-        merged_parts.append(" " + text)
+        merged_parts.append("\n" + text)
     return "".join(merged_parts)
 
 
@@ -1295,17 +1377,12 @@ def _extract_artifacts_from_text(text: str) -> list[ChatArtifact]:
 
 
 def _context_leak_markers() -> list[str]:
-    global CODEX_CONTEXT_LEAK_MARKERS
-    if CODEX_CONTEXT_LEAK_MARKERS is not None:
-        return CODEX_CONTEXT_LEAK_MARKERS
     context = _load_codex_context().lower()
     if not context:
-        CODEX_CONTEXT_LEAK_MARKERS = []
-        return CODEX_CONTEXT_LEAK_MARKERS
+        return []
     markers: list[str] = []
     for chunk in re.split(r"[\n.:;]+", context):
         text = " ".join(chunk.strip().split())
         if len(text) >= 24:
             markers.append(text)
-    CODEX_CONTEXT_LEAK_MARKERS = markers
-    return CODEX_CONTEXT_LEAK_MARKERS
+    return markers

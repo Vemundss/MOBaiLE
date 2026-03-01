@@ -5,12 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PAIRING_FILE="${REPO_ROOT}/backend/pairing.json"
 OUT_FILE="${REPO_ROOT}/backend/pairing-qr.png"
+FORMAT="url"
 
 usage() {
   cat <<EOF
-Usage: bash ./scripts/pairing_qr.sh [--out <path>]
+Usage: bash ./scripts/pairing_qr.sh [--out <path>] [--format url|json]
 
 Reads backend/pairing.json and generates a local QR code image.
+  --format url   QR encodes mobaile://pair deep link (default)
+  --format json  QR encodes raw {"server_url","pair_code","session_id"} JSON
 EOF
 }
 
@@ -18,6 +21,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --out)
       OUT_FILE="$2"
+      shift 2
+      ;;
+    --format)
+      FORMAT="$2"
       shift 2
       ;;
     -h|--help)
@@ -38,20 +45,54 @@ if [[ ! -f "${PAIRING_FILE}" ]]; then
   exit 1
 fi
 
-PAYLOAD="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
+PAYLOAD_JSON="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
 p = Path(os.environ["PAIRING_PATH"])
 data = json.loads(p.read_text(encoding="utf-8"))
-print(json.dumps({"server_url": data["server_url"], "api_token": data["api_token"]}, separators=(",", ":")))
+print(
+    json.dumps(
+        {
+            "server_url": data["server_url"],
+            "pair_code": data["pair_code"],
+            "session_id": data.get("session_id", "iphone-app"),
+        },
+        separators=(",", ":"),
+    )
+)
 PY
 )"
+
+if [[ "${FORMAT}" == "json" ]]; then
+  PAYLOAD="${PAYLOAD_JSON}"
+elif [[ "${FORMAT}" == "url" ]]; then
+  PAYLOAD="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
+import json
+import os
+import urllib.parse
+from pathlib import Path
+
+p = Path(os.environ["PAIRING_PATH"])
+data = json.loads(p.read_text(encoding="utf-8"))
+if "pair_code" not in data or not str(data["pair_code"]).strip():
+    raise SystemExit("pair_code missing in pairing.json; run scripts/install_backend.sh again")
+server = urllib.parse.quote(data["server_url"], safe="")
+pair_code = urllib.parse.quote(data["pair_code"], safe="")
+session = urllib.parse.quote(data.get("session_id", "iphone-app"), safe="")
+print(f"mobaile://pair?server_url={server}&pair_code={pair_code}&session_id={session}")
+PY
+)"
+else
+  echo "Invalid --format: ${FORMAT} (expected: url or json)" >&2
+  exit 1
+fi
 
 if command -v qrencode >/dev/null 2>&1; then
   qrencode -o "${OUT_FILE}" "${PAYLOAD}"
   echo "QR image written to: ${OUT_FILE}"
+  echo "Format: ${FORMAT}"
   echo
   echo "Terminal preview:"
   qrencode -t ansiutf8 "${PAYLOAD}" || true

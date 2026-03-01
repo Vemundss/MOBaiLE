@@ -3,15 +3,18 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */; };
+		3D1DC632A5EF8251A764491E /* ChatRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968552A59D7CC89642B2EFFB /* ChatRenderers.swift */; };
 		5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D91AF3EDBB51ECC1F494AC /* Models.swift */; };
 		8DAE313D0CFB3DB28FFAE81D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */; };
 		94980E4F676D67E7F0C2CE05 /* VoiceAgentModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */; };
 		B120A06EEC64BEA0F9DE734A /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */; };
+		B243A2C4EE00ACD44CEE8302 /* mobaile_logo.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */; };
+		B747B93FEBD761493C3D4C69 /* ChatScaffoldViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14543222250EAE3887C38275 /* ChatScaffoldViews.swift */; };
 		BF652C85AFE113E7FB2D7E84 /* VoiceAgentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03AFE8DCC8EB158A6410CC44 /* VoiceAgentViewModel.swift */; };
 		D0D6E84323A42B05D9E06AD0 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 087BA601BAADAF3708DE7220 /* APIClient.swift */; };
 /* End PBXBuildFile section */
@@ -29,14 +32,17 @@
 /* Begin PBXFileReference section */
 		03AFE8DCC8EB158A6410CC44 /* VoiceAgentViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentViewModel.swift; sourceTree = "<group>"; };
 		087BA601BAADAF3708DE7220 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mobaile_logo.png; sourceTree = "<group>"; };
+		14543222250EAE3887C38275 /* ChatScaffoldViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatScaffoldViews.swift; sourceTree = "<group>"; };
 		33D91AF3EDBB51ECC1F494AC /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentModelTests.swift; sourceTree = "<group>"; };
 		55BD337AE620AD07C1581C7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
+		968552A59D7CC89642B2EFFB /* ChatRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRenderers.swift; sourceTree = "<group>"; };
 		BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentApp.swift; sourceTree = "<group>"; };
 		C5A63560C68468159F1DCE09 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3E6198279CE9DE1A7E6A096 /* VoiceAgentAppTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceAgentAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -73,8 +79,11 @@
 			children = (
 				087BA601BAADAF3708DE7220 /* APIClient.swift */,
 				8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */,
+				968552A59D7CC89642B2EFFB /* ChatRenderers.swift */,
+				14543222250EAE3887C38275 /* ChatScaffoldViews.swift */,
 				DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */,
 				55BD337AE620AD07C1581C7C /* Info.plist */,
+				0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */,
 				33D91AF3EDBB51ECC1F494AC /* Models.swift */,
 				BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */,
 				03AFE8DCC8EB158A6410CC44 /* VoiceAgentViewModel.swift */,
@@ -90,6 +99,7 @@
 			buildConfigurationList = B4578A7AB888CD773E3F6661 /* Build configuration list for PBXNativeTarget "VoiceAgentApp" */;
 			buildPhases = (
 				30BD392AF90AD3FD2B2465B9 /* Sources */,
+				C0BE4FE4BC78BD5EA27B8916 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -130,6 +140,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					07599C9446334FBAAECE1F09 = {
+						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -144,6 +155,7 @@
 			);
 			mainGroup = CC939A14EE448F747C906ACD;
 			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -153,6 +165,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		C0BE4FE4BC78BD5EA27B8916 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B243A2C4EE00ACD44CEE8302 /* mobaile_logo.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		30BD392AF90AD3FD2B2465B9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -160,6 +183,8 @@
 			files = (
 				D0D6E84323A42B05D9E06AD0 /* APIClient.swift in Sources */,
 				B120A06EEC64BEA0F9DE734A /* AudioRecorderService.swift in Sources */,
+				3D1DC632A5EF8251A764491E /* ChatRenderers.swift in Sources */,
+				B747B93FEBD761493C3D4C69 /* ChatScaffoldViews.swift in Sources */,
 				8DAE313D0CFB3DB28FFAE81D /* ContentView.swift in Sources */,
 				5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */,
 				059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */,
@@ -193,7 +218,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
+				DEVELOPMENT_TEAM = "";
 				INFOPLIST_FILE = VoiceAgentApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -247,7 +272,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
+				DEVELOPMENT_TEAM = "";
 				INFOPLIST_FILE = VoiceAgentApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

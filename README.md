@@ -1,27 +1,141 @@
-# Voice-to-Agent iPhone App
+# MOBaiLE
 
-This project builds an iPhone app that:
+<p align="center">
+  <img src="ios/VoiceAgentApp/mobaile_logo.png" alt="MOBaiLE logo" width="180" />
+</p>
 
-1. Listens to spoken user input.
-2. Transcribes speech to text.
-3. Sends text to a backend API orchestrator.
-4. Uses an LLM to plan safe, structured actions.
-5. Executes those actions on a target machine (local sandbox first, remote host later).
-6. Returns execution updates/results to the phone and reads final output aloud.
+MOBaiLE turns your iPhone into a voice remote for your computer.
+Speak a task, MOBaiLE transcribes it, plans it through a backend control plane, executes safely on a target machine, and streams progress/results back to your phone.
 
-Current MVP focus:
-- Use the phone as the voice UI (speech in, speech out).
-- Use the backend as the control plane for planning and execution.
-- Run Codex CLI in unrestricted mode with full machine access on the target host.
-- Treat the target host as a dedicated trusted environment for this purpose.
+If you have ever wanted "Siri, but for real work on my actual machine," this is the repo.
 
-Distribution vision:
-- iOS app is installed by end users from TestFlight/App Store.
-- Backend is installed on the target machine from this repo with a one-command setup script.
-- Setup should output a server URL + pairing token/QR that the phone app can use to connect.
+## What problem it solves
 
-The implementation strategy, architecture, and rollout plan are documented in `ARCHITECTURE.md`.
-Current execution status is tracked in `STATUS.md`.
-Basic local setup and run instructions are in `docs/USAGE.md`.
-Immediate iPhone testing path (Shortcuts-based) is in `docs/PHONE_SHORTCUT_MVP.md`.
-Native iOS scaffold usage is documented in `ios/README.md`.
+- Removes command-line friction when you are away from your keyboard.
+- Gives one control plane for voice input, execution, and run history.
+- Supports both safe and full-access execution modes depending on trust level.
+- Keeps interaction conversational while still exposing diagnostics and logs.
+
+## Setup
+
+### 1) Prerequisites
+
+- macOS or Linux
+- Python `3.11+`
+- [`uv`](https://docs.astral.sh/uv/)
+
+### 2) Clone and install backend (recommended: safe mode)
+
+```bash
+git clone https://github.com/vemundss/MOBaiLE.git
+cd MOBaiLE
+bash ./scripts/install_backend.sh --mode safe
+bash ./scripts/doctor.sh
+```
+
+### 3) Start backend API
+
+```bash
+cd backend
+bash ./run_backend.sh
+```
+
+Backend should now respond on:
+
+- `http://127.0.0.1:8000/health`
+- `http://127.0.0.1:8000/docs`
+
+### 4) Run iOS app
+
+```bash
+cd ios
+xcodegen generate
+open VoiceAgentApp.xcodeproj
+```
+
+In app settings:
+
+1. Set `Server URL` to your reachable backend URL.
+2. Set `API Token` from `backend/.env` (`VOICE_AGENT_API_TOKEN`).
+3. Start with executor `local` (then try `codex`).
+4. Send text or voice input.
+
+## Usage examples
+
+### Example 1: Let the backend execute a simple request
+
+```bash
+TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' backend/.env)"
+curl -s -X POST http://127.0.0.1:8000/v1/utterances \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "session_id": "demo-session",
+    "utterance_text": "create a hello python script and run it",
+    "mode": "execute",
+    "executor": "local",
+    "working_directory": "~/MOBaiLE-workspace"
+  }'
+```
+
+### Example 2: End-to-end smoke flow
+
+```bash
+cd backend
+uv run python ../scripts/backend_smoke.py
+```
+
+### Example 3: Bootstrap a pairing-ready host/server
+
+```bash
+bash ./scripts/bootstrap_server.sh --mode safe
+```
+
+This performs clone/update, install, health checks, and pairing QR generation.  
+Then scan `backend/pairing-qr.png` and open the `mobaile://pair...` link on iPhone.
+
+## Test, rerun, and nice-to-know
+
+### Run tests
+
+```bash
+cd backend
+uv run pytest -q
+```
+
+### Re-check local environment
+
+```bash
+bash ./scripts/doctor.sh
+```
+
+### Use macOS background service (optional)
+
+```bash
+bash ./scripts/service_macos.sh install
+bash ./scripts/service_macos.sh status
+bash ./scripts/service_macos.sh logs
+```
+
+### Security modes
+
+- `safe` (recommended): restricted workdir + restricted file reads + non-unrestricted codex defaults.
+- `full-access`: relaxed restrictions for trusted private hosts only.
+
+### Repo map
+
+- `ios/` SwiftUI app
+- `backend/` FastAPI control plane
+- `scripts/` setup and operational helpers
+- `docs/` deeper usage guides
+
+### Further docs
+
+- Usage details: [`docs/USAGE.md`](docs/USAGE.md)
+- iPhone Shortcut MVP testing: [`docs/PHONE_SHORTCUT_MVP.md`](docs/PHONE_SHORTCUT_MVP.md)
+- iOS notes: [`ios/README.md`](ios/README.md)
+- Backend details: [`backend/README.md`](backend/README.md)
+- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Current status: [`STATUS.md`](STATUS.md)
+- Planned features: [`NEW_FEATURES.md`](NEW_FEATURES.md)
+- Agent/contributor intent: [`AGENT_INTENT.md`](AGENT_INTENT.md)

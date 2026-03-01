@@ -2,10 +2,20 @@
 
 Utility scripts for local dev tasks (smoke tests, local setup, helpers).
 
+Bootstrap backend on a host/server (clone/update + install + service + pairing QR):
+
+```bash
+bash ./scripts/bootstrap_server.sh --mode safe
+# or:
+bash ./scripts/bootstrap_server.sh --mode full-access
+```
+
 Install backend (one-command setup):
 
 ```bash
-bash ./scripts/install_backend.sh
+bash ./scripts/install_backend.sh --mode safe
+# or:
+bash ./scripts/install_backend.sh --mode full-access
 ```
 
 Run environment and connectivity checks:
@@ -33,6 +43,21 @@ Generate a pairing QR from `backend/pairing.json`:
 
 ```bash
 bash ./scripts/pairing_qr.sh
+# Optional raw JSON payload QR:
+bash ./scripts/pairing_qr.sh --format json
+```
+
+Rotate backend API token (updates `backend/.env` and `backend/pairing.json`):
+
+```bash
+bash ./scripts/rotate_api_token.sh
+```
+
+Switch backend security mode after install:
+
+```bash
+bash ./scripts/set_security_mode.sh safe
+bash ./scripts/set_security_mode.sh full-access
 ```
 
 Smoke test:

@@ -123,3 +123,53 @@
   - codex cancellation flow
   - codex timeout handling
 - Updated docs (`docs/USAGE.md`, `STATUS.md`) to match current implementation.
+
+## 2026-02-24
+
+- Agreed product-direction shift: from MVP-first patching to stable, user-friendly, feature-rich app development.
+- Updated core docs (`README.md`, `ARCHITECTURE.md`, `STATUS.md`) to reflect:
+  - typed-contract-first architecture direction
+  - explicit chat/log separation as UX baseline
+  - domain adapters (calendar/email/files) as deterministic capability path
+  - stronger product quality bar (tests + docs + operational clarity for all major changes)
+
+## 2026-02-25
+
+- Added persistent feature tracker `NEW_FEATURES.md` with prioritized checklist and status.
+- Implemented iOS thread/session history with local persistence:
+  - new thread creation
+  - thread switching
+  - thread rename
+  - thread delete
+  - active thread snapshot persistence (conversation + run/status metadata).
+- Implemented iOS Developer Mode gating:
+  - default mode now enforces `executor=codex` and concise chat responses.
+  - local executor moved behind Developer Mode.
+  - logs button shown only in Developer Mode.
+- Added iOS thread picker sheet (`Threads`) accessible from top bar.
+- Kept run/chat behavior compatible with existing backend API and SSE flow.
+
+## 2026-02-27
+
+- Implemented launch-hardening controls with explicit security modes:
+  - `VOICE_AGENT_SECURITY_MODE=safe|full-access`
+  - installer/bootstrap mode flags (`--mode safe|full-access`)
+  - runtime mode switch script `scripts/set_security_mode.sh`.
+- Changed codex unrestricted default behavior:
+  - now defaults to restricted in `safe` mode, unrestricted in `full-access`.
+- Hardened backend file/workdir controls:
+  - `/v1/files` now enforces allowed roots and optional absolute-path blocking.
+  - workdir resolution now enforces optional root boundary in safe mode.
+  - added `/v1/config` endpoint for client-visible runtime mode metadata.
+- Added event message truncation guard (`VOICE_AGENT_MAX_EVENT_MESSAGE_CHARS`).
+- Replaced token-in-QR pairing with one-time pairing code flow:
+  - added `POST /v1/pair/exchange` (unauthenticated, rate-limited, one-time code rotation).
+  - pairing QR now carries `pair_code` deep link instead of API token.
+  - install/token-rotate scripts now manage pair code + expiry.
+- Improved iOS credential handling:
+  - API token moved to Keychain storage.
+  - deep-link pairing supports one-time pair code exchange and mode display.
+- Added/updated backend tests for new security behavior:
+  - file root restriction
+  - safe-mode workdir enforcement
+  - pair exchange and code rotation.

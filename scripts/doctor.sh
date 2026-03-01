@@ -61,6 +61,13 @@ main() {
     else
       warn "VOICE_AGENT_API_TOKEN missing in ${ENV_FILE}"
     fi
+    local mode
+    mode="$(awk -F= '/^VOICE_AGENT_SECURITY_MODE=/{print $2}' "${ENV_FILE}" | tr -d '[:space:]')"
+    if [[ -n "${mode}" ]]; then
+      ok "VOICE_AGENT_SECURITY_MODE=${mode}"
+    else
+      warn "VOICE_AGENT_SECURITY_MODE not set (defaults to safe)"
+    fi
   else
     warn "backend .env missing. Run scripts/install_backend.sh"
   fi

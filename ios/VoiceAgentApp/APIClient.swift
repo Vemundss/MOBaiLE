@@ -45,6 +45,26 @@ final class APIClient {
         return try jsonDecoder.decode(UtteranceResponse.self, from: data)
     }
 
+    func exchangePairingCode(
+        serverURL: String,
+        pairCode: String,
+        sessionID: String?
+    ) async throws -> PairExchangeResponse {
+        guard let url = URL(string: serverURL + "/v1/pair/exchange") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try jsonEncoder.encode(
+            PairExchangeRequest(pairCode: pairCode, sessionId: sessionID)
+        )
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(PairExchangeResponse.self, from: data)
+    }
+
     func fetchRun(
         serverURL: String,
         token: String,
@@ -64,12 +84,94 @@ final class APIClient {
         return try jsonDecoder.decode(RunRecord.self, from: data)
     }
 
+    func fetchSessionRuns(
+        serverURL: String,
+        token: String,
+        sessionID: String,
+        limit: Int = 20
+    ) async throws -> [RunSummary] {
+        guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: serverURL + "/v1/sessions/\(encoded)/runs?limit=\(limit)") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode([RunSummary].self, from: data)
+    }
+
+    func fetchRunDiagnostics(
+        serverURL: String,
+        token: String,
+        runID: String
+    ) async throws -> RunDiagnostics {
+        guard let url = URL(string: serverURL + "/v1/runs/\(runID)/diagnostics") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(RunDiagnostics.self, from: data)
+    }
+
+    func fetchRuntimeConfig(
+        serverURL: String,
+        token: String
+    ) async throws -> RuntimeConfig {
+        guard let url = URL(string: serverURL + "/v1/config") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(RuntimeConfig.self, from: data)
+    }
+
+    func fetchDirectoryListing(
+        serverURL: String,
+        token: String,
+        path: String?
+    ) async throws -> DirectoryListingResponse {
+        guard var components = URLComponents(string: serverURL + "/v1/directories") else {
+            throw APIError.invalidURL
+        }
+        let trimmedPath = (path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedPath.isEmpty {
+            components.queryItems = [URLQueryItem(name: "path", value: trimmedPath)]
+        }
+        guard let url = components.url else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(DirectoryListingResponse.self, from: data)
+    }
+
     func createAudioRun(
         serverURL: String,
         token: String,
         sessionID: String,
         executor: String,
         workingDirectory: String?,
+        responseMode: String?,
+        responseProfile: String?,
         audioFileURL: URL
     ) async throws -> AudioRunResponse {
         guard let url = URL(string: serverURL + "/v1/audio") else {
@@ -89,7 +191,9 @@ final class APIClient {
             fields: [
                 "session_id": sessionID,
                 "executor": executor,
-                "working_directory": workingDirectory ?? ""
+                "working_directory": workingDirectory ?? "",
+                "response_mode": responseMode ?? "",
+                "response_profile": responseProfile ?? ""
             ],
             fileData: audioData,
             fileFieldName: "audio",
@@ -181,6 +285,46 @@ final class APIClient {
         return try jsonDecoder.decode(CancelRunResponse.self, from: data)
     }
 
+    func downloadArtifactToTemporaryFile(
+        serverURL: String,
+        token: String,
+        artifact: ChatArtifact
+    ) async throws -> URL {
+        guard let requestURL = resolveArtifactURL(serverURL: serverURL, artifact: artifact) else {
+            throw APIError.invalidURL
+        }
+        let data = try await fetchURLData(
+            serverURL: serverURL,
+            token: token,
+            url: requestURL,
+            timeout: 30
+        )
+
+        let ext = preferredExtension(from: artifact, url: requestURL)
+        let baseName = suggestedBaseName(from: artifact, url: requestURL)
+        let filename = "\(baseName)-\(UUID().uuidString)\(ext)"
+        let targetURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try data.write(to: targetURL, options: .atomic)
+        return targetURL
+    }
+
+    func fetchURLData(
+        serverURL: String,
+        token: String,
+        url: URL,
+        timeout: TimeInterval = 20
+    ) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        if shouldAttachAuth(to: url, serverURL: serverURL), !token.isEmpty {
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return data
+    }
+
     private func buildMultipartBody(
         boundary: String,
         fields: [String: String],
@@ -216,10 +360,89 @@ final class APIClient {
             throw APIError.httpError(http.statusCode, body)
         }
     }
+
+    private func resolveArtifactURL(serverURL: String, artifact: ChatArtifact) -> URL? {
+        if let raw = artifact.url?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            return URL(string: raw)
+        }
+        if let path = artifact.path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+            let normalizedServer = serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+                return nil
+            }
+            return URL(string: "\(normalizedServer)/v1/files?path=\(encoded)")
+        }
+        return nil
+    }
+
+    private func shouldAttachAuth(to url: URL, serverURL: String) -> Bool {
+        guard let backend = URL(string: serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else {
+            return false
+        }
+        return url.host == backend.host &&
+            (url.port ?? defaultPort(for: url.scheme)) == (backend.port ?? defaultPort(for: backend.scheme)) &&
+            url.scheme == backend.scheme &&
+            url.path.hasPrefix("/v1/")
+    }
+
+    private func defaultPort(for scheme: String?) -> Int {
+        switch scheme?.lowercased() {
+        case "https":
+            return 443
+        default:
+            return 80
+        }
+    }
+
+    private func preferredExtension(from artifact: ChatArtifact, url: URL) -> String {
+        if let ext = URL(fileURLWithPath: artifact.path ?? "").pathExtension.nonEmpty {
+            return "." + ext
+        }
+        if let ext = url.pathExtension.nonEmpty {
+            return "." + ext
+        }
+        if let mime = artifact.mime?.lowercased() {
+            if mime.contains("png") { return ".png" }
+            if mime.contains("jpeg") || mime.contains("jpg") { return ".jpg" }
+            if mime.contains("gif") { return ".gif" }
+            if mime.contains("webp") { return ".webp" }
+            if mime.contains("json") { return ".json" }
+            if mime.contains("text/plain") { return ".txt" }
+            if mime.contains("python") { return ".py" }
+        }
+        return ""
+    }
+
+    private func suggestedBaseName(from artifact: ChatArtifact, url: URL) -> String {
+        if let title = artifact.title.nonEmpty {
+            return sanitizeFileName(title)
+        }
+        if let name = URL(fileURLWithPath: artifact.path ?? "").deletingPathExtension().lastPathComponent.nonEmpty {
+            return sanitizeFileName(name)
+        }
+        if let name = url.deletingPathExtension().lastPathComponent.nonEmpty {
+            return sanitizeFileName(name)
+        }
+        return "artifact"
+    }
+
+    private func sanitizeFileName(_ raw: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let cleaned = raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let collapsed = String(cleaned).replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
+        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-")).nonEmpty ?? "artifact"
+    }
 }
 
 private extension Data {
     mutating func append(_ string: String) {
         self.append(contentsOf: string.utf8)
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

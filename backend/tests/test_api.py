@@ -112,7 +112,7 @@ def test_merge_assistant_lines_adds_structure(monkeypatch, tmp_path: Path):
         ]
     )
     assert "What I Did:\nCreated /Users/test/hello.py" in merged
-    assert "Result Hello, world!" in merged
+    assert "## Result\nHello, world!" in merged
 
 
 def test_coerce_assistant_text_to_envelope_extracts_artifacts(monkeypatch, tmp_path: Path):
@@ -362,6 +362,48 @@ def test_file_fetch_rejects_outside_allowed_roots(monkeypatch, tmp_path: Path):
     )
     resp = client.get(
         "/v1/files",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(outside)},
+    )
+    assert resp.status_code == 403
+
+
+def test_directory_listing_endpoint(monkeypatch, tmp_path: Path):
+    (tmp_path / "src").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "README.md").write_text("hello", encoding="utf-8")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path)},
+    )
+    resp = client.get(
+        "/v1/directories",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(tmp_path)},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["path"] == str(tmp_path)
+    assert payload["entries"][0]["name"] == "src"
+    names = [item["name"] for item in payload["entries"]]
+    assert "README.md" in names
+    assert payload["truncated"] is False
+
+
+def test_directory_listing_rejects_outside_allowed_roots(monkeypatch, tmp_path: Path):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside"
+    outside.mkdir(parents=True, exist_ok=True)
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(allowed)},
+    )
+    resp = client.get(
+        "/v1/directories",
         headers={"Authorization": f"Bearer {token}"},
         params={"path": str(outside)},
     )

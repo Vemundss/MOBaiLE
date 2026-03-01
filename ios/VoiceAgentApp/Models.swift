@@ -31,6 +31,8 @@ struct UtteranceRequest: Encodable {
     let mode: String
     let executor: String
     let workingDirectory: String?
+    let responseMode: String?
+    let responseProfile: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -38,6 +40,8 @@ struct UtteranceRequest: Encodable {
         case mode
         case executor
         case workingDirectory = "working_directory"
+        case responseMode = "response_mode"
+        case responseProfile = "response_profile"
     }
 }
 
@@ -196,6 +200,25 @@ struct RuntimeConfig: Decodable {
         case allowAbsoluteFileReads = "allow_absolute_file_reads"
         case fileRoots = "file_roots"
     }
+}
+
+struct DirectoryEntry: Decodable, Identifiable {
+    var id: String { path }
+    let name: String
+    let path: String
+    let isDirectory: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case path
+        case isDirectory = "is_directory"
+    }
+}
+
+struct DirectoryListingResponse: Decodable {
+    let path: String
+    let entries: [DirectoryEntry]
+    let truncated: Bool
 }
 
 struct ChatEnvelope: Decodable {

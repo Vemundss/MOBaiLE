@@ -10,7 +10,9 @@ class CodexExecutor:
         self.workdir = workdir.resolve()
         self.binary = binary or os.getenv("VOICE_AGENT_CODEX_BINARY", "codex")
         self.model = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
-        unrestricted = os.getenv("VOICE_AGENT_CODEX_UNRESTRICTED", "true").strip().lower()
+        security_mode = os.getenv("VOICE_AGENT_SECURITY_MODE", "safe").strip().lower()
+        default_unrestricted = "true" if security_mode == "full-access" else "false"
+        unrestricted = os.getenv("VOICE_AGENT_CODEX_UNRESTRICTED", default_unrestricted).strip().lower()
         self.unrestricted = unrestricted not in {"0", "false", "no", "off"}
 
     def start(self, prompt: str) -> subprocess.Popen[str]:

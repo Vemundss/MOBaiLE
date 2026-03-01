@@ -147,8 +147,8 @@ Working:
   - rename/delete threads
   - persisted locally in app storage.
 - Advanced controls are now developer-gated:
-  - default UX is codex + concise mode.
-  - local executor / verbose mode / logs UI are hidden unless Developer Mode is enabled.
+  - default UX is codex + concise chat.
+  - local executor and logs UI are hidden unless Developer Mode is enabled.
 - Launch-hardening baseline is now implemented:
   - security mode model (`safe` vs `full-access`) with mode-switch script.
   - safe-mode default for new installs.
@@ -180,7 +180,7 @@ Not implemented yet:
 1. Replace heuristic chat shaping with typed assistant payload contract.
 2. Implement backend calendar adapter + typed agenda response for robust rendering.
 3. Split UI rendering into structured cards (calendar/email/files) + fallback markdown.
-4. Finalize chat/log separation UX with concise/verbose modes and persistent diagnostics.
+4. Finalize chat/log separation UX and persistent diagnostics.
 5. Expand integration tests around conversation quality (format stability, no context leaks, deterministic cards).
 
 ## 6) Definition of Done for MVP

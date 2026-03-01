@@ -11,6 +11,8 @@ class UtteranceRequest(BaseModel):
     mode: Literal["assistant", "execute"] = "execute"
     executor: Literal["local", "codex"] = "local"
     working_directory: str | None = None
+    response_mode: Literal["concise", "verbose"] = "concise"
+    response_profile: Literal["guided", "minimal"] = "guided"
 
 
 class Action(BaseModel):
@@ -132,6 +134,18 @@ class RunDiagnostics(BaseModel):
     last_error: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class DirectoryEntry(BaseModel):
+    name: str
+    path: str
+    is_directory: bool
+
+
+class DirectoryListingResponse(BaseModel):
+    path: str
+    entries: list[DirectoryEntry]
+    truncated: bool = False
 
 
 class UtteranceResponse(BaseModel):
