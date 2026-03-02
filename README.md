@@ -7,7 +7,7 @@
 MOBaiLE lets you control coding tasks on your computer from your iPhone.
 You can type or speak a request, and the backend runs it safely on your machine while the app shows live progress.
 
-## Quick Start (Layman-Friendly)
+## Quick Start
 
 If you just want it working, copy these steps.
 
