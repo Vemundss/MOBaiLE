@@ -1,14 +1,13 @@
-# iOS App
+# iOS App (Layman-First)
 
-SwiftUI app that captures speech, sends transcripts to backend, and reads responses aloud.
+This is the iPhone app for MOBaiLE.
+You use it to send text/voice requests and watch the run progress from your phone.
 
-Current MVP scaffold:
-- App source files under `VoiceAgentApp/`
-- test file under `VoiceAgentAppTests/`
+## Quick Start
 
-## Quick start in Xcode
+### 1) Open the iOS project
 
-1. Generate/open project:
+From repo root:
 
 ```bash
 cd ios
@@ -16,27 +15,61 @@ xcodegen generate
 open VoiceAgentApp.xcodeproj
 ```
 
-2. In Xcode:
-- Select scheme `VoiceAgentApp`
-- Choose iOS Simulator (for example `iPhone 17`)
-- Build/Run
+### 2) Run the app in Xcode
 
-3. In app UI:
-- Set `Server URL` to your reachable backend URL (not `127.0.0.1` when running on phone).
-- Set `API Token` from `backend/.env` (`VOICE_AGENT_API_TOKEN`).
-- Default mode uses `codex`; enable Developer Mode if you want to switch executor manually.
-- Tap `Send Prompt` for text flow.
-- Or use `Start Recording` -> `Stop & Send Audio` for `/v1/audio` flow.
+In Xcode:
+1. Select scheme `VoiceAgentApp`
+2. Choose a simulator (for example `iPhone 17`) or a real iPhone
+3. Press Run
 
-4. Expected MVP behavior:
-- App creates run via `/v1/utterances`.
-- App can upload recorded audio via `/v1/audio`.
-- App streams `/v1/runs/{run_id}/events` with polling fallback.
-- App shows events and reads summary aloud.
+### 3) Connect app to backend
 
-## Notes
+Best option:
+1. Generate/open `backend/pairing-qr.png`
+2. Scan with iPhone camera
+3. Open the `mobaile://pair...` link
+4. Confirm pairing inside the app
 
-- This scaffold currently sends text prompts; on-device speech-to-text capture can be added next.
-- Add microphone usage description key in your Xcode target Info settings:
-  - already set in generated project (`NSMicrophoneUsageDescription`)
-- For immediate phone voice testing today, use `docs/PHONE_SHORTCUT_MVP.md`.
+Manual option in app Settings:
+1. Set `Server URL` to your backend URL
+2. Set `API Token` to `VOICE_AGENT_API_TOKEN` from `backend/.env`
+3. Keep `Session ID` as `iphone-app` (or set your own)
+
+### 4) Send a request
+
+- Type a prompt and tap `Send`
+- Or use the mic button for audio input
+
+## What You Need
+
+- macOS + Xcode
+- `xcodegen` (`brew install xcodegen`)
+- Running backend server
+- For real audio transcription: backend must have `OPENAI_API_KEY`
+
+## Common Problems (Fast Fixes)
+
+- App on real iPhone cannot reach backend:
+  - do not use `127.0.0.1`; use LAN/Tailscale URL
+- Pairing link opens but app does not connect:
+  - verify backend is running and token/session in pairing file are current
+- Audio fails but text works:
+  - check backend `OPENAI_API_KEY` or switch backend transcription to mock
+
+## Technical Notes
+
+- App code: `ios/VoiceAgentApp/`
+- Tests: `ios/VoiceAgentAppTests/`
+- Runtime flow:
+  - create run via `/v1/utterances` or `/v1/audio`
+  - stream events from `/v1/runs/{run_id}/events`
+  - fallback polling from `/v1/runs/{run_id}`
+- Run logs are available in-app via the logs screen
+
+## Test Command
+
+From `ios/`:
+
+```bash
+xcodebuild -project VoiceAgentApp.xcodeproj -scheme VoiceAgentApp -destination 'platform=iOS Simulator,name=iPhone 17' test
+```
