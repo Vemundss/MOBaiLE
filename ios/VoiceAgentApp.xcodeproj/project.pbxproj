@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -42,7 +42,7 @@
 		BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentApp.swift; sourceTree = "<group>"; };
 		C5A63560C68468159F1DCE09 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3E6198279CE9DE1A7E6A096 /* VoiceAgentAppTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceAgentAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -140,7 +140,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					07599C9446334FBAAECE1F09 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -155,7 +154,6 @@
 			);
 			mainGroup = CC939A14EE448F747C906ACD;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -218,7 +216,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -272,7 +270,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

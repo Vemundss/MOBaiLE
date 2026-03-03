@@ -112,6 +112,29 @@ CODEX_GUARDRAILS = os.getenv("VOICE_AGENT_CODEX_GUARDRAILS", "warn").strip().low
 CODEX_DANGEROUS_CONFIRM_TOKEN = os.getenv(
     "VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN", "[allow-dangerous]"
 ).strip()
+PROFILE_STATE_ROOT = Path(
+    os.getenv(
+        "VOICE_AGENT_PROFILE_STATE_ROOT",
+        os.getenv(
+            "VOICE_AGENT_SESSION_STATE_ROOT",
+            str(Path(__file__).resolve().parent.parent / "data" / "profiles"),
+        ),
+    )
+).resolve()
+PROFILE_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+LEGACY_SESSION_STATE_ROOT = Path(
+    os.getenv(
+        "VOICE_AGENT_SESSION_STATE_ROOT",
+        str(Path(__file__).resolve().parent.parent / "data" / "sessions"),
+    )
+).resolve()
+PROFILE_ID = os.getenv("VOICE_AGENT_PROFILE_ID", "default-user").strip() or "default-user"
+PROFILE_AGENTS_MAX_CHARS = int(
+    os.getenv("VOICE_AGENT_PROFILE_AGENTS_MAX_CHARS", os.getenv("VOICE_AGENT_SESSION_AGENTS_MAX_CHARS", "3000"))
+)
+PROFILE_MEMORY_MAX_CHARS = int(
+    os.getenv("VOICE_AGENT_PROFILE_MEMORY_MAX_CHARS", os.getenv("VOICE_AGENT_SESSION_MEMORY_MAX_CHARS", "6000"))
+)
 MAX_AUDIO_MB = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
 MAX_AUDIO_BYTES = int(MAX_AUDIO_MB * 1024 * 1024)
 MAX_DIRECTORY_ENTRIES = int(os.getenv("VOICE_AGENT_MAX_DIRECTORY_ENTRIES", "200"))
@@ -137,6 +160,34 @@ PAIR_CODE_TTL_MIN = int(os.getenv("VOICE_AGENT_PAIR_CODE_TTL_MIN", "30"))
 PAIR_ATTEMPTS_LOCK = threading.Lock()
 PAIR_ATTEMPTS: dict[str, list[float]] = {}
 PAIR_ATTEMPT_LIMIT_PER_MIN = int(os.getenv("VOICE_AGENT_PAIR_ATTEMPT_LIMIT_PER_MIN", "20"))
+PROFILE_FILE_LOCK = threading.Lock()
+
+DEFAULT_PROFILE_AGENTS = """# MOBaiLE AGENTS
+You are an assistant running through MOBaiLE.
+- You run on the user's server/computer.
+- Your output is displayed in a phone UI.
+- Prefer concise updates and clear final results.
+- Do not repeat runtime context unless asked.
+"""
+
+DEFAULT_PROFILE_MEMORY = """# MOBaiLE MEMORY
+Purpose: persistent notes across runs.
+
+Rules:
+- Keep this file concise and useful.
+- Store durable learnings only (preferences, environment facts, reliable workflows).
+- Avoid secrets/tokens.
+- Remove stale or duplicate notes.
+
+## User Preferences
+- (none yet)
+
+## Environment Notes
+- (none yet)
+
+## Reliable Workflows
+- (none yet)
+"""
 
 
 @app.get("/health")
@@ -758,7 +809,15 @@ def _run_codex(
     guardrail_message: str | None = None,
 ) -> None:
     codex_executor = CodexExecutor(workdir)
-    codex_prompt = _build_codex_prompt(prompt, response_profile=response_profile)
+    profile_agents, profile_memory = _load_profile_context(session_id_hint=session_id)
+    workdir_memory_path = _stage_profile_files_in_workdir(workdir, session_id_hint=session_id)
+    codex_prompt = _build_codex_prompt(
+        prompt,
+        response_profile=response_profile,
+        profile_agents=profile_agents,
+        profile_memory=profile_memory,
+        memory_file_hint=".mobaile/MEMORY.md",
+    )
     normalized_client_thread_id = (client_thread_id or "").strip() or None
     resume_thread_id: str | None = None
     if normalized_client_thread_id:
@@ -790,6 +849,7 @@ def _run_codex(
         )
         _append_event(run_id, ExecutionEvent(type="run.failed", message="Run failed"))
         _set_run_status(run_id, "failed", "Run failed")
+        _sync_profile_memory_from_workdir(workdir_memory_path)
         return
 
     with ACTIVE_PROCS_LOCK:
@@ -889,11 +949,13 @@ def _run_codex(
         summary = "Run cancelled by user"
         _append_event(run_id, ExecutionEvent(type="run.cancelled", message=summary))
         _set_run_status(run_id, "cancelled", summary)
+        _sync_profile_memory_from_workdir(workdir_memory_path)
         return
     if timed_out:
         summary = f"Run timed out after {CODEX_TIMEOUT_SEC}s"
         _append_event(run_id, ExecutionEvent(type="run.failed", message=summary))
         _set_run_status(run_id, "failed", summary)
+        _sync_profile_memory_from_workdir(workdir_memory_path)
         return
 
     success = exit_code == 0
@@ -903,6 +965,7 @@ def _run_codex(
         ExecutionEvent(type="run.completed" if success else "run.failed", message=summary),
     )
     _set_run_status(run_id, "completed" if success else "failed", summary)
+    _sync_profile_memory_from_workdir(workdir_memory_path)
 
 
 def _execute_plan(run_id: str, plan: ActionPlan, executor: LocalExecutor) -> bool:
@@ -1049,6 +1112,118 @@ def _enforce_pair_rate_limit(client_id: str) -> None:
             raise HTTPException(status_code=429, detail="too many pairing attempts, try again soon")
         attempts.append(now)
         PAIR_ATTEMPTS[client_id] = attempts
+
+
+def _profile_key(raw_value: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", raw_value.strip())[:120]
+    if not normalized:
+        return "default"
+    return normalized
+
+
+def _legacy_session_key(session_id: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", session_id.strip())[:120]
+    if not normalized:
+        return "default"
+    return normalized
+
+
+def _legacy_session_dir(session_id: str) -> Path:
+    return LEGACY_SESSION_STATE_ROOT / _legacy_session_key(session_id)
+
+
+def _profile_dir() -> Path:
+    return PROFILE_STATE_ROOT / _profile_key(PROFILE_ID)
+
+
+def _profile_agents_path() -> Path:
+    return _profile_dir() / "AGENTS.md"
+
+
+def _profile_memory_path() -> Path:
+    return _profile_dir() / "MEMORY.md"
+
+
+def _clip_context(value: str, max_chars: int) -> str:
+    text = value.strip()
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    clipped = text[:max_chars].rstrip()
+    return clipped + "\n...[truncated for context budget]"
+
+
+def _ensure_profile_files(session_id_hint: str | None = None) -> tuple[Path, Path]:
+    profile_path = _profile_dir()
+    agents_path = _profile_agents_path()
+    memory_path = _profile_memory_path()
+    with PROFILE_FILE_LOCK:
+        profile_path.mkdir(parents=True, exist_ok=True)
+        if not agents_path.exists():
+            seeded = ""
+            if session_id_hint:
+                legacy = _legacy_session_dir(session_id_hint) / "AGENTS.md"
+                if legacy.exists() and legacy.is_file():
+                    seeded = legacy.read_text(encoding="utf-8").strip()
+            agents_path.write_text((seeded or DEFAULT_PROFILE_AGENTS).strip() + "\n", encoding="utf-8")
+        if not memory_path.exists():
+            seeded = ""
+            if session_id_hint:
+                legacy = _legacy_session_dir(session_id_hint) / "MEMORY.md"
+                if legacy.exists() and legacy.is_file():
+                    seeded = legacy.read_text(encoding="utf-8").strip()
+            memory_path.write_text((seeded or DEFAULT_PROFILE_MEMORY).strip() + "\n", encoding="utf-8")
+    return agents_path, memory_path
+
+
+def _load_profile_context(session_id_hint: str | None = None) -> tuple[str, str]:
+    agents_path, memory_path = _ensure_profile_files(session_id_hint=session_id_hint)
+    agents = _clip_context(agents_path.read_text(encoding="utf-8"), PROFILE_AGENTS_MAX_CHARS)
+    memory = _clip_context(memory_path.read_text(encoding="utf-8"), PROFILE_MEMORY_MAX_CHARS)
+    return agents, memory
+
+
+def _stage_profile_files_in_workdir(workdir: Path, session_id_hint: str | None = None) -> Path:
+    agents_path, memory_path = _ensure_profile_files(session_id_hint=session_id_hint)
+    mobaile_dir = (workdir / ".mobaile").resolve()
+    mobaile_dir.mkdir(parents=True, exist_ok=True)
+    workdir_agents = mobaile_dir / "AGENTS.md"
+    workdir_memory = mobaile_dir / "MEMORY.md"
+    workdir_agents.write_text(agents_path.read_text(encoding="utf-8"), encoding="utf-8")
+    workdir_memory.write_text(memory_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return workdir_memory
+
+
+def _sync_profile_memory_from_workdir(workdir_memory_path: Path) -> None:
+    candidates = [workdir_memory_path]
+    mobaile_dir = workdir_memory_path.parent
+    workdir = mobaile_dir.parent
+    candidates.extend(
+        [
+            mobaile_dir / "memory.md",
+            workdir / "MEMORY.md",
+            workdir / "memory.md",
+        ]
+    )
+
+    latest_text: str | None = None
+    latest_mtime = -1.0
+    for candidate in candidates:
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        text = candidate.read_text(encoding="utf-8")
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not normalized:
+            continue
+        mtime = candidate.stat().st_mtime
+        if mtime >= latest_mtime:
+            latest_mtime = mtime
+            latest_text = normalized
+    if not latest_text:
+        return
+
+    bounded = _clip_context(latest_text, PROFILE_MEMORY_MAX_CHARS)
+    _ensure_profile_files()
+    _profile_memory_path().write_text(bounded + "\n", encoding="utf-8")
 
 
 def _codex_structured_message(message: str, user_prompt: str) -> str | None:
@@ -1227,7 +1402,13 @@ def _is_cancelled(run_id: str) -> bool:
         return run_id in RUN_CANCELLED
 
 
-def _build_codex_prompt(user_prompt: str, response_profile: Literal["guided", "minimal"] = "guided") -> str:
+def _build_codex_prompt(
+    user_prompt: str,
+    response_profile: Literal["guided", "minimal"] = "guided",
+    profile_agents: str = "",
+    profile_memory: str = "",
+    memory_file_hint: str = ".mobaile/MEMORY.md",
+) -> str:
     if response_profile == "minimal":
         context = (
             "You are running through MOBaiLE.\n"
@@ -1237,14 +1418,34 @@ def _build_codex_prompt(user_prompt: str, response_profile: Literal["guided", "m
         )
     else:
         if not CODEX_USE_CONTEXT:
-            return user_prompt
-        context = _load_codex_context()
-        if not context:
-            return user_prompt
+            context = ""
+        else:
+            context = _load_codex_context()
+    session_block = ""
+    if profile_agents.strip() or profile_memory.strip():
+        session_block = (
+            "Persistent AGENTS profile:\n"
+            f"{profile_agents.strip() or '(empty)'}\n\n"
+            "Persistent MEMORY (shared across sessions):\n"
+            f"{profile_memory.strip() or '(empty)'}\n\n"
+            "Persistence guidance:\n"
+            f"- If you learn durable facts, update `{memory_file_hint}`.\n"
+            "- Do not store MOBaiLE persistence in `~/.codex/*`.\n"
+            "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
+        )
+    if not context and not session_block:
+        return user_prompt
+    if context:
+        runtime_block = (
+            "MOBaiLE runtime context:\n"
+            f"{context}\n\n"
+        )
+    else:
+        runtime_block = ""
     return (
         "You are running through MOBaiLE.\n\n"
-        "MOBaiLE runtime context:\n"
-        f"{context}\n\n"
+        f"{runtime_block}"
+        f"{session_block}"
         "User request:\n"
         f"{user_prompt}"
     )

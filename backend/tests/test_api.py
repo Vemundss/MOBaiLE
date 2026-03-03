@@ -44,6 +44,51 @@ def test_codex_prompt_context_injection(monkeypatch, tmp_path: Path):
     assert "create hello script" in built
 
 
+def test_profile_memory_seed_and_prompt_block(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("VOICE_AGENT_PROFILE_STATE_ROOT", str(tmp_path / "profiles"))
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+    agents, memory = module._load_profile_context()
+    assert "MOBaiLE AGENTS" in agents
+    assert "MOBaiLE MEMORY" in memory
+
+    built = module._build_codex_prompt(
+        "check calendar today",
+        profile_agents=agents,
+        profile_memory=memory,
+    )
+    assert "Persistent AGENTS profile" in built
+    assert "Persistent MEMORY" in built
+    assert "~/.codex" in built
+    assert "check calendar today" in built
+
+
+def test_profile_memory_sync_accepts_memory_file_fallback(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("VOICE_AGENT_PROFILE_STATE_ROOT", str(tmp_path / "profiles"))
+    monkeypatch.setenv("VOICE_AGENT_PROFILE_ID", "user-fallback")
+    module = importlib.import_module("app.main")
+    module = importlib.reload(module)
+
+    workdir = tmp_path / "workspace"
+    mobaile_dir = workdir / ".mobaile"
+    mobaile_dir.mkdir(parents=True, exist_ok=True)
+    primary = mobaile_dir / "MEMORY.md"
+    fallback = workdir / "memory.md"
+
+    primary.write_text("# stale\nold memory\n", encoding="utf-8")
+    fallback.write_text("# fresh\nnew durable note\n", encoding="utf-8")
+    now = time.time()
+    os.utime(fallback, (now + 5, now + 5))
+
+    module._sync_profile_memory_from_workdir(primary)
+
+    profile_memory = tmp_path / "profiles" / "user-fallback" / "MEMORY.md"
+    assert profile_memory.exists()
+    text = profile_memory.read_text(encoding="utf-8")
+    assert "new durable note" in text
+    assert "old memory" not in text
+
+
 def test_codex_structured_message_filters_noise(monkeypatch, tmp_path: Path):
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
@@ -707,3 +752,93 @@ def test_codex_thread_resume_by_client_thread_id(monkeypatch, tmp_path: Path):
     assert second_payload["status"] == "completed"
     second_chat_messages = [e["message"] for e in second_payload["events"] if e["type"] == "chat.message"]
     assert any("resumed memory" in msg for msg in second_chat_messages)
+
+
+def test_codex_profile_memory_persists_across_sessions(monkeypatch, tmp_path: Path):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "mkdir -p .mobaile\n"
+        "state=\"no-memory\"\n"
+        "if [[ -f .mobaile/MEMORY.md ]] && grep -q \"workflow-v1\" .mobaile/MEMORY.md; then\n"
+        "  state=\"has-memory\"\n"
+        "fi\n"
+        "cat > .mobaile/MEMORY.md <<'EOF'\n"
+        "# MOBaiLE MEMORY\n"
+        "## Reliable Workflows\n"
+        "- workflow-v1: calendar lookup via macOS Calendar bridge\n"
+        "EOF\n"
+        "echo \"{\\\"type\\\":\\\"item.completed\\\",\\\"item\\\":{\\\"id\\\":\\\"item_1\\\",\\\"type\\\":\\\"agent_message\\\",\\\"text\\\":\\\"${state}\\\"}}\"\n"
+        "echo '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}'\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    profile_root = tmp_path / "profiles"
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_CODEX_BINARY": "codex",
+            "VOICE_AGENT_CODEX_TIMEOUT_SEC": "60",
+            "VOICE_AGENT_PROFILE_STATE_ROOT": str(profile_root),
+            "VOICE_AGENT_PROFILE_ID": "user-1",
+        },
+    )
+
+    create_first = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "mem-session-a",
+            "utterance_text": "first run",
+            "executor": "codex",
+        },
+    )
+    assert create_first.status_code == 200
+    first_run_id = create_first.json()["run_id"]
+
+    first_payload = None
+    for _ in range(80):
+        first_run = client.get(f"/v1/runs/{first_run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert first_run.status_code == 200
+        first_payload = first_run.json()
+        if first_payload["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert first_payload is not None
+    assert first_payload["status"] == "completed"
+    first_chat_messages = [e["message"] for e in first_payload["events"] if e["type"] == "chat.message"]
+    assert any("no-memory" in msg for msg in first_chat_messages)
+
+    create_second = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "mem-session-b",
+            "utterance_text": "second run",
+            "executor": "codex",
+        },
+    )
+    assert create_second.status_code == 200
+    second_run_id = create_second.json()["run_id"]
+
+    second_payload = None
+    for _ in range(80):
+        second_run = client.get(f"/v1/runs/{second_run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert second_run.status_code == 200
+        second_payload = second_run.json()
+        if second_payload["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert second_payload is not None
+    assert second_payload["status"] == "completed"
+    second_chat_messages = [e["message"] for e in second_payload["events"] if e["type"] == "chat.message"]
+    assert any("has-memory" in msg for msg in second_chat_messages)
+
+    profile_memory = profile_root / "user-1" / "MEMORY.md"
+    assert profile_memory.exists()
+    assert "workflow-v1" in profile_memory.read_text(encoding="utf-8")

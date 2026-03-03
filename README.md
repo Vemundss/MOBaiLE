@@ -4,114 +4,187 @@
   <img src="ios/VoiceAgentApp/mobaile_logo.png" alt="MOBaiLE logo" width="180" />
 </p>
 
-MOBaiLE lets you control coding tasks on your computer from your iPhone.
-You can type or speak a request, and the backend runs it safely on your machine while the app shows live progress.
+MOBaiLE lets you talk to your computer from your iPhone.
+Think of it as a practical "remote teammate in your pocket": you speak or type a task, the backend runs it on your machine, and the app streams progress/results live.
 
 ## Quick Start
 
-If you just want it working, copy these steps.
+### What this solves
 
-### 1) Install the backend server in one command
+- Run real tasks on your own computer while away from your desk.
+- Keep a single control plane for auth, run history, and live event updates.
+- Choose a safer default mode (`safe`) or unlock full power on trusted hosts (`full-access`).
 
-This installs everything, sets up tokens, and prepares pairing:
+## Setup For On-The-Go Use (Outside Local Network)
+
+This is the recommended end-to-end setup for most users.
+
+### 1) Install required apps/tools
+
+On your computer:
+- `git`, `python3`, `curl`
+- [`uv`](https://docs.astral.sh/uv/) (auto-installed by bootstrap if missing)
+- [Tailscale](https://tailscale.com/download) (recommended for remote access without port forwarding)
+
+On your iPhone:
+- **Tailscale** app from App Store
+- **MOBaiLE** iOS app
+  - if distributed: install from TestFlight/App Store
+  - if developing locally: build from `ios/` in Xcode and run on your phone
+
+### 2) Sign in to Tailscale on both computer and iPhone
+
+Use the same Tailscale account/tailnet on both devices.
+
+On computer, verify Tailscale is connected:
+
+```bash
+tailscale status
+tailscale ip -4
+```
+
+### 3) Install and bootstrap MOBaiLE backend on your computer
+
+Option A (one command, installs into `~/MOBaiLE`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
 ```
 
-What this does for you:
-- installs missing backend prerequisites (`uv`) if needed
-- clones MOBaiLE to `~/MOBaiLE`
-- installs backend dependencies
-- creates backend config + API token + pairing info
-- on macOS: installs and starts a background service
-- generates pairing QR at `~/MOBaiLE/backend/pairing-qr.png`
-
-If you already cloned this repo and prefer npm-style commands:
+Option B (manual, if you want full control):
 
 ```bash
-npm run setup:server
+git clone https://github.com/vemundss/MOBaiLE.git
+cd MOBaiLE
+bash ./scripts/install_backend.sh --mode safe
+bash ./scripts/service_macos.sh install   # macOS only
+bash ./scripts/doctor.sh
+bash ./scripts/pairing_qr.sh
 ```
 
-### 2) Confirm backend is running
+What bootstrap does:
+- clones/updates repo to `~/MOBaiLE`
+- installs backend deps and creates `backend/.env`
+- creates `backend/pairing.json` (uses Tailscale URL when available)
+- on macOS: installs and starts background service
+- generates `backend/pairing-qr.png`
+
+### 4) Verify backend is healthy
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-You should get a small JSON response with `"ok"` status.
+Expected: JSON response with status `ok`.
 
-### 3) Open the iOS app project
+### 5) Pair your iPhone with backend
+
+On computer:
+1. Open `backend/pairing-qr.png` from your MOBaiLE repo folder.
+2. If missing, regenerate:
+   ```bash
+   bash ./scripts/pairing_qr.sh
+   ```
+
+On iPhone:
+1. Open Camera and scan the QR.
+2. Tap the `mobaile://pair...` deep link.
+3. Confirm in MOBaiLE app.
+
+Manual fallback (in MOBaiLE app settings):
+1. `Server URL`: Tailscale URL from `backend/pairing.json`
+2. `API Token`: `VOICE_AGENT_API_TOKEN` from `backend/.env`
+3. `Session ID`: default `iphone-app` is fine
+
+### 6) Validate remote access over cellular
+
+1. Turn off Wi-Fi on iPhone (use cellular).
+2. Keep Tailscale connected on iPhone.
+3. Open MOBaiLE and run a small prompt (for example: "create and run a hello script").
+4. Confirm you see live run events and final result.
+
+If this works on cellular, your on-the-go setup is complete.
+
+## Usage Examples
+
+### Example 1: Send a task through backend API
 
 ```bash
-cd ~/MOBaiLE/ios
+TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' backend/.env)"
+curl -s -X POST http://127.0.0.1:8000/v1/utterances \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "session_id": "demo-session",
+    "utterance_text": "create a hello python script and run it",
+    "mode": "execute",
+    "executor": "local",
+    "working_directory": "~/MOBaiLE-workspace"
+  }'
+```
+
+### Example 2: Run connectivity smoke test
+
+```bash
+bash ./scripts/phone_connectivity_smoke.sh
+```
+
+### Example 3: Open iOS project locally (developer workflow)
+
+```bash
+cd ios
 xcodegen generate
 open VoiceAgentApp.xcodeproj
 ```
 
-In Xcode:
-1. Select scheme `VoiceAgentApp`
-2. Pick an iPhone simulator (or your device)
-3. Press Run
-
-### 4) Connect app to backend
-
-Easiest way:
-1. Open `~/MOBaiLE/backend/pairing-qr.png`
-2. Scan with iPhone camera
-3. Open the `mobaile://pair...` link
-4. Confirm pairing in-app
-
-Manual fallback (Settings in app):
-1. `Server URL`: your backend URL
-2. `API Token`: from `~/MOBaiLE/backend/.env` (`VOICE_AGENT_API_TOKEN`)
-3. `Session ID`: keep default (`iphone-app`) unless you want a custom one
-
-## What You Need
-
-- A Mac (for iOS app build)
-- iPhone (for real mobile use; simulator also works for testing)
-- Internet access for dependency install
-- Xcode
-- `xcodegen` (`brew install xcodegen`)
-
-Optional for audio transcription:
-- OpenAI API key in `backend/.env` (`OPENAI_API_KEY`)
-- If you only use text prompts, this is not required
-
-Optional for npm shortcuts:
-- Node.js + npm
-
-## Common Issues (Fast Fixes)
-
-- `address already in use` on port `8000`:
-  - another backend is already running; stop it first or change port in `backend/.env`
-- App on real iPhone cannot reach `127.0.0.1`:
-  - use your computer's LAN/Tailscale URL instead
-- Pairing works but audio fails:
-  - add `OPENAI_API_KEY` to `backend/.env` (or switch transcription provider to `mock` for testing)
-
-## Useful Commands
-
-From repo root:
+## Test, Rerun, and Maintenance
 
 ```bash
-npm run setup:server          # bootstrap safe-mode backend
-npm run backend:start         # start backend in foreground
-npm run doctor                # connectivity and environment checks
-npm run pair:qr               # regenerate pairing QR
-npm run ios:open              # regenerate and open iOS project
+bash ./scripts/doctor.sh             # environment + API checks
+bash ./scripts/pairing_qr.sh         # regenerate pairing QR
+cd backend && bash ./run_backend.sh  # start backend in foreground
 ```
 
-Without npm:
+macOS service control:
 
 ```bash
-bash ./scripts/install_backend.sh --mode safe
-cd backend && bash ./run_backend.sh
-bash ./scripts/doctor.sh
+bash ./scripts/service_macos.sh status
+bash ./scripts/service_macos.sh restart
+bash ./scripts/service_macos.sh logs
 ```
 
-## Technical Details (Advanced)
+Backend tests:
+
+```bash
+cd backend
+uv run pytest -q
+```
+
+## Troubleshooting
+
+- Pairing QR contains `127.0.0.1` instead of Tailscale URL:
+  - ensure Tailscale is connected on computer, then re-run:
+    ```bash
+    bash ./scripts/install_backend.sh --mode safe
+    bash ./scripts/pairing_qr.sh
+    ```
+- iPhone can pair on Wi-Fi but not on cellular:
+  - confirm Tailscale is connected on iPhone and computer
+  - confirm backend is running (`bash ./scripts/doctor.sh`)
+- Audio uploads fail:
+  - set `OPENAI_API_KEY` in `backend/.env`
+  - or set `VOICE_AGENT_TRANSCRIBE_PROVIDER=mock` for deterministic local tests
+
+Optional npm wrappers (if you use Node):
+
+```bash
+npm run setup:server
+npm run backend:start
+npm run doctor
+npm run pair:qr
+```
+
+## More Docs
 
 - Usage guide: [`docs/USAGE.md`](docs/USAGE.md)
 - Backend details and endpoints: [`backend/README.md`](backend/README.md)

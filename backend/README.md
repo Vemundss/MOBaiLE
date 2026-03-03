@@ -41,6 +41,13 @@ Interactive API docs are available at:
 - API token key: `VOICE_AGENT_API_TOKEN`
 - Pairing info: `backend/pairing.json`
 
+Persistent profile files (shared across sessions, auto-created):
+- `backend/data/profiles/<profile_id>/AGENTS.md` (stable profile)
+- `backend/data/profiles/<profile_id>/MEMORY.md` (mutable persistent notes)
+
+Optional env for profile scope:
+- `VOICE_AGENT_PROFILE_ID` (default: `default-user`)
+
 Important:
 - `/v1/*` endpoints require `Authorization: Bearer <VOICE_AGENT_API_TOKEN>`
 - `/health` does not require auth
