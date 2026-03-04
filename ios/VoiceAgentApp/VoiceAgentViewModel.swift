@@ -1,7 +1,10 @@
 import AVFoundation
+import AudioToolbox
 import Foundation
+import MediaPlayer
 import SQLite3
 import Security
+import UIKit
 
 @MainActor
 final class VoiceAgentViewModel: ObservableObject {
@@ -33,6 +36,12 @@ final class VoiceAgentViewModel: ObservableObject {
             }
             if host.hasPrefix("127.") || host.hasPrefix("10.") || host.hasPrefix("192.168.") {
                 return true
+            }
+            if host.hasPrefix("100.") {
+                let parts = host.split(separator: ".")
+                if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
+                    return true
+                }
             }
             if host.hasPrefix("172.") {
                 let parts = host.split(separator: ".")
@@ -75,6 +84,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var threads: [ChatThread] = []
     @Published var activeThreadID: UUID?
     @Published var backendSecurityMode: String = "unknown"
+    @Published var backendCodexModel: String = "default"
     @Published var backendWorkdirRoot: String = ""
     @Published var showDirectoryBrowser: Bool = false
     @Published var isLoadingDirectoryBrowser: Bool = false
@@ -87,6 +97,12 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var runStartedAt: Date?
     @Published var runEndedAt: Date?
     @Published var directoryBrowserPath: String = ""
+    @Published var airPodsClickToRecordEnabled: Bool = true
+    @Published var hideDotFoldersInBrowser: Bool = true
+    @Published var hapticCuesEnabled: Bool = true
+    @Published var audioCuesEnabled: Bool = true
+    @Published var autoSendAfterSilenceEnabled: Bool = false
+    @Published var autoSendAfterSilenceSeconds: String = "1.2"
 
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
@@ -98,6 +114,7 @@ final class VoiceAgentViewModel: ObservableObject {
     private var lastSubmittedUserText: String = ""
     private var didBootstrapSession = false
     private var trustedPairHosts: Set<String> = []
+    private var didConfigureRemoteCommands = false
 
     private enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
@@ -112,11 +129,19 @@ final class VoiceAgentViewModel: ObservableObject {
         static let threads = "mobaile.threads"
         static let activeThreadID = "mobaile.active_thread_id"
         static let trustedPairHosts = "mobaile.trusted_pair_hosts"
+        static let airPodsClickToRecordEnabled = "mobaile.airpods_click_to_record"
+        static let hideDotFoldersInBrowser = "mobaile.hide_dot_folders"
+        static let hapticCuesEnabled = "mobaile.haptic_cues_enabled"
+        static let audioCuesEnabled = "mobaile.audio_cues_enabled"
+        static let autoSendAfterSilenceEnabled = "mobaile.auto_send_after_silence_enabled"
+        static let autoSendAfterSilenceSeconds = "mobaile.auto_send_after_silence_seconds"
+        static let pendingShortcutAction = "mobaile.pending_shortcut_action"
     }
 
     init() {
         loadSettings()
         loadThreads()
+        configureRemoteCommandsIfNeeded()
     }
 
     func sendPrompt() async {
@@ -170,14 +195,41 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func startRecording() async {
+        guard !isLoading else {
+            statusText = "A run is already in progress."
+            return
+        }
+        guard hasConfiguredConnection else {
+            statusText = "Set server URL and token first."
+            return
+        }
         errorText = ""
         do {
-            try await recorder.start()
+            let silenceConfig: AudioRecorderService.SilenceConfig?
+            if autoSendAfterSilenceEnabled {
+                silenceConfig = AudioRecorderService.SilenceConfig(
+                    requiredSilenceDuration: normalizedAutoSendAfterSilenceSeconds
+                )
+            } else {
+                silenceConfig = nil
+            }
+
+            try await recorder.start(silenceConfig: silenceConfig) { [weak self] in
+                guard let self else { return }
+                Task { @MainActor in
+                    guard self.isRecording else { return }
+                    self.statusText = "Silence detected. Sending..."
+                    await self.stopRecordingAndSend()
+                }
+            }
             isRecording = true
             statusText = "Recording..."
+            syncNowPlayingRecordingState()
+            emitRecordingStartedFeedback()
         } catch {
             errorText = error.localizedDescription
             statusText = "Failed to start recording"
+            emitFailureFeedback()
         }
     }
 
@@ -223,6 +275,7 @@ final class VoiceAgentViewModel: ObservableObject {
         guard isRecording else { return }
         didCompleteRun = false
         isRecording = false
+        syncNowPlayingRecordingState()
         statusText = "Uploading audio..."
         errorText = ""
         summaryText = ""
@@ -263,6 +316,7 @@ final class VoiceAgentViewModel: ObservableObject {
             lastSubmittedUserText = response.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
             activeRunExecutor = effectiveExecutor
             statusText = "Audio run started (\(response.runId))"
+            emitRecordingSentFeedback()
             persistActiveThreadSnapshot()
             try await observeRun(runID: response.runId)
         } catch {
@@ -272,7 +326,52 @@ final class VoiceAgentViewModel: ObservableObject {
             isLoading = false
             runPhaseText = "Failed"
             runEndedAt = Date()
+            emitFailureFeedback()
             persistActiveThreadSnapshot()
+        }
+    }
+
+    func toggleRecordingFromHeadsetControl() async {
+        guard airPodsClickToRecordEnabled else { return }
+        guard hasConfiguredConnection else {
+            statusText = "Set server URL and token first."
+            return
+        }
+        if isRecording {
+            await stopRecordingAndSend()
+        } else if !isLoading {
+            await startRecording()
+        }
+    }
+
+    func handleStartVoiceTaskShortcut() async {
+        if isRecording || isLoading {
+            return
+        }
+        await startRecording()
+    }
+
+    func handleSendLastPromptShortcut() async {
+        if canRetryLastPrompt {
+            await retryLastPrompt()
+            return
+        }
+        statusText = "No previous prompt to resend."
+    }
+
+    func consumePendingShortcutActionIfNeeded() async {
+        let action = defaults.string(forKey: DefaultsKey.pendingShortcutAction)?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).lowercased() ?? ""
+        guard !action.isEmpty else { return }
+        defaults.removeObject(forKey: DefaultsKey.pendingShortcutAction)
+        switch action {
+        case "start-voice":
+            await handleStartVoiceTaskShortcut()
+        case "send-last-prompt":
+            await handleSendLastPromptShortcut()
+        default:
+            break
         }
     }
 
@@ -566,6 +665,22 @@ final class VoiceAgentViewModel: ObservableObject {
         return !current.isEmpty && current != "/"
     }
 
+    var filteredDirectoryBrowserEntries: [DirectoryEntry] {
+        guard hideDotFoldersInBrowser else { return directoryBrowserEntries }
+        return directoryBrowserEntries.filter { entry in
+            !(entry.isDirectory && entry.name.hasPrefix("."))
+        }
+    }
+
+    var hiddenDotFolderCount: Int {
+        directoryBrowserEntries.reduce(0) { partial, entry in
+            if entry.isDirectory && entry.name.hasPrefix(".") {
+                return partial + 1
+            }
+            return partial
+        }
+    }
+
     var canRetryLastPrompt: Bool {
         !isLoading && !lastSubmittedUserText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -574,6 +689,87 @@ final class VoiceAgentViewModel: ObservableObject {
         guard canRetryLastPrompt else { return }
         promptText = lastSubmittedUserText
         await sendPrompt()
+    }
+
+    private func configureRemoteCommandsIfNeeded() {
+        guard !didConfigureRemoteCommands else { return }
+        let commandCenter = MPRemoteCommandCenter.shared()
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.pauseCommand.isEnabled = true
+
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in
+                await self.toggleRecordingFromHeadsetControl()
+            }
+            return .success
+        }
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in
+                if self.airPodsClickToRecordEnabled, !self.isRecording, !self.isLoading {
+                    await self.startRecording()
+                }
+            }
+            return .success
+        }
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in
+                if self.airPodsClickToRecordEnabled, self.isRecording {
+                    await self.stopRecordingAndSend()
+                }
+            }
+            return .success
+        }
+
+        didConfigureRemoteCommands = true
+        syncNowPlayingRecordingState()
+    }
+
+    private func syncNowPlayingRecordingState() {
+        if isRecording {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+                MPMediaItemPropertyTitle: "MOBaiLE Recording",
+                MPNowPlayingInfoPropertyPlaybackRate: 1
+            ]
+        } else {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+                MPMediaItemPropertyTitle: "MOBaiLE",
+                MPNowPlayingInfoPropertyPlaybackRate: 0
+            ]
+        }
+    }
+
+    private func emitRecordingStartedFeedback() {
+        if hapticCuesEnabled {
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+        }
+        if audioCuesEnabled {
+            AudioServicesPlaySystemSound(1104)
+        }
+    }
+
+    private func emitRecordingSentFeedback() {
+        if hapticCuesEnabled {
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+        }
+        if audioCuesEnabled {
+            AudioServicesPlaySystemSound(1113)
+        }
+    }
+
+    private func emitFailureFeedback() {
+        if hapticCuesEnabled {
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.error)
+        }
+        if audioCuesEnabled {
+            AudioServicesPlaySystemSound(1073)
+        }
     }
 
     func persistSettings() {
@@ -600,6 +796,12 @@ final class VoiceAgentViewModel: ObservableObject {
         defaults.set("concise", forKey: DefaultsKey.responseMode)
         defaults.set(agentGuidanceMode, forKey: DefaultsKey.agentGuidanceMode)
         defaults.set(developerMode, forKey: DefaultsKey.developerMode)
+        defaults.set(airPodsClickToRecordEnabled, forKey: DefaultsKey.airPodsClickToRecordEnabled)
+        defaults.set(hideDotFoldersInBrowser, forKey: DefaultsKey.hideDotFoldersInBrowser)
+        defaults.set(hapticCuesEnabled, forKey: DefaultsKey.hapticCuesEnabled)
+        defaults.set(audioCuesEnabled, forKey: DefaultsKey.audioCuesEnabled)
+        defaults.set(autoSendAfterSilenceEnabled, forKey: DefaultsKey.autoSendAfterSilenceEnabled)
+        defaults.set(autoSendAfterSilenceSeconds, forKey: DefaultsKey.autoSendAfterSilenceSeconds)
     }
 
     func bootstrapSessionIfNeeded() async {
@@ -612,6 +814,7 @@ final class VoiceAgentViewModel: ObservableObject {
                 token: apiToken
             ) {
                 backendSecurityMode = cfg.securityMode
+                backendCodexModel = displayModelName(cfg.codexModel)
                 backendWorkdirRoot = cfg.workdirRoot ?? ""
             }
             let runs = try await client.fetchSessionRuns(
@@ -857,6 +1060,10 @@ final class VoiceAgentViewModel: ObservableObject {
         serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
+    private var hasConfiguredConnection: Bool {
+        !normalizedServerURL.isEmpty && !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var normalizedWorkingDirectory: String? {
         let value = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty {
@@ -905,6 +1112,12 @@ final class VoiceAgentViewModel: ObservableObject {
         let value = runTimeoutSeconds.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let parsed = Double(value), parsed >= 10 else { return 300 }
         return parsed
+    }
+
+    private var normalizedAutoSendAfterSilenceSeconds: TimeInterval {
+        let value = autoSendAfterSilenceSeconds.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Double(value) else { return 1.2 }
+        return min(5.0, max(0.8, parsed))
     }
 
     private func isTerminalStatus(_ status: String) -> Bool {
@@ -1137,6 +1350,34 @@ final class VoiceAgentViewModel: ObservableObject {
             agentGuidanceMode = value
         }
         developerMode = defaults.bool(forKey: DefaultsKey.developerMode)
+        if defaults.object(forKey: DefaultsKey.airPodsClickToRecordEnabled) == nil {
+            airPodsClickToRecordEnabled = true
+        } else {
+            airPodsClickToRecordEnabled = defaults.bool(forKey: DefaultsKey.airPodsClickToRecordEnabled)
+        }
+        if defaults.object(forKey: DefaultsKey.hideDotFoldersInBrowser) == nil {
+            hideDotFoldersInBrowser = true
+        } else {
+            hideDotFoldersInBrowser = defaults.bool(forKey: DefaultsKey.hideDotFoldersInBrowser)
+        }
+        if defaults.object(forKey: DefaultsKey.hapticCuesEnabled) == nil {
+            hapticCuesEnabled = true
+        } else {
+            hapticCuesEnabled = defaults.bool(forKey: DefaultsKey.hapticCuesEnabled)
+        }
+        if defaults.object(forKey: DefaultsKey.audioCuesEnabled) == nil {
+            audioCuesEnabled = true
+        } else {
+            audioCuesEnabled = defaults.bool(forKey: DefaultsKey.audioCuesEnabled)
+        }
+        if defaults.object(forKey: DefaultsKey.autoSendAfterSilenceEnabled) == nil {
+            autoSendAfterSilenceEnabled = false
+        } else {
+            autoSendAfterSilenceEnabled = defaults.bool(forKey: DefaultsKey.autoSendAfterSilenceEnabled)
+        }
+        if let value = defaults.string(forKey: DefaultsKey.autoSendAfterSilenceSeconds), !value.isEmpty {
+            autoSendAfterSilenceSeconds = value
+        }
         trustedPairHosts = Set(defaults.stringArray(forKey: DefaultsKey.trustedPairHosts) ?? [])
         if !developerMode {
             executor = "codex"
@@ -1158,6 +1399,7 @@ final class VoiceAgentViewModel: ObservableObject {
                 token: response.apiToken
             ) {
                 self.backendSecurityMode = cfg.securityMode
+                self.backendCodexModel = self.displayModelName(cfg.codexModel)
                 self.backendWorkdirRoot = cfg.workdirRoot ?? ""
             }
             self.persistSettings()
@@ -1174,6 +1416,11 @@ final class VoiceAgentViewModel: ObservableObject {
         rawURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
+    private func displayModelName(_ rawModel: String?) -> String {
+        let value = rawModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? "default" : value
+    }
+
     private func isLocalOrPrivateHost(_ host: String) -> Bool {
         let lower = host.lowercased()
         if lower == "localhost" || lower == "::1" || lower.hasSuffix(".local") {
@@ -1181,6 +1428,12 @@ final class VoiceAgentViewModel: ObservableObject {
         }
         if lower.hasPrefix("127.") || lower.hasPrefix("10.") || lower.hasPrefix("192.168.") {
             return true
+        }
+        if lower.hasPrefix("100.") {
+            let parts = lower.split(separator: ".")
+            if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
+                return true
+            }
         }
         if lower.hasPrefix("172.") {
             let parts = lower.split(separator: ".")

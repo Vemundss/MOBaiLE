@@ -8,249 +8,60 @@ struct ContentView: View {
     @State private var showThreads = false
     @State private var newDirectoryName = ""
     @State private var trustPairHost = false
+    @State private var showRuntimeInfoBar = true
+    @State private var lastScrollMinY: CGFloat = .zero
+    @State private var hasTrackedScrollPosition = false
     @FocusState private var composerFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        mainView
+    }
+
+    private var mainView: some View {
+        pairingSheetView
+    }
+
+    private var baseNavigationView: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        BrandHeaderView()
-                            .padding(.top, 6)
-
-                        ForEach(vm.conversation) { message in
-                            HStack {
-                                if message.role == "user" {
-                                    Spacer(minLength: 52)
-                                }
-                                MessageBubble(message: message, serverURL: vm.serverURL, apiToken: vm.apiToken)
-                                if message.role != "user" {
-                                    Spacer(minLength: 52)
-                                }
-                            }
-                            .id(message.id)
-                        }
-
-                        if vm.conversation.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Start by typing or recording a prompt.")
-                                    .font(.subheadline.weight(.medium))
-                                Text("MOBaiLE will stream the agent response here.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 20)
-                        }
-
-                        if !vm.errorText.isEmpty {
-                            Text(vm.errorText)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                .safeAreaInset(edge: .top, spacing: 8) {
-                    runtimeInfoBar
-                }
-                .onChange(of: vm.conversation.count) {
-                    if let last = vm.conversation.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
-                .safeAreaInset(edge: .bottom) {
-                    VStack(spacing: 8) {
-                        if !vm.statusText.isEmpty && vm.statusText != "Idle" {
-                            HStack {
-                                if !vm.runID.isEmpty {
-                                    Text("Run \(shortRunID(vm.runID))")
-                                        .font(.caption2.monospaced())
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if vm.isLoading {
-                                    ProgressView()
-                                        .controlSize(.mini)
-                                }
-                                Text(bottomRunStatusText)
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        VStack(spacing: 8) {
-                            ZStack(alignment: .topLeading) {
-                                TextEditor(text: $vm.promptText)
-                                    .focused($composerFocused)
-                                    .scrollContentBackground(.hidden)
-                                    .padding(6)
-                                    .frame(height: composerHeight)
-                                    .background(Color(.tertiarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                                if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text("Message MOBaiLE")
-                                        .font(.body)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.leading, 12)
-                                        .padding(.top, 14)
-                                        .allowsHitTesting(false)
-                                }
-                            }
-                            .animation(.easeInOut(duration: 0.16), value: composerHeight)
-
-                            HStack(spacing: 10) {
-                                Button {
-                                    Task {
-                                        if vm.isRecording {
-                                            await vm.stopRecordingAndSend()
-                                        } else {
-                                            await vm.startRecording()
-                                        }
-                                    }
-                                } label: {
-                                    Image(systemName: vm.isRecording ? "stop.fill" : "mic.fill")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .frame(width: 34, height: 34)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(vm.isRecording ? .red : .blue)
-                                .disabled(vm.isLoading || vm.apiToken.isEmpty || vm.serverURL.isEmpty)
-
-                                Spacer()
-
-                                if vm.isLoading && !vm.runID.isEmpty {
-                                    Button("Cancel") {
-                                        Task { await vm.cancelCurrentRun() }
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.red)
-                                } else {
-                                    Button("Send") {
-                                        Task { await vm.sendPrompt() }
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .disabled(
-                                        vm.apiToken.isEmpty ||
-                                        vm.serverURL.isEmpty ||
-                                        vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                                        vm.isRecording
-                                    )
-                                }
-                            }
-                        }
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
+            conversationView
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showConnectionSettings = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
                 }
             }
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 10) {
                     Button {
-                        showConnectionSettings = true
+                        showThreads = true
                     } label: {
-                        Image(systemName: "slider.horizontal.3")
+                        Image(systemName: "text.bubble")
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 10) {
-                        Button {
-                            showThreads = true
-                        } label: {
-                            Image(systemName: "text.bubble")
-                        }
-                        .accessibilityLabel("Threads")
-                        Button {
-                            showLogs = true
-                        } label: {
-                            Image(systemName: "doc.text.magnifyingglass")
-                        }
-                        Button("New Chat") {
-                            vm.startNewChat()
-                        }
-                        .font(.subheadline.weight(.semibold))
+                    .accessibilityLabel("Threads")
+                    Button {
+                        showLogs = true
+                    } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
                     }
+                    Button("New Chat") {
+                        vm.startNewChat()
+                    }
+                    .font(.subheadline.weight(.semibold))
                 }
             }
+        }
+    }
+
+    private var modalSheetView: some View {
+        baseNavigationView
             .sheet(isPresented: $showConnectionSettings) {
-                NavigationStack {
-                    Form {
-                        Section("Connection") {
-                            TextField("Server URL", text: $vm.serverURL)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.footnote.monospaced())
-                            SecureField("API Token", text: $vm.apiToken)
-                                .font(.footnote.monospaced())
-                            TextField("Session ID", text: $vm.sessionID)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                        }
-                        Section("Execution") {
-                            TextField("Working directory", text: $vm.workingDirectory)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.footnote.monospaced())
-                            Text("Folder where commands run and files are created. In safe mode, this must stay inside the backend workdir root.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            TextField("Timeout seconds", text: $vm.runTimeoutSeconds)
-                                .keyboardType(.numberPad)
-                            Text("Max time to wait for a run before the app marks it as timed out.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Picker("Agent guidance", selection: $vm.agentGuidanceMode) {
-                                Text("Guided").tag("guided")
-                                Text("Minimal").tag("minimal")
-                            }
-                            .pickerStyle(.segmented)
-                            Text(vm.agentGuidanceMode == "minimal"
-                                ? "Minimal: keeps chat focused on final results with fewer progress updates."
-                                : "Guided: includes short progress updates and clearer result context.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            LabeledContent("Chat detail", value: "Concise")
-                            Text("Verbose chat mode removed. Use Run Logs for full execution events.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if vm.developerMode {
-                                Picker("Executor", selection: $vm.executor) {
-                                    Text("Local").tag("local")
-                                    Text("Codex").tag("codex")
-                                }
-                                .pickerStyle(.segmented)
-                            } else {
-                                LabeledContent("Executor", value: "Codex")
-                            }
-                        }
-                        Section("App") {
-                            Toggle("Developer Mode", isOn: $vm.developerMode)
-                            LabeledContent("Backend mode", value: vm.backendSecurityMode)
-                            Text(vm.developerMode
-                                ? "Enables local executor switching."
-                                : "Keeps production-safe defaults (Codex executor only).")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .navigationTitle("Settings")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") {
-                                showConnectionSettings = false
-                            }
-                        }
-                    }
-                }
+                settingsSheet
             }
             .sheet(isPresented: $showThreads) {
                 ThreadsView(
@@ -275,8 +86,18 @@ struct ContentView: View {
             .sheet(isPresented: $showLogs) {
                 LogsView(events: vm.events)
             }
+    }
+
+    private var lifecycleManagedView: some View {
+        modalSheetView
             .task {
                 await vm.bootstrapSessionIfNeeded()
+                await vm.consumePendingShortcutActionIfNeeded()
+            }
+            .onChange(of: scenePhase) {
+                if scenePhase == .active {
+                    Task { await vm.consumePendingShortcutActionIfNeeded() }
+                }
             }
             .onChange(of: vm.didCompleteRun) {
                 if vm.didCompleteRun {
@@ -284,23 +105,6 @@ struct ContentView: View {
                     composerFocused = false
                 }
             }
-            .onChange(of: vm.serverURL) {
-                vm.hideDirectoryBrowser()
-                vm.persistSettings()
-            }
-            .onChange(of: vm.apiToken) {
-                vm.hideDirectoryBrowser()
-                vm.persistSettings()
-            }
-            .onChange(of: vm.sessionID) { vm.persistSettings() }
-            .onChange(of: vm.workingDirectory) {
-                vm.hideDirectoryBrowser()
-                vm.persistSettings()
-            }
-            .onChange(of: vm.runTimeoutSeconds) { vm.persistSettings() }
-            .onChange(of: vm.agentGuidanceMode) { vm.persistSettings() }
-            .onChange(of: vm.executor) { vm.persistSettings() }
-            .onChange(of: vm.developerMode) { vm.persistSettings() }
             .onChange(of: vm.pendingPairing) {
                 guard let pending = vm.pendingPairing else {
                     trustPairHost = false
@@ -309,8 +113,15 @@ struct ContentView: View {
                 trustPairHost = vm.isTrustedPairHost(pending.serverHost)
             }
             .onOpenURL { url in
+                if handleShortcutURL(url) {
+                    return
+                }
                 vm.applyPairingURL(url)
             }
+    }
+
+    private var pairingSheetView: some View {
+        lifecycleManagedView
             .sheet(item: Binding(
                 get: { vm.pendingPairing },
                 set: { if $0 == nil { vm.cancelPendingPairing() } }
@@ -324,7 +135,322 @@ struct ContentView: View {
                     }
                 )
             }
+    }
+
+    private func handleShortcutURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "mobaile" else { return false }
+        guard let host = url.host?.lowercased(), host == "shortcut" else { return false }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        let action = components.queryItems?.first(where: { $0.name == "action" })?.value?.lowercased() ?? ""
+        guard !action.isEmpty else { return false }
+
+        Task {
+            switch action {
+            case "start-voice":
+                await vm.handleStartVoiceTaskShortcut()
+            case "send-last-prompt":
+                await vm.handleSendLastPromptShortcut()
+            default:
+                break
+            }
         }
+        return true
+    }
+
+    private var conversationView: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    GeometryReader { geometry in
+                        Color.clear
+                            .preference(
+                                key: ConversationScrollMinYPreferenceKey.self,
+                                value: geometry.frame(in: .named("conversationScroll")).minY
+                            )
+                    }
+                    .frame(height: 0)
+
+                    BrandHeaderView()
+                        .padding(.top, 6)
+
+                    ForEach(vm.conversation) { message in
+                        HStack {
+                            if message.role == "user" {
+                                Spacer(minLength: 52)
+                            }
+                            MessageBubble(message: message, serverURL: vm.serverURL, apiToken: vm.apiToken)
+                            if message.role != "user" {
+                                Spacer(minLength: 52)
+                            }
+                        }
+                        .id(message.id)
+                    }
+
+                    if vm.conversation.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Start by typing or recording a prompt.")
+                                .font(.subheadline.weight(.medium))
+                            Text("MOBaiLE will stream the agent response here.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 20)
+                    }
+
+                    if !vm.errorText.isEmpty {
+                        Text(vm.errorText)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 4)
+            .coordinateSpace(name: "conversationScroll")
+            .safeAreaInset(edge: .top, spacing: showRuntimeInfoBar ? 4 : 0) {
+                if showRuntimeInfoBar {
+                    runtimeInfoBar
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if !showRuntimeInfoBar {
+                    floatingSettingsButton
+                        .padding(.top, 8)
+                        .padding(.leading, 12)
+                        .transition(.opacity)
+                }
+            }
+            .onChange(of: vm.conversation.count) {
+                if let last = vm.conversation.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+            .onPreferenceChange(ConversationScrollMinYPreferenceKey.self) { minY in
+                updateRuntimeInfoBarVisibility(with: minY)
+            }
+            .animation(.easeInOut(duration: 0.18), value: showRuntimeInfoBar)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    composerFocused = false
+                }
+            )
+            .safeAreaInset(edge: .bottom) {
+                composerBar
+            }
+        }
+    }
+
+    private var settingsSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Connection") {
+                    TextField("Server URL", text: $vm.serverURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote.monospaced())
+                    SecureField("API Token", text: $vm.apiToken)
+                        .font(.footnote.monospaced())
+                    TextField("Session ID", text: $vm.sessionID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Section("Execution") {
+                    TextField("Working directory", text: $vm.workingDirectory)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote.monospaced())
+                    Text("Folder where commands run and files are created. In safe mode, this must stay inside the backend workdir root.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Timeout seconds", text: $vm.runTimeoutSeconds)
+                        .keyboardType(.numberPad)
+                    Text("Max time to wait for a run before the app marks it as timed out.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("Agent guidance", selection: $vm.agentGuidanceMode) {
+                        Text("Guided").tag("guided")
+                        Text("Minimal").tag("minimal")
+                    }
+                    .pickerStyle(.segmented)
+                    Text(vm.agentGuidanceMode == "minimal"
+                        ? "Minimal: keeps chat focused on final results with fewer progress updates."
+                        : "Guided: includes short progress updates and clearer result context.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("Chat detail", value: "Concise")
+                    Text("Verbose chat mode removed. Use Run Logs for full execution events.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if vm.developerMode {
+                        Picker("Executor", selection: $vm.executor) {
+                            Text("Local").tag("local")
+                            Text("Codex").tag("codex")
+                        }
+                        .pickerStyle(.segmented)
+                    } else {
+                        LabeledContent("Executor", value: "Codex")
+                    }
+                }
+                Section("App") {
+                    Toggle("Developer Mode", isOn: $vm.developerMode)
+                    Toggle("AirPods Click To Record", isOn: $vm.airPodsClickToRecordEnabled)
+                    Toggle("Hide Hidden Folders", isOn: $vm.hideDotFoldersInBrowser)
+                    Toggle("Haptic Cues", isOn: $vm.hapticCuesEnabled)
+                    Toggle("Audio Cues", isOn: $vm.audioCuesEnabled)
+                    Toggle("Auto-send After Silence", isOn: $vm.autoSendAfterSilenceEnabled)
+                    if vm.autoSendAfterSilenceEnabled {
+                        TextField("Silence seconds", text: $vm.autoSendAfterSilenceSeconds)
+                            .keyboardType(.decimalPad)
+                        Text("Hands-free mode: auto-submits after this much silence while recording.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("Backend mode", value: vm.backendSecurityMode)
+                    LabeledContent("Codex model", value: vm.backendCodexModel)
+                    Text(vm.developerMode
+                        ? "Enables local executor switching."
+                        : "Keeps production-safe defaults (Codex executor only).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("AirPods click uses headset play/pause controls to start recording and stop+send.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        vm.hideDirectoryBrowser()
+                        vm.persistSettings()
+                        showConnectionSettings = false
+                    }
+                }
+            }
+        }
+    }
+
+    private var composerBar: some View {
+        VStack(spacing: 6) {
+            if !vm.statusText.isEmpty && vm.statusText != "Idle" {
+                HStack {
+                    if !vm.runID.isEmpty {
+                        Text("Run \(shortRunID(vm.runID))")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if vm.isLoading {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Text(bottomRunStatusText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $vm.promptText)
+                        .focused($composerFocused)
+                        .scrollContentBackground(.hidden)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 5)
+                        .frame(height: composerHeight)
+                        .background(Color(.tertiarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Message MOBaiLE")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 12)
+                            .padding(.top, 14)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.16), value: composerHeight)
+
+                HStack(spacing: 6) {
+                    Button {
+                        Task {
+                            if vm.isRecording {
+                                await vm.stopRecordingAndSend()
+                            } else {
+                                await vm.startRecording()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: vm.isRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(vm.isRecording ? .red : .blue)
+                    .background(
+                        Circle()
+                            .fill(Color(.tertiarySystemBackground))
+                    )
+                    .disabled(vm.isLoading || vm.apiToken.isEmpty || vm.serverURL.isEmpty)
+
+                    if vm.isLoading && !vm.runID.isEmpty {
+                        Button {
+                            Task { await vm.cancelCurrentRun() }
+                        } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .background(
+                            Circle()
+                                .fill(Color.red)
+                        )
+                    } else {
+                        Button {
+                            Task { await vm.sendPrompt() }
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 14, weight: .bold))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .background(
+                            Circle()
+                                .fill(Color.accentColor)
+                        )
+                        .disabled(
+                            vm.apiToken.isEmpty ||
+                            vm.serverURL.isEmpty ||
+                            vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                            vm.isRecording
+                        )
+                    }
+                }
+                .opacity((vm.apiToken.isEmpty || vm.serverURL.isEmpty) ? 0.55 : 1)
+            }
+            .padding(8)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 5)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 14)
+                .onEnded { value in
+                    let downward = value.translation.height
+                    let sideways = abs(value.translation.width)
+                    guard downward > 24, downward > sideways else { return }
+                    composerFocused = false
+                }
+        )
     }
 
     private func shortRunID(_ runID: String) -> String {
@@ -347,10 +473,10 @@ struct ContentView: View {
     private var composerHeight: CGFloat {
         let trimmed = vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !composerFocused && trimmed.isEmpty {
-            return 44
+            return 38
         }
         let lineCount = max(1, vm.promptText.split(separator: "\n", omittingEmptySubsequences: false).count)
-        return min(152, max(76, CGFloat(lineCount) * 24 + 30))
+        return min(132, max(66, CGFloat(lineCount) * 22 + 24))
     }
 
     private var runtimeExecutorLabel: String {
@@ -365,27 +491,7 @@ struct ContentView: View {
     }
 
     private var runtimeInfoBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(runtimeExecutorLabel)
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color(.tertiarySystemBackground))
-                    .clipShape(Capsule())
-                if !vm.runID.isEmpty {
-                    Text("run: \(shortRunID(vm.runID))")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if !vm.statusText.isEmpty && vm.statusText != "Idle" {
-                    Text(vm.statusText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
+        VStack(alignment: .leading, spacing: 6) {
             Button {
                 Task { await vm.toggleDirectoryBrowser() }
             } label: {
@@ -393,11 +499,23 @@ struct ContentView: View {
                     Image(systemName: vm.showDirectoryBrowser ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    Text(runtimeExecutorLabel)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(.tertiarySystemBackground))
+                        .clipShape(Capsule())
                     Text("cwd: \(runtimeDirectoryLabel)")
                         .font(.caption2.monospaced())
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .foregroundStyle(.secondary)
+                    if !vm.statusText.isEmpty && vm.statusText != "Idle" {
+                        Text(bottomRunStatusText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -406,8 +524,8 @@ struct ContentView: View {
                 directoryBrowserPanel
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
         .background(Color(.systemBackground).opacity(0.96))
         .overlay(
             Rectangle()
@@ -415,6 +533,52 @@ struct ContentView: View {
                 .frame(height: 0.5),
             alignment: .bottom
         )
+    }
+
+    private var floatingSettingsButton: some View {
+        Button {
+            showConnectionSettings = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .foregroundStyle(.primary)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settings")
+    }
+
+    private func updateRuntimeInfoBarVisibility(with minY: CGFloat) {
+        if !hasTrackedScrollPosition {
+            hasTrackedScrollPosition = true
+            lastScrollMinY = minY
+            return
+        }
+
+        let delta = minY - lastScrollMinY
+        lastScrollMinY = minY
+
+        if vm.showDirectoryBrowser {
+            if !showRuntimeInfoBar {
+                showRuntimeInfoBar = true
+            }
+            return
+        }
+
+        if minY >= -8 {
+            if !showRuntimeInfoBar {
+                showRuntimeInfoBar = true
+            }
+            return
+        }
+
+        let threshold: CGFloat = 10
+        if delta < -threshold, showRuntimeInfoBar {
+            showRuntimeInfoBar = false
+        } else if delta > threshold, !showRuntimeInfoBar {
+            showRuntimeInfoBar = true
+        }
     }
 
     private var directoryBrowserPanel: some View {
@@ -504,38 +668,69 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(vm.directoryBrowserEntries.prefix(20)) { entry in
-                    Button {
-                        Task { await vm.openDirectoryEntry(entry) }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
-                                .font(.caption2)
-                                .foregroundStyle(entry.isDirectory ? .blue : .secondary)
-                            Text(entry.name)
-                                .font(.caption2.monospaced())
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if entry.isDirectory {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!entry.isDirectory)
-                }
-                if vm.directoryBrowserTruncated {
-                    Text("Showing first 20 entries.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                directoryEntriesContent
             }
         }
         .padding(8)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var directoryEntriesContent: some View {
+        if vm.filteredDirectoryBrowserEntries.isEmpty {
+            Text("Only hidden folders in this directory. Disable filter in Settings to view them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(vm.filteredDirectoryBrowserEntries) { entry in
+                        Button {
+                            Task { await vm.openDirectoryEntry(entry) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
+                                    .font(.caption2)
+                                    .foregroundStyle(entry.isDirectory ? .blue : .secondary)
+                                Text(entry.name)
+                                    .font(.caption2.monospaced())
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if entry.isDirectory {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!entry.isDirectory)
+                    }
+                }
+            }
+            .frame(maxHeight: 220)
+        }
+
+        if vm.hideDotFoldersInBrowser && vm.hiddenDotFolderCount > 0 {
+            Text("Hidden folders filtered: \(vm.hiddenDotFolderCount).")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+
+        if vm.directoryBrowserTruncated {
+            Text("Listing truncated by backend.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ConversationScrollMinYPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = .zero
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

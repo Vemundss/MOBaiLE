@@ -105,6 +105,58 @@ Manual fallback (in MOBaiLE app settings):
 
 If this works on cellular, your on-the-go setup is complete.
 
+## On-The-Go Power Features
+
+These are built in and can be enabled in a few minutes.
+
+### 1) Lock screen / Home screen widget: "Start Voice Task"
+
+On iPhone:
+1. Long-press Home or Lock Screen.
+2. Tap `Edit` / `Customize`.
+3. Add widget: **MOBaiLE**.
+4. Pick the widget variant you prefer.
+5. Tap the widget to launch MOBaiLE and start recording immediately.
+
+### 2) Haptic + audio recording cues
+
+In MOBaiLE app:
+1. Open `Settings` (slider icon).
+2. In `App` section:
+   - enable `Haptic Cues`
+   - enable `Audio Cues`
+3. Tap `Done`.
+
+Behavior:
+- short cue when recording starts
+- success cue when audio is sent
+- error cue if recording/send fails
+
+### 3) Hands-free mode: auto-send after silence
+
+In MOBaiLE app:
+1. Open `Settings` -> `App`.
+2. Enable `Auto-send After Silence`.
+3. Set `Silence seconds` (recommended: `1.0` to `1.5`).
+4. Tap `Done`.
+
+Now recording will auto-submit when you stop speaking for the configured time.
+
+### 4) Siri / Shortcuts intents
+
+Available intents:
+- `Start Voice Task`
+- `Send Last Prompt`
+
+On iPhone:
+1. Open `Shortcuts` app.
+2. Tap `+` -> `Add Action`.
+3. Search for `MOBaiLE`.
+4. Add one of the actions above.
+5. (Optional) assign a Siri phrase and/or pin it as a Home Screen shortcut.
+
+Tip: You can combine this with AirPods click-to-record for near hands-free usage.
+
 ## Usage Examples
 
 ### Example 1: Send a task through backend API

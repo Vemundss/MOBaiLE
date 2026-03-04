@@ -109,6 +109,7 @@ CODEX_USE_CONTEXT = os.getenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true").strip().l
 }
 CODEX_CONTEXT_FILE = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "AGENT_CONTEXT.md").strip()
 CODEX_GUARDRAILS = os.getenv("VOICE_AGENT_CODEX_GUARDRAILS", "warn").strip().lower()
+CODEX_MODEL_OVERRIDE = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
 CODEX_DANGEROUS_CONFIRM_TOKEN = os.getenv(
     "VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN", "[allow-dangerous]"
 ).strip()
@@ -427,6 +428,7 @@ def get_run(run_id: str) -> RunRecord:
 def get_runtime_config() -> dict[str, object]:
     return {
         "security_mode": SECURITY_MODE,
+        "codex_model": CODEX_MODEL_OVERRIDE or None,
         "workdir_root": str(WORKDIR_ROOT) if WORKDIR_ROOT is not None else None,
         "allow_absolute_file_reads": ALLOW_ABSOLUTE_FILE_READS,
         "file_roots": [str(root) for root in FILE_ROOTS],
@@ -1433,7 +1435,13 @@ def _build_codex_prompt(
             "- Do not store MOBaiLE persistence in `~/.codex/*`.\n"
             "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
         )
-    if not context and not session_block:
+    hygiene_block = (
+        "Execution hygiene:\n"
+        "- Keep generated files/images inside the current working directory.\n"
+        "- Prefer project-local environments (for example `.mobaile/.venv`) for extra packages.\n"
+        "- Ask before installing packages user-wide or system-wide.\n\n"
+    )
+    if not context and not session_block and not hygiene_block:
         return user_prompt
     if context:
         runtime_block = (
@@ -1446,6 +1454,7 @@ def _build_codex_prompt(
         "You are running through MOBaiLE.\n\n"
         f"{runtime_block}"
         f"{session_block}"
+        f"{hygiene_block}"
         "User request:\n"
         f"{user_prompt}"
     )

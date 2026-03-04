@@ -6,14 +6,16 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PAIRING_FILE="${REPO_ROOT}/backend/pairing.json"
 OUT_FILE="${REPO_ROOT}/backend/pairing-qr.png"
 FORMAT="url"
+QR_SCALE="12"
 
 usage() {
   cat <<EOF
-Usage: bash ./scripts/pairing_qr.sh [--out <path>] [--format url|json]
+Usage: bash ./scripts/pairing_qr.sh [--out <path>] [--format url|json] [--scale <int>]
 
 Reads backend/pairing.json and generates a local QR code image.
   --format url   QR encodes mobaile://pair deep link (default)
   --format json  QR encodes raw {"server_url","pair_code","session_id"} JSON
+  --scale <int>  QR pixel scale (default: 12)
 EOF
 }
 
@@ -25,6 +27,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --format)
       FORMAT="$2"
+      shift 2
+      ;;
+    --scale)
+      QR_SCALE="$2"
       shift 2
       ;;
     -h|--help)
@@ -90,9 +96,15 @@ else
 fi
 
 if command -v qrencode >/dev/null 2>&1; then
-  qrencode -o "${OUT_FILE}" "${PAYLOAD}"
+  if ! [[ "${QR_SCALE}" =~ ^[0-9]+$ ]] || [[ "${QR_SCALE}" -lt 1 ]]; then
+    echo "Invalid --scale: ${QR_SCALE} (expected positive integer)" >&2
+    exit 1
+  fi
+
+  qrencode -s "${QR_SCALE}" -o "${OUT_FILE}" "${PAYLOAD}"
   echo "QR image written to: ${OUT_FILE}"
   echo "Format: ${FORMAT}"
+  echo "Scale: ${QR_SCALE}"
   echo
   echo "Terminal preview:"
   qrencode -t ansiutf8 "${PAYLOAD}" || true

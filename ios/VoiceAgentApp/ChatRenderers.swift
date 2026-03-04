@@ -810,6 +810,7 @@ private struct RemoteImageView: View {
     @State private var loadedImage: Image?
     @State private var isLoading = false
     @State private var didFail = false
+    @State private var failureMessage = "Image failed to load"
 
     var body: some View {
         Group {
@@ -821,7 +822,7 @@ private struct RemoteImageView: View {
             } else if isLoading {
                 ProgressView()
             } else if didFail {
-                Text("Image failed to load")
+                Text(failureMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -836,11 +837,13 @@ private struct RemoteImageView: View {
 
     private func loadImage() async {
         guard let url = URL(string: urlString) else {
+            failureMessage = "Invalid image URL."
             didFail = true
             return
         }
         isLoading = true
         didFail = false
+        failureMessage = "Image failed to load"
         do {
             let data = try await client.fetchURLData(
                 serverURL: serverURL,
@@ -849,13 +852,33 @@ private struct RemoteImageView: View {
                 timeout: 20
             )
             guard let uiImage = UIImage(data: data) else {
+                failureMessage = "Downloaded file is not a valid image."
                 didFail = true
                 isLoading = false
                 return
             }
             loadedImage = Image(uiImage: uiImage)
             isLoading = false
+        } catch let apiError as APIError {
+            switch apiError {
+            case let .httpError(code, body):
+                let lower = body.lowercased()
+                if code == 403 && lower.contains("outside allowed roots") {
+                    failureMessage = "Image blocked by safe mode: file is outside allowed roots."
+                } else if code == 403 {
+                    failureMessage = "Image access denied by backend."
+                } else if code == 404 {
+                    failureMessage = "Image file not found on backend."
+                } else {
+                    failureMessage = "Image failed to load (HTTP \(code))."
+                }
+            default:
+                failureMessage = apiError.localizedDescription
+            }
+            didFail = true
+            isLoading = false
         } catch {
+            failureMessage = error.localizedDescription
             didFail = true
             isLoading = false
         }
@@ -900,19 +923,24 @@ private func extractImagePath(from text: String) -> String {
     let stripped = text
         .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" "))
         .replacingOccurrences(of: "file://", with: "")
-    let lower = stripped.lowercased()
-    let extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
-    guard let ext = extensions.first(where: { lower.contains($0) }),
-          let end = lower.range(of: ext)?.upperBound else {
-        return stripped
+    let absolutePattern = #"/[^\s`'\"()]+?\.(?:png|jpg|jpeg|gif|webp)"#
+    if let regex = try? NSRegularExpression(pattern: absolutePattern, options: [.caseInsensitive]) {
+        let range = NSRange(stripped.startIndex..., in: stripped)
+        if let match = regex.firstMatch(in: stripped, options: [], range: range),
+           let pathRange = Range(match.range, in: stripped) {
+            return String(stripped[pathRange])
+        }
     }
-    let originalEnd = stripped.index(stripped.startIndex, offsetBy: lower.distance(from: lower.startIndex, to: end))
-    let prefix = stripped[..<originalEnd]
-    if let startSlash = prefix.lastIndex(of: "/") {
-        let candidate = stripped[startSlash..<originalEnd]
-        return String(candidate)
+
+    let relativePattern = #"[^\s`'\"()]+?\.(?:png|jpg|jpeg|gif|webp)"#
+    if let regex = try? NSRegularExpression(pattern: relativePattern, options: [.caseInsensitive]) {
+        let range = NSRange(stripped.startIndex..., in: stripped)
+        if let match = regex.firstMatch(in: stripped, options: [], range: range),
+           let pathRange = Range(match.range, in: stripped) {
+            return String(stripped[pathRange])
+        }
     }
-    return String(prefix)
+    return stripped
 }
 
 private func decodeChatEnvelopeJSON(_ value: String) -> ChatEnvelope? {

@@ -60,6 +60,7 @@ def test_profile_memory_seed_and_prompt_block(monkeypatch, tmp_path: Path):
     assert "Persistent AGENTS profile" in built
     assert "Persistent MEMORY" in built
     assert "~/.codex" in built
+    assert "Ask before installing packages user-wide or system-wide." in built
     assert "check calendar today" in built
 
 

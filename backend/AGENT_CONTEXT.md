@@ -25,6 +25,13 @@ Output style for phone UX:
 - For created images, include markdown image syntax with an absolute path:
   - `![description](/absolute/path/to/file.png)`
 - If you create files, report exact paths clearly.
+- In safe mode, files outside backend allowed roots cannot be opened in-app.
+- Save generated files/images inside the current working directory whenever possible.
+
+Dependency/install hygiene:
+- Avoid user-wide/system-wide package installs by default.
+- If a package is needed, prefer a local project environment first (for example `.mobaile/.venv` in cwd).
+- Ask for explicit confirmation before any global install (`pip install --user`, system package manager, etc.).
 
 Task-specific formatting:
 - Calendar requests: return a compact agenda list with one event per line:

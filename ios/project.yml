@@ -11,6 +11,9 @@ targets:
     platform: iOS
     sources:
       - VoiceAgentApp
+    dependencies:
+      - target: VoiceTaskWidgetExtension
+        embed: true
     info:
       path: VoiceAgentApp/Info.plist
       properties:
@@ -21,13 +24,19 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSMicrophoneUsageDescription: Voice Agent needs microphone access to record audio and send it to your backend.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.vemundss.voiceagentapp
+            CFBundleURLSchemes:
+              - mobaile
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "G9VZ6PWF3Z"
         TARGETED_DEVICE_FAMILY: "1,2"
 
   VoiceAgentAppTests:
@@ -44,6 +53,25 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.tests
+
+  VoiceTaskWidgetExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - VoiceAgentWidget
+    info:
+      path: VoiceAgentWidget/Info.plist
+      properties:
+        CFBundleDisplayName: MOBaiLE Widget
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.widget
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "G9VZ6PWF3Z"
 
 schemes:
   VoiceAgentApp:
