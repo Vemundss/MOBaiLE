@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MOBaiLE Privacy Policy</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #1b1f2a;
+      --muted: #4a5266;
+      --accent: #2357d6;
+      --border: #e3e8f3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: var(--text);
+      background: radial-gradient(circle at top left, #e9efff 0%, var(--bg) 48%, #f2f4f9 100%);
+      padding: 24px;
+    }
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 8px 22px rgba(27, 31, 42, 0.08);
+    }
+    h1 { margin-top: 0; line-height: 1.25; }
+    h2 { margin-top: 28px; margin-bottom: 8px; }
+    p, li { color: var(--muted); }
+    ul { padding-left: 20px; }
+    a { color: var(--accent); }
+    .updated {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #edf2ff;
+      color: #284078;
+      font-size: 13px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Privacy Policy for MOBaiLE</h1>
+    <div class="updated">Last updated: March 5, 2026</div>
+
+    <p>
+      This Privacy Policy explains how MOBaiLE ("the app") processes information when you use the iOS app.
+      MOBaiLE is designed to connect to a backend server that you configure and control.
+    </p>
+
+    <h2>Information the app processes</h2>
+    <ul>
+      <li>Connection settings such as server URL and session ID.</li>
+      <li>API token used to authenticate to your backend (stored in iOS Keychain).</li>
+      <li>Text prompts and chat history you submit in the app.</li>
+      <li>Voice recordings when you choose to use microphone input.</li>
+      <li>Run status, logs, and result metadata returned by your backend.</li>
+    </ul>
+
+    <h2>How information is used</h2>
+    <p>
+      The app uses this information only to run your requested tasks, show run progress/results, and persist local
+      app state (for example, your settings and chat threads).
+    </p>
+
+    <h2>Where information is sent</h2>
+    <p>
+      The iOS app sends prompts/audio and related metadata to the backend server URL you configure. If your backend
+      is configured to call third-party providers (for example, AI or transcription services), data may also be
+      processed by those providers under their own policies.
+    </p>
+
+    <h2>Data sharing and sale</h2>
+    <p>
+      The app does not sell personal data and does not include advertising SDKs or third-party analytics/tracking
+      libraries.
+    </p>
+
+    <h2>Data retention and deletion</h2>
+    <ul>
+      <li>On-device settings and chat history remain until you delete them or uninstall the app.</li>
+      <li>Backend-side retention depends on your backend setup and configuration.</li>
+      <li>You can remove app data by uninstalling MOBaiLE and deleting backend data on your server.</li>
+    </ul>
+
+    <h2>Security</h2>
+    <p>
+      You are responsible for securing your backend endpoint. Use HTTPS for non-local connections and manage API
+      tokens carefully.
+    </p>
+
+    <h2>Children's privacy</h2>
+    <p>
+      MOBaiLE is not directed to children under 13.
+    </p>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      This policy may be updated over time. Changes will be published at this URL with a revised "Last updated" date.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      For privacy questions, open an issue at
+      <a href="https://github.com/vemundss/MOBaiLE/issues">github.com/vemundss/MOBaiLE/issues</a>.
+    </p>
+  </main>
+</body>
+</html>

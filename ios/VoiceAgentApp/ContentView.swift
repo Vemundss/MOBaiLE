@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var showThreads = false
     @State private var newDirectoryName = ""
     @State private var trustPairHost = false
+    private let privacyPolicyURL = URL(string: "https://vemundss.github.io/MOBaiLE/privacy-policy.html")
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -282,6 +283,9 @@ struct ContentView: View {
                     }
                     LabeledContent("Backend mode", value: vm.backendSecurityMode)
                     LabeledContent("Codex model", value: vm.backendCodexModel)
+                    if let privacyPolicyURL {
+                        Link("Privacy Policy", destination: privacyPolicyURL)
+                    }
                     Text(vm.developerMode
                         ? "Enables local executor switching."
                         : "Keeps production-safe defaults (Codex executor only).")
