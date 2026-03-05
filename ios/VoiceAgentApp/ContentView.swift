@@ -8,9 +8,6 @@ struct ContentView: View {
     @State private var showThreads = false
     @State private var newDirectoryName = ""
     @State private var trustPairHost = false
-    @State private var showRuntimeInfoBar = true
-    @State private var lastScrollMinY: CGFloat = .zero
-    @State private var hasTrackedScrollPosition = false
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -25,36 +22,36 @@ struct ContentView: View {
     private var baseNavigationView: some View {
         NavigationStack {
             conversationView
-        }
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    showConnectionSettings = true
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
+                .navigationTitle("MOBaiLE")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showConnectionSettings = true
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 10) {
+                            Button {
+                                showThreads = true
+                            } label: {
+                                Image(systemName: "text.bubble")
+                            }
+                            .accessibilityLabel("Threads")
+                            Button {
+                                showLogs = true
+                            } label: {
+                                Image(systemName: "doc.text.magnifyingglass")
+                            }
+                            Button("New Chat") {
+                                vm.startNewChat()
+                            }
+                            .font(.subheadline.weight(.semibold))
+                        }
+                    }
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 10) {
-                    Button {
-                        showThreads = true
-                    } label: {
-                        Image(systemName: "text.bubble")
-                    }
-                    .accessibilityLabel("Threads")
-                    Button {
-                        showLogs = true
-                    } label: {
-                        Image(systemName: "doc.text.magnifyingglass")
-                    }
-                    Button("New Chat") {
-                        vm.startNewChat()
-                    }
-                    .font(.subheadline.weight(.semibold))
-                }
-            }
         }
     }
 
@@ -161,15 +158,6 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    GeometryReader { geometry in
-                        Color.clear
-                            .preference(
-                                key: ConversationScrollMinYPreferenceKey.self,
-                                value: geometry.frame(in: .named("conversationScroll")).minY
-                            )
-                    }
-                    .frame(height: 0)
-
                     BrandHeaderView()
                         .padding(.top, 6)
 
@@ -208,30 +196,14 @@ struct ContentView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 4)
-            .coordinateSpace(name: "conversationScroll")
-            .safeAreaInset(edge: .top, spacing: showRuntimeInfoBar ? 4 : 0) {
-                if showRuntimeInfoBar {
-                    runtimeInfoBar
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .overlay(alignment: .topLeading) {
-                if !showRuntimeInfoBar {
-                    floatingSettingsButton
-                        .padding(.top, 8)
-                        .padding(.leading, 12)
-                        .transition(.opacity)
-                }
+            .safeAreaInset(edge: .top, spacing: 4) {
+                runtimeInfoBar
             }
             .onChange(of: vm.conversation.count) {
                 if let last = vm.conversation.last {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
-            .onPreferenceChange(ConversationScrollMinYPreferenceKey.self) { minY in
-                updateRuntimeInfoBarVisibility(with: minY)
-            }
-            .animation(.easeInOut(duration: 0.18), value: showRuntimeInfoBar)
             .simultaneousGesture(
                 TapGesture().onEnded {
                     composerFocused = false
@@ -492,33 +464,35 @@ struct ContentView: View {
 
     private var runtimeInfoBar: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button {
-                Task { await vm.toggleDirectoryBrowser() }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: vm.showDirectoryBrowser ? "chevron.down" : "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(runtimeExecutorLabel)
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color(.tertiarySystemBackground))
-                        .clipShape(Capsule())
-                    Text("cwd: \(runtimeDirectoryLabel)")
-                        .font(.caption2.monospaced())
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .foregroundStyle(.secondary)
-                    if !vm.statusText.isEmpty && vm.statusText != "Idle" {
-                        Text(bottomRunStatusText)
-                            .font(.caption2)
+            HStack(spacing: 8) {
+                Button {
+                    Task { await vm.toggleDirectoryBrowser() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: vm.showDirectoryBrowser ? "chevron.down" : "chevron.right")
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
+                        Text(runtimeExecutorLabel)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color(.tertiarySystemBackground))
+                            .clipShape(Capsule())
+                        Text("cwd: \(runtimeDirectoryLabel)")
+                            .font(.caption2.monospaced())
                             .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(.secondary)
+                        if !vm.statusText.isEmpty && vm.statusText != "Idle" {
+                            Text(bottomRunStatusText)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             if vm.showDirectoryBrowser {
                 directoryBrowserPanel
@@ -533,52 +507,6 @@ struct ContentView: View {
                 .frame(height: 0.5),
             alignment: .bottom
         )
-    }
-
-    private var floatingSettingsButton: some View {
-        Button {
-            showConnectionSettings = true
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 14, weight: .semibold))
-                .frame(width: 30, height: 30)
-                .foregroundStyle(.primary)
-                .background(.ultraThinMaterial, in: Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Settings")
-    }
-
-    private func updateRuntimeInfoBarVisibility(with minY: CGFloat) {
-        if !hasTrackedScrollPosition {
-            hasTrackedScrollPosition = true
-            lastScrollMinY = minY
-            return
-        }
-
-        let delta = minY - lastScrollMinY
-        lastScrollMinY = minY
-
-        if vm.showDirectoryBrowser {
-            if !showRuntimeInfoBar {
-                showRuntimeInfoBar = true
-            }
-            return
-        }
-
-        if minY >= -8 {
-            if !showRuntimeInfoBar {
-                showRuntimeInfoBar = true
-            }
-            return
-        }
-
-        let threshold: CGFloat = 10
-        if delta < -threshold, showRuntimeInfoBar {
-            showRuntimeInfoBar = false
-        } else if delta > threshold, !showRuntimeInfoBar {
-            showRuntimeInfoBar = true
-        }
     }
 
     private var directoryBrowserPanel: some View {
@@ -723,14 +651,6 @@ struct ContentView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-    }
-}
-
-private struct ConversationScrollMinYPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = .zero
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

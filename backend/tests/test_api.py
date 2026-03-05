@@ -394,6 +394,50 @@ def test_file_fetch_endpoint(monkeypatch, tmp_path: Path):
     assert resp.text == "hello-file"
 
 
+def test_file_fetch_relative_path_uses_default_workdir(monkeypatch, tmp_path: Path):
+    workdir = tmp_path / "workspace"
+    workdir.mkdir(parents=True, exist_ok=True)
+    file_path = workdir / "plot_xy_temp.png"
+    file_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workdir),
+            "VOICE_AGENT_FILE_ROOTS": str(workdir),
+        },
+    )
+    resp = client.get(
+        "/v1/files",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": "plot_xy_temp.png"},
+    )
+    assert resp.status_code == 200
+    assert resp.content.startswith(b"\x89PNG")
+
+
+def test_file_fetch_absolute_blocked_when_disabled(monkeypatch, tmp_path: Path):
+    file_path = tmp_path / "sample.txt"
+    file_path.write_text("hello-file", encoding="utf-8")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_FILE_ROOTS": str(tmp_path),
+            "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS": "false",
+        },
+    )
+    resp = client.get(
+        "/v1/files",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(file_path)},
+    )
+    assert resp.status_code == 403
+    assert "absolute file paths are disabled" in resp.json()["detail"].lower()
+
+
 def test_file_fetch_rejects_outside_allowed_roots(monkeypatch, tmp_path: Path):
     outside = tmp_path / "outside.txt"
     outside.write_text("nope", encoding="utf-8")
@@ -521,6 +565,22 @@ def test_workdir_restricted_in_safe_mode(monkeypatch, tmp_path: Path):
     )
     assert resp.status_code == 400
     assert "working_directory" in resp.json()["detail"]
+
+
+def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_CODEX_MODEL": "gpt-5.1"},
+    )
+    resp = client.get(
+        "/v1/config",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["codex_model"] == "gpt-5.1"
 
 
 def test_pair_exchange_returns_api_token_and_rotates_code(monkeypatch, tmp_path: Path):

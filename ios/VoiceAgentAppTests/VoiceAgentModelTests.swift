@@ -42,4 +42,24 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.artifacts.count, 1)
         XCTAssertEqual(decoded.artifacts.first?.path, "/Users/test/hello.py")
     }
+
+    func testExtractImagePathKeepsAbsolutePathWithSpaces() {
+        let raw = "`/Users/test/Mobile Documents/plots/plot_xy_temp.png`"
+        let extracted = _test_extractImagePath(raw)
+        XCTAssertEqual(extracted, "/Users/test/Mobile Documents/plots/plot_xy_temp.png")
+    }
+
+    func testResolveImageURLEncodesAbsolutePathWithSpaces() {
+        let raw = "/Users/test/Mobile Documents/plots/plot_xy_temp.png"
+        let resolved = _test_resolveImageURL(raw, serverURL: "http://127.0.0.1:8000")
+        XCTAssertNotNil(resolved)
+        XCTAssertTrue(resolved?.hasPrefix("http://127.0.0.1:8000/v1/files?path=") == true)
+        XCTAssertTrue(resolved?.contains("Mobile%20Documents") == true)
+        XCTAssertTrue(resolved?.contains(".png") == true)
+    }
+
+    func testResolveImageURLRejectsPlaceholderPath() {
+        let resolved = _test_resolveImageURL("/absolute/path/to/file.png", serverURL: "http://127.0.0.1:8000")
+        XCTAssertNil(resolved)
+    }
 }

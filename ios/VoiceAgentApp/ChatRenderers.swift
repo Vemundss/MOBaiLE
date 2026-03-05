@@ -923,7 +923,7 @@ private func extractImagePath(from text: String) -> String {
     let stripped = text
         .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" "))
         .replacingOccurrences(of: "file://", with: "")
-    let absolutePattern = #"/[^\s`'\"()]+?\.(?:png|jpg|jpeg|gif|webp)"#
+    let absolutePattern = #"/[^`'\"()\n]+?\.(?:png|jpg|jpeg|gif|webp)"#
     if let regex = try? NSRegularExpression(pattern: absolutePattern, options: [.caseInsensitive]) {
         let range = NSRange(stripped.startIndex..., in: stripped)
         if let match = regex.firstMatch(in: stripped, options: [], range: range),
@@ -932,7 +932,7 @@ private func extractImagePath(from text: String) -> String {
         }
     }
 
-    let relativePattern = #"[^\s`'\"()]+?\.(?:png|jpg|jpeg|gif|webp)"#
+    let relativePattern = #"[^`'\"()\n]+?\.(?:png|jpg|jpeg|gif|webp)"#
     if let regex = try? NSRegularExpression(pattern: relativePattern, options: [.caseInsensitive]) {
         let range = NSRange(stripped.startIndex..., in: stripped)
         if let match = regex.firstMatch(in: stripped, options: [], range: range),
@@ -942,6 +942,16 @@ private func extractImagePath(from text: String) -> String {
     }
     return stripped
 }
+
+#if DEBUG
+func _test_extractImagePath(_ text: String) -> String {
+    extractImagePath(from: text)
+}
+
+func _test_resolveImageURL(_ raw: String, serverURL: String) -> String? {
+    resolveImageURL(from: raw, serverURL: serverURL)
+}
+#endif
 
 private func decodeChatEnvelopeJSON(_ value: String) -> ChatEnvelope? {
     guard let data = value.data(using: .utf8) else { return nil }
