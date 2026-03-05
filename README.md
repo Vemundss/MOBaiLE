@@ -19,8 +19,14 @@ Think of it as a practical "remote teammate in your pocket": you speak or type a
 
 Apple requires a public privacy policy URL for App Store submissions.
 
-This repo includes a privacy page at `docs/privacy-policy.html` and a deploy workflow:
-`.github/workflows/deploy-privacy-policy.yml`
+Current live policy URL (public):
+
+- `https://gist.github.com/Vemundss/c2ae60485e23c0c8a93115c039b03044`
+
+Use that URL in App Store Connect now.
+
+The repo also includes a privacy page at `docs/privacy-policy.html` and an optional GitHub Pages deploy workflow:
+`.github/workflows/deploy-privacy-policy.yml` (works when Pages is enabled/supported for the repo).
 
 ### Publish it
 
@@ -28,11 +34,7 @@ This repo includes a privacy page at `docs/privacy-policy.html` and a deploy wor
 2. In GitHub repo settings, enable Pages and select `GitHub Actions` as source.
 3. Wait for the `Deploy Privacy Policy` workflow to complete.
 
-### Use this URL in App Store Connect
-
-- `https://vemundss.github.io/MOBaiLE/privacy-policy.html`
-
-Also include the same URL inside the app (Settings -> App -> Privacy Policy).
+Also include the same public URL inside the app (Settings -> App -> Privacy Policy).
 
 ## Setup For On-The-Go Use (Outside Local Network)
 

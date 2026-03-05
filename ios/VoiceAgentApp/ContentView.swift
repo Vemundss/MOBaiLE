@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var showThreads = false
     @State private var newDirectoryName = ""
     @State private var trustPairHost = false
-    private let privacyPolicyURL = URL(string: "https://vemundss.github.io/MOBaiLE/privacy-policy.html")
+    private let privacyPolicyURL = URL(string: "https://gist.github.com/Vemundss/c2ae60485e23c0c8a93115c039b03044")
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
