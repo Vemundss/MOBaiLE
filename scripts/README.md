@@ -37,6 +37,11 @@ bash ./scripts/install_backend.sh --mode safe
 bash ./scripts/install_backend.sh --mode full-access
 ```
 
+Notes:
+- `install_backend.sh` defaults to local-only bind (`127.0.0.1`).
+- Add `--expose-network` when you want phone pairing over LAN/Tailscale.
+- `bootstrap_server.sh` already enables network exposure for you.
+
 Run environment and connectivity checks:
 
 ```bash
@@ -50,6 +55,19 @@ bash ./scripts/service_macos.sh install
 bash ./scripts/service_macos.sh sync
 bash ./scripts/service_macos.sh status
 bash ./scripts/service_macos.sh logs
+bash ./scripts/service_macos.sh warmup
+```
+
+Warmup runs automatically after `install/start/restart` unless disabled with:
+
+```bash
+export VOICE_AGENT_WARMUP_ON_START=false
+```
+
+Run capability warmup directly:
+
+```bash
+bash ./scripts/warmup_capabilities.sh
 ```
 
 Run end-to-end connection smoke using `backend/pairing.json`:

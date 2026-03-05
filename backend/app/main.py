@@ -19,12 +19,14 @@ from typing import Iterator, Literal
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from app.capabilities import collect_capabilities
 from app.executors.codex_executor import CodexExecutor
 from app.executors.local_executor import LocalExecutor
 from app.models.schemas import (
     ActionPlan,
     AgendaItem,
     AudioRunResponse,
+    CapabilitiesResponse,
     ChatArtifact,
     ChatEnvelope,
     ChatSection,
@@ -140,6 +142,12 @@ MAX_AUDIO_MB = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
 MAX_AUDIO_BYTES = int(MAX_AUDIO_MB * 1024 * 1024)
 MAX_DIRECTORY_ENTRIES = int(os.getenv("VOICE_AGENT_MAX_DIRECTORY_ENTRIES", "200"))
 MAX_EVENT_MESSAGE_CHARS = int(os.getenv("VOICE_AGENT_MAX_EVENT_MESSAGE_CHARS", "16000"))
+CAPABILITIES_REPORT_PATH = Path(
+    os.getenv(
+        "VOICE_AGENT_CAPABILITIES_REPORT_PATH",
+        str(Path(__file__).resolve().parent.parent / "data" / "capabilities.json"),
+    )
+).resolve()
 TRANSCRIBER = Transcriber()
 API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN", "")
 RUN_STORE = RunStore(
@@ -433,6 +441,22 @@ def get_runtime_config() -> dict[str, object]:
         "allow_absolute_file_reads": ALLOW_ABSOLUTE_FILE_READS,
         "file_roots": [str(root) for root in FILE_ROOTS],
     }
+
+
+@app.get("/v1/capabilities", response_model=CapabilitiesResponse)
+def get_capabilities(
+    deep: bool = Query(False),
+    launch_apps: bool = Query(False),
+) -> CapabilitiesResponse:
+    return collect_capabilities(
+        security_mode=SECURITY_MODE,
+        codex_binary=os.getenv("VOICE_AGENT_CODEX_BINARY", "codex"),
+        transcribe_provider=TRANSCRIBER.provider,
+        report_path=CAPABILITIES_REPORT_PATH,
+        deep=deep,
+        launch_apps=launch_apps,
+        fetch_calendar_events=_fetch_today_calendar_events,
+    )
 
 
 @app.get("/v1/tools/calendar/today")

@@ -56,7 +56,7 @@ Option B (manual, if you want full control):
 ```bash
 git clone https://github.com/vemundss/MOBaiLE.git
 cd MOBaiLE
-bash ./scripts/install_backend.sh --mode safe
+bash ./scripts/install_backend.sh --mode safe --expose-network
 bash ./scripts/service_macos.sh install   # macOS only
 bash ./scripts/doctor.sh
 bash ./scripts/pairing_qr.sh
@@ -212,12 +212,20 @@ cd backend
 uv run pytest -q
 ```
 
+Optional: enable commit-time secret scanning:
+
+```bash
+uv tool install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
 ## Troubleshooting
 
 - Pairing QR contains `127.0.0.1` instead of Tailscale URL:
   - ensure Tailscale is connected on computer, then re-run:
     ```bash
-    bash ./scripts/install_backend.sh --mode safe
+    bash ./scripts/install_backend.sh --mode safe --expose-network
     bash ./scripts/pairing_qr.sh
     ```
 - iPhone can pair on Wi-Fi but not on cellular:
@@ -245,3 +253,8 @@ npm run pair:qr
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Current status: [`STATUS.md`](STATUS.md)
 - Planned features: [`NEW_FEATURES.md`](NEW_FEATURES.md)
+
+## License
+
+This project is licensed under the Apache License, Version 2.0.
+See [`LICENSE`](LICENSE) for the full text.

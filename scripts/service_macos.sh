@@ -8,6 +8,8 @@ BACKEND_DIR="${REPO_ROOT}/backend"
 RUNTIME_DIR="${HOME}/Library/Application Support/MOBaiLE/backend-runtime"
 RUN_SCRIPT="${RUNTIME_DIR}/run_backend.sh"
 LOG_DIR="${RUNTIME_DIR}/logs"
+WARMUP_SCRIPT="${REPO_ROOT}/scripts/warmup_capabilities.sh"
+WARMUP_ON_START="${VOICE_AGENT_WARMUP_ON_START:-true}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 DOMAIN="gui/$(id -u)"
 
@@ -24,6 +26,7 @@ Commands:
   restart    Restart the launchd service
   status     Show launchd service state
   logs       Tail backend service logs
+  warmup     Run capability warmup against current backend
 EOF
 }
 
@@ -88,6 +91,18 @@ write_plist() {
 EOF
 }
 
+run_warmup_if_enabled() {
+  if [[ "${WARMUP_ON_START}" != "true" ]]; then
+    return
+  fi
+  if [[ ! -x "${WARMUP_SCRIPT}" ]]; then
+    echo "Warmup script missing or not executable: ${WARMUP_SCRIPT}" >&2
+    return
+  fi
+  echo "Running capability warmup..."
+  "${WARMUP_SCRIPT}" || true
+}
+
 bootout_if_loaded() {
   launchctl bootout "${DOMAIN}" "${PLIST_PATH}" >/dev/null 2>&1 || true
 }
@@ -99,6 +114,7 @@ install_service() {
   launchctl bootstrap "${DOMAIN}" "${PLIST_PATH}"
   launchctl enable "${DOMAIN}/${LABEL}" || true
   launchctl kickstart -k "${DOMAIN}/${LABEL}"
+  run_warmup_if_enabled
   echo "Installed and started ${LABEL}"
 }
 
@@ -118,6 +134,7 @@ start_service() {
   launchctl bootstrap "${DOMAIN}" "${PLIST_PATH}"
   launchctl enable "${DOMAIN}/${LABEL}" || true
   launchctl kickstart -k "${DOMAIN}/${LABEL}"
+  run_warmup_if_enabled
   echo "Started ${LABEL}"
 }
 
@@ -152,6 +169,7 @@ main() {
     restart) stop_service; start_service ;;
     status) status_service ;;
     logs) logs_service ;;
+    warmup) "${WARMUP_SCRIPT}" ;;
     *) usage; exit 1 ;;
   esac
 }

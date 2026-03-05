@@ -17,7 +17,7 @@ Usage: bash ./scripts/bootstrap_server.sh [--repo-url <url>] [--dir <path>] [--b
 
 Bootstraps MOBaiLE backend on a server/host machine:
 1) clone/update repository
-2) run backend install
+2) run backend install (network exposed for phone pairing)
 3) install/start macOS service (on macOS)
 4) run doctor checks
 5) generate pairing QR
@@ -108,7 +108,7 @@ main() {
   clone_or_update_repo
 
   cd "${INSTALL_DIR}"
-  bash ./scripts/install_backend.sh --mode "${MODE}"
+  bash ./scripts/install_backend.sh --mode "${MODE}" --expose-network
 
   if [[ "$(uname -s)" == "Darwin" ]]; then
     bash ./scripts/service_macos.sh install

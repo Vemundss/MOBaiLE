@@ -23,6 +23,7 @@ def make_client(
     monkeypatch.setenv("VOICE_AGENT_TRANSCRIBE_PROVIDER", provider)
     monkeypatch.setenv("OPENAI_API_KEY", openai_api_key)
     monkeypatch.setenv("VOICE_AGENT_DB_PATH", str(tmp_path / "runs.db"))
+    monkeypatch.setenv("VOICE_AGENT_CAPABILITIES_REPORT_PATH", str(tmp_path / "capabilities.json"))
     if extra_env:
         for key, value in extra_env.items():
             monkeypatch.setenv(key, value)
@@ -581,6 +582,46 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["codex_model"] == "gpt-5.1"
+
+
+def test_capabilities_endpoint_returns_report(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path, provider="mock")
+    resp = client.get(
+        "/v1/capabilities",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["report_path"] == str(tmp_path / "capabilities.json")
+    capability_ids = {item["id"] for item in payload["capabilities"]}
+    assert "codex_cli" in capability_ids
+    assert "uv_cli" in capability_ids
+    assert "transcribe_provider" in capability_ids
+    assert "calendar_adapter" in capability_ids
+    assert "mail_adapter" in capability_ids
+    report_path = tmp_path / "capabilities.json"
+    assert report_path.exists()
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report_payload["checked_at"]
+
+
+def test_capabilities_openai_probe_requires_key(monkeypatch, tmp_path: Path):
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="openai",
+        openai_api_key="",
+    )
+    resp = client.get(
+        "/v1/capabilities",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    by_id = {item["id"]: item for item in payload["capabilities"]}
+    transcribe_probe = by_id["transcribe_provider"]
+    assert transcribe_probe["status"] == "blocked"
+    assert transcribe_probe["code"] == "auth_missing"
 
 
 def test_pair_exchange_returns_api_token_and_rotates_code(monkeypatch, tmp_path: Path):

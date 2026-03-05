@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -177,3 +178,21 @@ class PairExchangeResponse(BaseModel):
     api_token: str
     session_id: str
     security_mode: Literal["safe", "full-access"]
+
+
+class CapabilityProbe(BaseModel):
+    id: str
+    title: str
+    status: Literal["ready", "degraded", "blocked", "unsupported"]
+    code: str
+    message: str
+    unattended_safe: bool = True
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapabilitiesResponse(BaseModel):
+    checked_at: str
+    host_platform: str
+    security_mode: Literal["safe", "full-access"]
+    capabilities: list[CapabilityProbe]
+    report_path: str | None = None

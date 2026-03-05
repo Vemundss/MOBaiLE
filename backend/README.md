@@ -15,6 +15,8 @@ cd backend
 bash ./run_backend.sh
 ```
 
+For phone pairing over LAN/Tailscale, add `--expose-network` to the install command.
+
 If you have Node/npm and prefer one command wrappers:
 
 ```bash
@@ -101,6 +103,7 @@ From repo root:
 
 ```bash
 bash ./scripts/doctor.sh
+bash ./scripts/warmup_capabilities.sh
 bash ./scripts/pairing_qr.sh
 bash ./scripts/service_macos.sh status
 ```

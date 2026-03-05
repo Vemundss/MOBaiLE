@@ -191,6 +191,20 @@ curl -s -H "Authorization: Bearer ${TOKEN}" \
   "http://127.0.0.1:8000/v1/runs/<run_id>/diagnostics"
 ```
 
+Probe runtime capabilities (light check):
+
+```bash
+curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8000/v1/capabilities"
+```
+
+Probe runtime capabilities (deep check, may trigger app permission prompts on macOS):
+
+```bash
+curl -s -H "Authorization: Bearer ${TOKEN}" \
+  "http://127.0.0.1:8000/v1/capabilities?deep=true&launch_apps=true"
+```
+
 List an existing directory (read-only):
 
 ```bash
