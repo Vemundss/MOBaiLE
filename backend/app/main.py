@@ -20,6 +20,19 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.capabilities import collect_capabilities
+from app.chat_envelope import coerce_assistant_text_to_envelope as _coerce_assistant_text_to_envelope
+from app.chat_envelope import extract_artifacts_from_text as _extract_artifacts_from_text
+from app.chat_envelope import merge_assistant_lines as _merge_assistant_lines
+from app.chat_envelope import parse_chat_envelope_payload as _parse_chat_envelope_payload
+from app.chat_envelope import split_sections_from_text as _split_sections_from_text
+from app.codex_text import CodexAssistantExtractor as _CodexAssistantExtractorImpl
+from app.codex_text import build_codex_prompt as _build_codex_prompt_impl
+from app.codex_text import codex_structured_message as _codex_structured_message_impl
+from app.codex_text import context_leak_markers as _context_leak_markers_impl
+from app.codex_text import evaluate_codex_guardrails as _evaluate_codex_guardrails_impl
+from app.codex_text import is_calendar_request as _is_calendar_request_impl
+from app.codex_text import load_codex_context as _load_codex_context_impl
+from app.codex_text import parse_codex_json_event as _parse_codex_json_event_impl
 from app.executors.codex_executor import CodexExecutor
 from app.executors.local_executor import LocalExecutor
 from app.models.schemas import (
@@ -1253,174 +1266,16 @@ def _sync_profile_memory_from_workdir(workdir_memory_path: Path) -> None:
 
 
 def _codex_structured_message(message: str, user_prompt: str) -> str | None:
-    text = message.strip()
-    if not text:
-        return None
-    if text == user_prompt.strip():
-        return None
-
-    lower = text.lower()
-    noisy_exact = {
-        "user",
-        "codex",
-        "exec",
-        "thinking",
-        "output:",
-        "tokens used",
-        "--------",
-    }
-    if lower in noisy_exact:
-        return None
-    noisy_prefixes = (
-        "openai codex v",
-        "you are running through mobaile",
-        "mobaile runtime context:",
-        "runtime:",
-        "product intent:",
-        "output style for phone ux:",
-        "task-specific formatting:",
-        "environment notes:",
-        "user request:",
-        "workdir:",
-        "model:",
-        "provider:",
-        "approval:",
-        "sandbox:",
-        "reasoning effort:",
-        "reasoning summaries:",
-        "session id:",
-        "mcp startup:",
-    )
-    if lower.startswith(noisy_prefixes):
-        return None
-    if "runtime context" in lower or "you are running through mobaile" in lower:
-        return None
-    context_leak_markers = (
-        "keep responses concise and grouped",
-        "avoid verbose step-by-step chatter",
-        "you are the coding agent used by mobaile",
-        "you run on the user's server/computer",
-        "your stdout is streamed to a phone ui",
-        "product intent:",
-        "mobaile makes a user's computer available from their phone",
-        "primary users are software engineers who run coding agents while away from the computer",
-        "secondary use cases include normal remote productivity tasks",
-        "output style for phone ux:",
-        "prefer short status + result summaries",
-        "environment notes:",
-        "for created images, include markdown image syntax",
-        "do not repeat or summarize this runtime context",
-    )
-    if any(marker in lower for marker in context_leak_markers):
-        return None
-    if any(marker in lower for marker in _context_leak_markers()):
-        return None
-    if lower.startswith("created ") and " and ran it successfully" in lower:
-        return None
-    if lower in {"run completed successfully", "run failed"}:
-        return None
-    if lower.startswith("error:"):
-        return text
-    if "succeeded in " in lower and " in /" in text:
-        return None
-    if text.startswith("/bin/") or text.startswith("$ "):
-        return None
-    if "/bin/zsh -lc" in text or " <<'PY'" in text:
-        return None
-    if re.match(r"^[A-Za-z0-9_./-]+\s+in\s+/.+\s+succeeded in \d+ms:?$", text):
-        return None
-    if re.match(r"^[A-Za-z0-9_./-]+:\s*$", text):
-        return None
-    if text in {"```text", "```bash", "```sh", "```python", "```"}:
-        return None
-    if text.startswith("**") and text.endswith("**"):
-        return None
-    if text.isdigit() or re.match(r"^\d[\d,]*$", text):
-        return None
-    return text
+    return _codex_structured_message_impl(message, user_prompt, _context_leak_markers())
 
 
-class _CodexAssistantExtractor:
+class _CodexAssistantExtractor(_CodexAssistantExtractorImpl):
     def __init__(self, user_prompt: str) -> None:
-        self.user_prompt = user_prompt
-        self.in_assistant_block = False
-        self.buffer: list[str] = []
-        self.last_emitted = ""
-
-    def consume(self, raw_line: str) -> list[str]:
-        text = raw_line.strip()
-        if not text:
-            return []
-        lower = text.lower()
-        if self._is_boundary(lower):
-            out = self._flush()
-            self.in_assistant_block = lower == "codex"
-            return out
-
-        # Only assistant blocks become chat messages. Raw lines remain available in logs.
-        if not self.in_assistant_block:
-            return []
-
-        cleaned = _codex_structured_message(text, self.user_prompt)
-        if not cleaned:
-            return []
-        self.buffer.append(cleaned)
-        if sum(len(item) for item in self.buffer) > 2000:
-            return self._flush()
-        return []
-
-    def flush(self) -> list[str]:
-        return self._flush()
-
-    def _flush(self) -> list[str]:
-        if not self.buffer:
-            return []
-        merged = _merge_assistant_lines(self.buffer).strip()
-        self.buffer.clear()
-        if not merged:
-            return []
-        if merged == self.last_emitted:
-            return []
-        self.last_emitted = merged
-        return [merged]
-
-    def _is_boundary(self, lower: str) -> bool:
-        if lower in {"user", "codex", "thinking", "exec", "tokens used", "--------"}:
-            return True
-        if lower.startswith(
-            (
-                "openai codex v",
-                "workdir:",
-                "model:",
-                "provider:",
-                "approval:",
-                "sandbox:",
-                "reasoning effort:",
-                "reasoning summaries:",
-                "session id:",
-                "mcp startup:",
-                "user request:",
-                "mobaile runtime context:",
-            )
-        ):
-            return True
-        return False
+        super().__init__(user_prompt=user_prompt, leak_markers=_context_leak_markers())
 
 
 def _parse_codex_json_event(raw_line: str) -> dict[str, object] | None:
-    text = raw_line.strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    event_type = payload.get("type")
-    if not isinstance(event_type, str) or not event_type.strip():
-        return None
-    return payload
+    return _parse_codex_json_event_impl(raw_line)
 
 
 def _is_cancelled(run_id: str) -> bool:
@@ -1435,269 +1290,32 @@ def _build_codex_prompt(
     profile_memory: str = "",
     memory_file_hint: str = ".mobaile/MEMORY.md",
 ) -> str:
-    if response_profile == "minimal":
-        context = (
-            "You are running through MOBaiLE.\n"
-            "- You run on the user's server/computer.\n"
-            "- Your stdout is streamed to a phone UI.\n"
-            "- Do not repeat this runtime context unless the user asks."
-        )
-    else:
-        if not CODEX_USE_CONTEXT:
-            context = ""
-        else:
-            context = _load_codex_context()
-    session_block = ""
-    if profile_agents.strip() or profile_memory.strip():
-        session_block = (
-            "Persistent AGENTS profile:\n"
-            f"{profile_agents.strip() or '(empty)'}\n\n"
-            "Persistent MEMORY (shared across sessions):\n"
-            f"{profile_memory.strip() or '(empty)'}\n\n"
-            "Persistence guidance:\n"
-            f"- If you learn durable facts, update `{memory_file_hint}`.\n"
-            "- Do not store MOBaiLE persistence in `~/.codex/*`.\n"
-            "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
-        )
-    hygiene_block = (
-        "Execution hygiene:\n"
-        "- Keep generated files/images inside the current working directory.\n"
-        "- Prefer project-local environments (for example `.mobaile/.venv`) for extra packages.\n"
-        "- Ask before installing packages user-wide or system-wide.\n\n"
-    )
-    if not context and not session_block and not hygiene_block:
-        return user_prompt
-    if context:
-        runtime_block = (
-            "MOBaiLE runtime context:\n"
-            f"{context}\n\n"
-        )
-    else:
-        runtime_block = ""
-    return (
-        "You are running through MOBaiLE.\n\n"
-        f"{runtime_block}"
-        f"{session_block}"
-        f"{hygiene_block}"
-        "User request:\n"
-        f"{user_prompt}"
+    return _build_codex_prompt_impl(
+        user_prompt,
+        response_profile=response_profile,
+        profile_agents=profile_agents,
+        profile_memory=profile_memory,
+        memory_file_hint=memory_file_hint,
+        use_context=CODEX_USE_CONTEXT,
+        codex_context=_load_codex_context(),
     )
 
 
 def _evaluate_codex_guardrails(user_prompt: str) -> tuple[str, str]:
-    mode = CODEX_GUARDRAILS if CODEX_GUARDRAILS in {"off", "warn", "enforce"} else "warn"
-    if mode == "off":
-        return ("off", "")
-    lowered = user_prompt.lower()
-    dangerous_patterns = (
-        r"\brm\s+-rf\b",
-        r"\bmkfs\b",
-        r"\bdd\s+if=",
-        r"\bshutdown\b",
-        r"\breboot\b",
-        r"\bcurl\b.+\|\s*(sh|bash|zsh)\b",
-        r"\bchmod\s+777\b",
-        r"\bchown\s+-r\b",
-        r"\bdrop\s+database\b",
+    return _evaluate_codex_guardrails_impl(
+        user_prompt,
+        guardrails_mode=CODEX_GUARDRAILS,
+        dangerous_confirm_token=CODEX_DANGEROUS_CONFIRM_TOKEN,
     )
-    is_dangerous = any(re.search(pattern, lowered) for pattern in dangerous_patterns)
-    if not is_dangerous:
-        return ("ok", "")
-    if CODEX_DANGEROUS_CONFIRM_TOKEN and CODEX_DANGEROUS_CONFIRM_TOKEN.lower() in lowered:
-        return ("ok", "")
-    message = (
-        "Potentially destructive request detected. "
-        f"Add {CODEX_DANGEROUS_CONFIRM_TOKEN} to confirm intentionally."
-    )
-    if mode == "enforce":
-        return ("reject", message)
-    return ("warn", message)
 
 
 def _is_calendar_request(user_prompt: str) -> bool:
-    lowered = user_prompt.lower()
-    calendar_terms = ("calendar", "agenda", "events")
-    time_terms = ("today", "tomorrow", "this week", "next week")
-    return any(term in lowered for term in calendar_terms) and any(
-        term in lowered for term in time_terms
-    )
+    return _is_calendar_request_impl(user_prompt)
 
 
 def _load_codex_context() -> str:
-    path = Path(CODEX_CONTEXT_FILE)
-    if not path.is_absolute():
-        path = (Path(__file__).resolve().parent.parent / path).resolve()
-    if not path.exists() or not path.is_file():
-        return ""
-    return path.read_text(encoding="utf-8").strip()
-
-
-def _parse_chat_envelope_payload(raw_text: str) -> dict[str, object] | None:
-    candidate = raw_text.strip()
-    if not candidate:
-        return None
-    if candidate.startswith("```") and candidate.endswith("```"):
-        parts = candidate.split("\n")
-        if len(parts) >= 3:
-            candidate = "\n".join(parts[1:-1]).strip()
-
-    parsed = None
-    for _ in range(2):
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            parsed = None
-            break
-        if isinstance(parsed, str):
-            candidate = parsed.strip()
-            continue
-        break
-    if not isinstance(parsed, dict):
-        return None
-    if parsed.get("type") != "assistant_response":
-        return None
-    parsed.setdefault("version", "1.0")
-    parsed.setdefault("message_id", str(uuid.uuid4()))
-    parsed.setdefault("created_at", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
-    parsed.setdefault("summary", "")
-    parsed.setdefault("sections", [])
-    parsed.setdefault("agenda_items", [])
-    parsed.setdefault("artifacts", [])
-    return parsed
-
-
-def _merge_assistant_lines(lines: list[str]) -> str:
-    merged_parts: list[str] = []
-    section_labels = {"what i did", "result", "next step", "output"}
-    for line in lines:
-        text = line.strip()
-        if not text:
-            continue
-        if not merged_parts:
-            merged_parts.append(text)
-            continue
-
-        prev = merged_parts[-1]
-        if prev.strip().lower().rstrip(":") in section_labels:
-            merged_parts.append("\n" + text)
-            continue
-        if text.lower().rstrip(":") in section_labels:
-            merged_parts.append("\n\n## " + text.rstrip(":"))
-            continue
-        if prev.endswith((":", ";")):
-            merged_parts.append("\n" + text)
-            continue
-        if text.startswith(("-", "*", "##", "###", "```")):
-            merged_parts.append("\n" + text)
-            continue
-        if text.startswith(("1.", "2.", "3.", "4.", "5.")):
-            merged_parts.append("\n" + text)
-            continue
-        if prev.endswith((".", "!", "?", "`")):
-            merged_parts.append("\n\n" + text)
-            continue
-        merged_parts.append("\n" + text)
-    return "".join(merged_parts)
-
-
-def _coerce_assistant_text_to_envelope(raw_text: str) -> ChatEnvelope:
-    text = raw_text.strip()
-    message_id = str(uuid.uuid4())
-    created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    if not text:
-        return ChatEnvelope(
-            message_id=message_id,
-            created_at=created_at,
-            summary="",
-            sections=[],
-            agenda_items=[],
-            artifacts=[],
-        )
-    sections = _split_sections_from_text(text)
-    artifacts = _extract_artifacts_from_text(text)
-    summary = sections[0].body if sections else text.split("\n", 1)[0]
-    summary = summary.strip()
-    if not summary:
-        summary = "Completed"
-    return ChatEnvelope(
-        message_id=message_id,
-        created_at=created_at,
-        summary=summary[:280],
-        sections=sections,
-        artifacts=artifacts,
-    )
-
-
-def _split_sections_from_text(text: str) -> list[ChatSection]:
-    cleaned = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not cleaned:
-        return []
-    if "## " in cleaned:
-        sections: list[ChatSection] = []
-        for block in re.split(r"(?m)^##\s+", cleaned):
-            chunk = block.strip()
-            if not chunk:
-                continue
-            lines = chunk.splitlines()
-            title = lines[0].strip().rstrip(":")
-            body = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
-            if not body:
-                continue
-            sections.append(ChatSection(title=title[:64], body=body))
-        if sections:
-            return sections
-    paragraphs = [p.strip() for p in re.split(r"\n{2,}", cleaned) if p.strip()]
-    if len(paragraphs) <= 1:
-        return [ChatSection(title="Result", body=cleaned)]
-    sections = [ChatSection(title="What I Did", body=paragraphs[0])]
-    sections.append(ChatSection(title="Result", body="\n\n".join(paragraphs[1:])))
-    return sections
-
-
-def _extract_artifacts_from_text(text: str) -> list[ChatArtifact]:
-    artifacts: list[ChatArtifact] = []
-    seen: set[str] = set()
-    image_pattern = r"!\[[^\]]*\]\(([^)]+)\)"
-    for match in re.finditer(image_pattern, text):
-        path = match.group(1).strip().strip("'\"")
-        if not path or path in seen:
-            continue
-        seen.add(path)
-        mime, _ = mimetypes.guess_type(path)
-        artifacts.append(
-            ChatArtifact(
-                type="image",
-                title=Path(path).name or "image",
-                path=path,
-                mime=mime or "image/png",
-            )
-        )
-    path_pattern = r"(/[^ \n`'\"<>]+\.[A-Za-z0-9]{1,8})"
-    for match in re.finditer(path_pattern, text):
-        path = match.group(1).strip()
-        if not path or path in seen:
-            continue
-        seen.add(path)
-        mime, _ = mimetypes.guess_type(path)
-        artifact_type = "image" if (mime or "").startswith("image/") else "file"
-        artifacts.append(
-            ChatArtifact(
-                type=artifact_type,
-                title=Path(path).name or path,
-                path=path,
-                mime=mime,
-            )
-        )
-    return artifacts
+    return _load_codex_context_impl(CODEX_CONTEXT_FILE, Path(__file__).resolve().parent.parent)
 
 
 def _context_leak_markers() -> list[str]:
-    context = _load_codex_context().lower()
-    if not context:
-        return []
-    markers: list[str] = []
-    for chunk in re.split(r"[\n.:;]+", context):
-        text = " ".join(chunk.strip().split())
-        if len(text) >= 24:
-            markers.append(text)
-    return markers
+    return _context_leak_markers_impl(_load_codex_context())

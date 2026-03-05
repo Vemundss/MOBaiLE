@@ -96,3 +96,11 @@ Switch backend security mode after install:
 bash ./scripts/set_security_mode.sh safe
 bash ./scripts/set_security_mode.sh full-access
 ```
+
+Sync checked-in contracts from backend models:
+
+```bash
+cd backend
+uv run python ../scripts/sync_contracts.py
+uv run python ../scripts/sync_contracts.py --check
+```

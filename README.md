@@ -233,6 +233,14 @@ cd backend
 uv run pytest -q
 ```
 
+Contract sync/check:
+
+```bash
+cd backend
+uv run python ../scripts/sync_contracts.py
+uv run python ../scripts/sync_contracts.py --check
+```
+
 Optional: enable commit-time secret scanning:
 
 ```bash

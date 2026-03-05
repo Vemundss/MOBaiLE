@@ -1,0 +1,43 @@
+name: iOS Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ios/**
+      - contracts/**
+      - .github/workflows/ios-tests.yml
+  pull_request:
+    paths:
+      - ios/**
+      - contracts/**
+      - .github/workflows/ios-tests.yml
+
+jobs:
+  test-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          SIM_NAME="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {gsub(/^ +| +$/, "", $1); print $1; exit}')"
+          if [ -z "$SIM_NAME" ]; then
+            echo "No available iPhone simulator found" >&2
+            exit 1
+          fi
+          echo "name=$SIM_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Run xcodebuild tests
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project VoiceAgentApp.xcodeproj \
+            -scheme VoiceAgentApp \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            test

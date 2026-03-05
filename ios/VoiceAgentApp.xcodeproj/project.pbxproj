@@ -18,8 +18,10 @@
 		B120A06EEC64BEA0F9DE734A /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */; };
 		B243A2C4EE00ACD44CEE8302 /* mobaile_logo.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */; };
 		B747B93FEBD761493C3D4C69 /* ChatScaffoldViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14543222250EAE3887C38275 /* ChatScaffoldViews.swift */; };
+		B9014AC6C4B7150E13FA67BA /* ChatThreadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F921FA3DE0D828EC5A1C6C6 /* ChatThreadStore.swift */; };
 		BF652C85AFE113E7FB2D7E84 /* VoiceAgentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03AFE8DCC8EB158A6410CC44 /* VoiceAgentViewModel.swift */; };
 		D0D6E84323A42B05D9E06AD0 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 087BA601BAADAF3708DE7220 /* APIClient.swift */; };
+		E0CEBC57FFB67BDCCAF370CA /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F46E28C5030E56744250A3B /* KeychainStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,10 +60,12 @@
 		087BA601BAADAF3708DE7220 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mobaile_logo.png; sourceTree = "<group>"; };
 		14543222250EAE3887C38275 /* ChatScaffoldViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatScaffoldViews.swift; sourceTree = "<group>"; };
+		2F921FA3DE0D828EC5A1C6C6 /* ChatThreadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatThreadStore.swift; sourceTree = "<group>"; };
 		302010F41747E9F19DB3B184 /* VoiceTaskWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VoiceTaskWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		33D91AF3EDBB51ECC1F494AC /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentModelTests.swift; sourceTree = "<group>"; };
 		55BD337AE620AD07C1581C7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		6F46E28C5030E56744250A3B /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
 		968552A59D7CC89642B2EFFB /* ChatRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRenderers.swift; sourceTree = "<group>"; };
 		A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBaiLEShortcuts.swift; sourceTree = "<group>"; };
@@ -120,8 +124,10 @@
 				8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */,
 				968552A59D7CC89642B2EFFB /* ChatRenderers.swift */,
 				14543222250EAE3887C38275 /* ChatScaffoldViews.swift */,
+				2F921FA3DE0D828EC5A1C6C6 /* ChatThreadStore.swift */,
 				DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */,
 				55BD337AE620AD07C1581C7C /* Info.plist */,
+				6F46E28C5030E56744250A3B /* KeychainStore.swift */,
 				0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */,
 				A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */,
 				33D91AF3EDBB51ECC1F494AC /* Models.swift */,
@@ -249,7 +255,9 @@
 				B120A06EEC64BEA0F9DE734A /* AudioRecorderService.swift in Sources */,
 				3D1DC632A5EF8251A764491E /* ChatRenderers.swift in Sources */,
 				B747B93FEBD761493C3D4C69 /* ChatScaffoldViews.swift in Sources */,
+				B9014AC6C4B7150E13FA67BA /* ChatThreadStore.swift in Sources */,
 				8DAE313D0CFB3DB28FFAE81D /* ContentView.swift in Sources */,
+				E0CEBC57FFB67BDCCAF370CA /* KeychainStore.swift in Sources */,
 				60CA8106724593E7295EC968 /* MOBaiLEShortcuts.swift in Sources */,
 				5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */,
 				059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */,

@@ -1,0 +1,189 @@
+{
+  "$defs": {
+    "AgendaItem": {
+      "properties": {
+        "calendar": {
+          "title": "Calendar",
+          "type": "string"
+        },
+        "end": {
+          "title": "End",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "start": {
+          "title": "Start",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "title",
+        "calendar"
+      ],
+      "title": "AgendaItem",
+      "type": "object"
+    },
+    "ChatArtifact": {
+      "properties": {
+        "mime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mime"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "image",
+            "file",
+            "code"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "type",
+        "title"
+      ],
+      "title": "ChatArtifact",
+      "type": "object"
+    },
+    "ChatSection": {
+      "properties": {
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "title": "ChatSection",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agenda_items": {
+      "items": {
+        "$ref": "#/$defs/AgendaItem"
+      },
+      "title": "Agenda Items",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/ChatArtifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "message_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Message Id"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/ChatSection"
+      },
+      "title": "Sections",
+      "type": "array"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "type": {
+      "const": "assistant_response",
+      "default": "assistant_response",
+      "title": "Type",
+      "type": "string"
+    },
+    "version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary"
+  ],
+  "title": "ChatEnvelope",
+  "type": "object"
+}
