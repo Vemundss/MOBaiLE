@@ -4,11 +4,36 @@ struct ConversationMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: String
     let text: String
+    let attachments: [ChatArtifact]
 
-    init(id: UUID = UUID(), role: String, text: String) {
+    enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case text
+        case attachments
+    }
+
+    init(id: UUID = UUID(), role: String, text: String, attachments: [ChatArtifact] = []) {
         self.id = id
         self.role = role
         self.text = text
+        self.attachments = attachments
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        role = try container.decode(String.self, forKey: .role)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        attachments = try container.decodeIfPresent([ChatArtifact].self, forKey: .attachments) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(role, forKey: .role)
+        try container.encode(text, forKey: .text)
+        try container.encode(attachments, forKey: .attachments)
     }
 }
 
@@ -23,12 +48,90 @@ struct ChatThread: Identifiable, Equatable, Codable {
     var statusText: String
     var resolvedWorkingDirectory: String
     var activeRunExecutor: String
+    var draftText: String
+    var draftAttachments: [DraftAttachment]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case updatedAt
+        case conversation
+        case runID
+        case summaryText
+        case transcriptText
+        case statusText
+        case resolvedWorkingDirectory
+        case activeRunExecutor
+        case draftText
+        case draftAttachments
+    }
+
+    init(
+        id: UUID,
+        title: String,
+        updatedAt: Date,
+        conversation: [ConversationMessage],
+        runID: String,
+        summaryText: String,
+        transcriptText: String,
+        statusText: String,
+        resolvedWorkingDirectory: String,
+        activeRunExecutor: String,
+        draftText: String = "",
+        draftAttachments: [DraftAttachment] = []
+    ) {
+        self.id = id
+        self.title = title
+        self.updatedAt = updatedAt
+        self.conversation = conversation
+        self.runID = runID
+        self.summaryText = summaryText
+        self.transcriptText = transcriptText
+        self.statusText = statusText
+        self.resolvedWorkingDirectory = resolvedWorkingDirectory
+        self.activeRunExecutor = activeRunExecutor
+        self.draftText = draftText
+        self.draftAttachments = draftAttachments
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? "New Chat"
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        conversation = try container.decodeIfPresent([ConversationMessage].self, forKey: .conversation) ?? []
+        runID = try container.decodeIfPresent(String.self, forKey: .runID) ?? ""
+        summaryText = try container.decodeIfPresent(String.self, forKey: .summaryText) ?? ""
+        transcriptText = try container.decodeIfPresent(String.self, forKey: .transcriptText) ?? ""
+        statusText = try container.decodeIfPresent(String.self, forKey: .statusText) ?? "Idle"
+        resolvedWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .resolvedWorkingDirectory) ?? ""
+        activeRunExecutor = try container.decodeIfPresent(String.self, forKey: .activeRunExecutor) ?? "codex"
+        draftText = try container.decodeIfPresent(String.self, forKey: .draftText) ?? ""
+        draftAttachments = try container.decodeIfPresent([DraftAttachment].self, forKey: .draftAttachments) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(conversation, forKey: .conversation)
+        try container.encode(runID, forKey: .runID)
+        try container.encode(summaryText, forKey: .summaryText)
+        try container.encode(transcriptText, forKey: .transcriptText)
+        try container.encode(statusText, forKey: .statusText)
+        try container.encode(resolvedWorkingDirectory, forKey: .resolvedWorkingDirectory)
+        try container.encode(activeRunExecutor, forKey: .activeRunExecutor)
+        try container.encode(draftText, forKey: .draftText)
+        try container.encode(draftAttachments, forKey: .draftAttachments)
+    }
 }
 
 struct UtteranceRequest: Encodable {
     let sessionId: String
     let threadID: String?
     let utteranceText: String
+    let attachments: [ChatArtifact]
     let mode: String
     let executor: String
     let workingDirectory: String?
@@ -39,6 +142,7 @@ struct UtteranceRequest: Encodable {
         case sessionId = "session_id"
         case threadID = "thread_id"
         case utteranceText = "utterance_text"
+        case attachments
         case mode
         case executor
         case workingDirectory = "working_directory"
@@ -192,14 +296,24 @@ struct RunDiagnostics: Decodable {
 
 struct RuntimeConfig: Decodable {
     let securityMode: String
+    let defaultExecutor: String?
+    let availableExecutors: [String]?
+    let transcribeProvider: String?
+    let transcribeReady: Bool?
     let codexModel: String?
+    let claudeModel: String?
     let workdirRoot: String?
     let allowAbsoluteFileReads: Bool?
     let fileRoots: [String]?
 
     enum CodingKeys: String, CodingKey {
         case securityMode = "security_mode"
+        case defaultExecutor = "default_executor"
+        case availableExecutors = "available_executors"
+        case transcribeProvider = "transcribe_provider"
+        case transcribeReady = "transcribe_ready"
         case codexModel = "codex_model"
+        case claudeModel = "claude_model"
         case workdirRoot = "workdir_root"
         case allowAbsoluteFileReads = "allow_absolute_file_reads"
         case fileRoots = "file_roots"
@@ -232,6 +346,16 @@ struct DirectoryCreateRequest: Encodable {
 struct DirectoryCreateResponse: Decodable {
     let path: String
     let created: Bool
+}
+
+struct UploadResponse: Decodable {
+    let artifact: ChatArtifact
+    let sizeBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case artifact
+        case sizeBytes = "size_bytes"
+    }
 }
 
 struct ChatEnvelope: Decodable {
@@ -268,12 +392,12 @@ struct ChatEnvelope: Decodable {
     }
 }
 
-struct ChatSection: Decodable {
+struct ChatSection: Codable, Equatable {
     let title: String
     let body: String
 }
 
-struct ChatAgendaItem: Decodable, Identifiable {
+struct ChatAgendaItem: Codable, Equatable, Identifiable {
     var id: String { "\(start)-\(end)-\(title)-\(calendar)-\(location ?? "")" }
     let start: String
     let end: String
@@ -282,7 +406,7 @@ struct ChatAgendaItem: Decodable, Identifiable {
     let location: String?
 }
 
-struct ChatArtifact: Decodable, Identifiable {
+struct ChatArtifact: Codable, Equatable, Identifiable {
     var id: String { path ?? url ?? "\(type)-\(title)" }
     let type: String
     let title: String

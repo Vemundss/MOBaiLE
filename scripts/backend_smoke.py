@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal smoke test for backend utterance -> plan -> execute flow."""
+"""Deterministic internal smoke test for backend utterance -> plan -> execute flow."""
 
 from pathlib import Path
 import sys
@@ -20,6 +20,7 @@ def main() -> None:
         UtteranceRequest(
             session_id="smoke-session",
             utterance_text="create a hello python script and run it",
+            executor="local",
         )
     )
     print("POST /v1/utterances:", response.model_dump())

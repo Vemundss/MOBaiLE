@@ -112,6 +112,12 @@ main() {
 
   if [[ "$(uname -s)" == "Darwin" ]]; then
     bash ./scripts/service_macos.sh install
+  elif [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+    if ! bash ./scripts/service_linux.sh install; then
+      echo
+      echo "Linux service install did not complete. Start backend manually:"
+      echo "  cd \"${INSTALL_DIR}/backend\" && bash ./run_backend.sh"
+    fi
   else
     echo
     echo "Non-macOS host detected. Start backend manually:"
@@ -123,7 +129,7 @@ main() {
 
   echo
   echo "Bootstrap complete."
-  echo "If you are on macOS, backend should now run as a launchd service."
+  echo "If service installation succeeded, backend should now run automatically."
   echo "Scan backend/pairing-qr.png with iPhone Camera and open in MOBaiLE."
 }
 

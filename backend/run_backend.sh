@@ -4,8 +4,8 @@ set -euo pipefail
 BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${BACKEND_DIR}"
 
-# launchd has a minimal PATH; include common Homebrew locations.
-export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+# Service managers often provide a minimal PATH; include common user/local locations.
+export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/snap/bin:${PATH}"
 
 if [[ -f ".env" ]]; then
   set -a

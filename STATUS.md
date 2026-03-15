@@ -78,6 +78,10 @@ Updates (2026-02-18 to 2026-02-19):
   - service runs from synced runtime path:
     `~/Library/Application Support/MOBaiLE/backend-runtime`
   - verified health/auth checks through service process
+- Added Linux systemd user-service management:
+  - `scripts/service_linux.sh` (`install/start/stop/restart/status/logs/sync`)
+  - service runs from synced runtime path:
+    `~/.local/share/MOBaiLE/backend-runtime`
 - Added pairing-based end-to-end connectivity smoke script:
   - `scripts/phone_connectivity_smoke.sh`
   - verifies health, auth enforcement, `/v1/audio`, and terminal run status
@@ -117,10 +121,8 @@ Updates (2026-02-18 to 2026-02-19):
 ## 2) What Exists
 
 - `README.md`: project intent and document map.
-- `ARCHITECTURE.md`: detailed architecture and phased implementation plan.
+- `ARCHITECTURE.md`: concise current engineering map.
 - `STATUS.md`: current state tracker (this file).
-- `MEMORY.md`: persistent project memory log.
-- `NEW_FEATURES.md`: prioritized feature checklist for ongoing product polish.
 
 ## 3) Working vs Not Working
 
@@ -133,9 +135,11 @@ Working:
 - `uv` local workflow is verified end-to-end.
 - SSE event stream endpoint is implemented and verified.
 - Codex executor integration path is implemented (runtime success depends on local Codex auth/model access).
+- Claude executor integration path is implemented (runtime success depends on local Claude Code auth/model access).
 - `/v1/audio` is implemented and verified end-to-end (auth, run creation, run completion).
 - Run history persistence across backend restarts is implemented and verified.
 - Always-on backend service flow is implemented and verified on macOS.
+- Always-on backend service flow is implemented for Linux via `systemd --user`.
 - Pairing-based connection smoke passes end-to-end.
 - iPhone Shortcuts-based voice loop is documented for immediate device testing.
 - Native iOS scaffold exists for direct backend testing in Xcode.
@@ -147,7 +151,7 @@ Working:
   - rename/delete threads
   - persisted locally in app storage.
 - Advanced controls are now developer-gated:
-  - default UX is codex + concise chat.
+  - default UX is concise chat with selectable Codex or Claude agent providers.
   - local executor and logs UI are hidden unless Developer Mode is enabled.
 - Launch-hardening baseline is now implemented:
   - security mode model (`safe` vs `full-access`) with mode-switch script.

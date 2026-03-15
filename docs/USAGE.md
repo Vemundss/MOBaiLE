@@ -9,7 +9,9 @@ From project root:
 ```bash
 bash ./scripts/install_backend.sh --mode safe
 bash ./scripts/doctor.sh
-bash ./scripts/service_macos.sh install   # macOS only
+bash ./scripts/service_macos.sh install   # macOS
+# or on Linux:
+bash ./scripts/service_linux.sh install
 ```
 
 Fresh host/server bootstrap (single command after clone):
@@ -18,7 +20,7 @@ Fresh host/server bootstrap (single command after clone):
 bash ./scripts/bootstrap_server.sh --mode safe
 ```
 
-`install_backend.sh` performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
+`install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
 Safe mode defaults:
 - restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
 - restricted file reads (`VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false`)
@@ -37,7 +39,7 @@ All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 
 - macOS/Linux shell
 - Python 3.11+
-- `uv` installed
+- `uv` (auto-installed by `install_backend.sh` if missing)
 
 Check versions:
 
@@ -67,17 +69,26 @@ API will be available at:
 - `http://127.0.0.1:8000/health`
 - `http://127.0.0.1:8000/docs`
 
-Service management on macOS:
+Service management:
 
 ```bash
+# macOS
 bash ./scripts/service_macos.sh status
 bash ./scripts/service_macos.sh sync
 bash ./scripts/service_macos.sh restart
 bash ./scripts/service_macos.sh logs
+
+# Linux
+bash ./scripts/service_linux.sh status
+bash ./scripts/service_linux.sh sync
+bash ./scripts/service_linux.sh restart
+bash ./scripts/service_linux.sh logs
 ```
 
 Notes:
 - Service runtime is synced to `~/Library/Application Support/MOBaiLE/backend-runtime`.
+- Linux user service runtime is synced to `~/.local/share/MOBaiLE/backend-runtime`.
+- Linux service management uses `systemd --user`; on headless hosts you may need `sudo loginctl enable-linger $USER` for reboot persistence.
 - Run `sync` after backend code/config changes, then `restart`.
 
 ## 3) Try the current flow
@@ -108,7 +119,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
     "session_id": "demo-session",
     "utterance_text": "create a hello python script and run it",
     "mode": "execute",
-    "executor": "local",
+    "executor": "codex",
     "working_directory": "~/MOBaiLE-workspace",
     "response_mode": "concise",
     "response_profile": "guided"
@@ -140,8 +151,23 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
   }'
 ```
 
-Codex executor config (`backend/.env`):
+Try Claude executor mode:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/utterances \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "session_id": "demo-session",
+    "utterance_text": "inspect this repo and propose next coding task",
+    "executor": "claude"
+  }'
+```
+
+Agent executor config (`backend/.env`):
 - `VOICE_AGENT_SECURITY_MODE=safe|full-access` controls security defaults.
+- `VOICE_AGENT_DEFAULT_EXECUTOR=codex|claude|local` selects the app/backend default executor.
+  - if the selected agent CLI is unavailable, backend falls back to another available agent executor and finally to the internal `local` fallback
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (recommended only for private trusted hosts).
 - `VOICE_AGENT_CODEX_GUARDRAILS=warn` adds prompt-level destructive-op detection (`off|warn|enforce`).
 - `VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]` explicit token to bypass guardrail warnings.
@@ -149,20 +175,26 @@ Codex executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
 - `VOICE_AGENT_CODEX_USE_CONTEXT=true` prepends MOBaiLE context to Codex prompts.
 - `VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md` points to context file under `backend/`.
-- `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for both `local` and `codex` runs.
+- `VOICE_AGENT_CLAUDE_BINARY=claude` selects the Claude Code CLI binary.
+- `VOICE_AGENT_CLAUDE_MODEL=<model-id>` optionally forces a Claude model.
+- `VOICE_AGENT_CLAUDE_TIMEOUT_SEC=900` sets max runtime per Claude run before backend fails it.
+- `VOICE_AGENT_CLAUDE_PERMISSION_MODE=acceptEdits` controls Claude headless permission mode in safe mode.
+- `VOICE_AGENT_CLAUDE_SKIP_PERMISSIONS=true` bypasses Claude permission prompts (recommended only for trusted private hosts).
+- `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for `local`, `codex`, and `claude` runs.
 - `VOICE_AGENT_WORKDIR_ROOT=/path` optionally constrains all requested working directories to a root.
 - `VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false` blocks absolute `/v1/files` access in safe mode.
 - `VOICE_AGENT_FILE_ROOTS=/path1,/path2` restricts readable file roots for `/v1/files`.
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
 
 Notes:
-- Context injection affects Codex runs launched via MOBaiLE backend only.
-- Direct terminal usage (`codex exec ...`) is unchanged unless you configure that separately.
+- Context injection affects agent runs launched via MOBaiLE backend only.
+- Direct terminal usage (`codex ...` / `claude ...`) is unchanged unless you configure that separately.
+- Runtime config advertises agent executors (`codex`, `claude`) for normal UX; `local` is kept for internal smoke/dev flows.
 - Per-run request controls:
   - `response_mode=concise` is the current supported mobile chat mode.
   - `response_profile=guided|minimal` controls prompt shaping:
     - `guided`: applies MOBaiLE formatting/context guidance.
-    - `minimal`: only runtime-awareness hint, otherwise near-default Codex behavior.
+    - `minimal`: only runtime-awareness hint, otherwise near-default agent behavior.
 
 Cancel a running run:
 
@@ -224,6 +256,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/directories \
 ## 5) Audio upload flow (`/v1/audio`)
 
 This endpoint accepts multipart audio and starts a run from server-side transcription.
+The iPhone app now prefers Apple Speech Recognition first and only falls back to this endpoint when backend transcription is configured.
 
 ```bash
 TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' backend/.env)"
@@ -232,7 +265,7 @@ printf 'fakewav' > /tmp/voice_sample.wav
 curl -s -X POST http://127.0.0.1:8000/v1/audio \
   -H "Authorization: Bearer ${TOKEN}" \
   -F 'session_id=audio-session' \
-  -F 'executor=local' \
+  -F 'executor=codex' \
   -F 'response_mode=concise' \
   -F 'response_profile=guided' \
   -F 'working_directory=~/MOBaiLE-workspace' \
@@ -249,6 +282,9 @@ Notes:
   - optional: `VOICE_AGENT_TRANSCRIBE_MODEL=whisper-1`
 - To force deterministic local behavior, opt into mock mode:
   - `VOICE_AGENT_TRANSCRIBE_PROVIDER=mock`
+- For deterministic internal smoke/dev testing, you can still set `executor=local`.
+- Text prompts do not depend on transcription configuration.
+- The iPhone app does not need this path for normal voice use on a real device; it uses Apple Speech Recognition first.
 - Response includes `transcript_text` and run metadata (`run_id`, `status`, `message`).
 
 ## 6) Run automated tests
@@ -310,6 +346,8 @@ Pairing endpoint:
 ```bash
 bash ./scripts/rotate_api_token.sh
 bash ./scripts/service_macos.sh restart
+# or on Linux:
+bash ./scripts/service_linux.sh restart
 ```
 
 This updates:
@@ -327,6 +365,8 @@ Then restart backend:
 
 ```bash
 bash ./scripts/service_macos.sh restart
+# or on Linux:
+bash ./scripts/service_linux.sh restart
 ```
 
 ## 12) Remote phone access hardening (recommended)
@@ -336,13 +376,13 @@ For use beyond local network:
 1. Do not expose raw `:8000` directly to the internet.
 2. Place backend behind TLS (e.g., Tailscale HTTPS, Cloudflare Tunnel, or reverse proxy with HTTPS).
 3. Keep bearer token secret and rotate it periodically (`rotate_api_token.sh`).
-4. Keep Codex guardrails at least `warn` in production-like usage.
+4. Keep agent guardrails at least `warn` in production-like usage.
 5. Use least-privilege OS account on server when possible.
 
 ## Current Limitations
 
 - Planner is a stub (rule-based), not a real LLM yet.
-- Codex executor success depends on local Codex CLI auth/model access.
+- Agent executor success depends on the selected local CLI (`codex` or `claude`) being installed and authenticated.
 - iOS client currently uses SSE with polling fallback; voice and chat UX are MVP-grade, not production polished.
 
 ## iOS Chat UX mode

@@ -123,13 +123,20 @@
             "type": "string"
           },
           "executor": {
-            "default": "codex",
-            "enum": [
-              "local",
-              "codex"
+            "anyOf": [
+              {
+                "enum": [
+                  "local",
+                  "codex",
+                  "claude"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Executor",
-            "type": "string"
+            "title": "Executor"
           },
           "mode": {
             "default": "execute",
@@ -201,6 +208,25 @@
           "audio"
         ],
         "title": "Body_create_audio_run_v1_audio_post",
+        "type": "object"
+      },
+      "Body_upload_file_v1_uploads_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "file"
+        ],
+        "title": "Body_upload_file_v1_uploads_post",
         "type": "object"
       },
       "CapabilitiesResponse": {
@@ -296,6 +322,62 @@
           "message"
         ],
         "title": "CapabilityProbe",
+        "type": "object"
+      },
+      "ChatArtifact": {
+        "properties": {
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "image",
+              "file",
+              "code"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "type",
+          "title"
+        ],
+        "title": "ChatArtifact",
         "type": "object"
       },
       "DirectoryCreateRequest": {
@@ -605,7 +687,8 @@
             "default": "local",
             "enum": [
               "local",
-              "codex"
+              "codex",
+              "claude"
             ],
             "title": "Executor",
             "type": "string"
@@ -686,7 +769,8 @@
             "default": "local",
             "enum": [
               "local",
-              "codex"
+              "codex",
+              "claude"
             ],
             "title": "Executor",
             "type": "string"
@@ -751,16 +835,47 @@
         "title": "RunSummary",
         "type": "object"
       },
+      "UploadResponse": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/ChatArtifact"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact",
+          "size_bytes"
+        ],
+        "title": "UploadResponse",
+        "type": "object"
+      },
       "UtteranceRequest": {
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ChatArtifact"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "executor": {
-            "default": "local",
-            "enum": [
-              "local",
-              "codex"
+            "anyOf": [
+              {
+                "enum": [
+                  "local",
+                  "codex",
+                  "claude"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Executor",
-            "type": "string"
+            "title": "Executor"
           },
           "mode": {
             "default": "execute",
@@ -807,7 +922,7 @@
             "title": "Thread Id"
           },
           "utterance_text": {
-            "minLength": 1,
+            "default": "",
             "title": "Utterance Text",
             "type": "string"
           },
@@ -824,8 +939,7 @@
           }
         },
         "required": [
-          "session_id",
-          "utterance_text"
+          "session_id"
         ],
         "title": "UtteranceRequest",
         "type": "object"
@@ -1424,6 +1538,44 @@
           }
         },
         "summary": "Get Calendar Today"
+      }
+    },
+    "/v1/uploads": {
+      "post": {
+        "operationId": "upload_file_v1_uploads_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_file_v1_uploads_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload File"
       }
     },
     "/v1/utterances": {

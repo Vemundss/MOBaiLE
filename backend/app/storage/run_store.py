@@ -77,18 +77,32 @@ class RunStore:
             )
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS codex_thread_map (
+                CREATE TABLE IF NOT EXISTS agent_session_map (
+                    executor TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     client_thread_id TEXT NOT NULL,
-                    codex_thread_id TEXT NOT NULL,
+                    agent_session_id TEXT NOT NULL,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (session_id, client_thread_id)
+                    PRIMARY KEY (executor, session_id, client_thread_id)
                 )
                 """
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_codex_thread_map_updated_at ON codex_thread_map(updated_at)"
+                "CREATE INDEX IF NOT EXISTS idx_agent_session_map_updated_at ON agent_session_map(updated_at)"
             )
+            legacy_thread_map = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='codex_thread_map'"
+            ).fetchone()
+            if legacy_thread_map is not None:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO agent_session_map (
+                        executor, session_id, client_thread_id, agent_session_id, updated_at
+                    )
+                    SELECT 'codex', session_id, client_thread_id, codex_thread_id, updated_at
+                    FROM codex_thread_map
+                    """
+                )
 
             if legacy_rows:
                 for row in legacy_rows:
@@ -238,34 +252,40 @@ class RunStore:
             )
         return results
 
-    def get_codex_thread_id(self, session_id: str, client_thread_id: str) -> str | None:
+    def get_agent_session_id(self, executor: str, session_id: str, client_thread_id: str) -> str | None:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT codex_thread_id
-                FROM codex_thread_map
-                WHERE session_id = ? AND client_thread_id = ?
+                SELECT agent_session_id
+                FROM agent_session_map
+                WHERE executor = ? AND session_id = ? AND client_thread_id = ?
                 """,
-                (session_id, client_thread_id),
+                (executor, session_id, client_thread_id),
             ).fetchone()
         if row is None:
             return None
-        value = str(row["codex_thread_id"]).strip()
+        value = str(row["agent_session_id"]).strip()
         return value or None
 
-    def set_codex_thread_id(self, session_id: str, client_thread_id: str, codex_thread_id: str) -> None:
+    def set_agent_session_id(
+        self,
+        executor: str,
+        session_id: str,
+        client_thread_id: str,
+        agent_session_id: str,
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO codex_thread_map (
-                    session_id, client_thread_id, codex_thread_id, updated_at
+                INSERT INTO agent_session_map (
+                    executor, session_id, client_thread_id, agent_session_id, updated_at
                 )
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(session_id, client_thread_id) DO UPDATE SET
-                    codex_thread_id=excluded.codex_thread_id,
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(executor, session_id, client_thread_id) DO UPDATE SET
+                    agent_session_id=excluded.agent_session_id,
                     updated_at=CURRENT_TIMESTAMP
                 """,
-                (session_id, client_thread_id, codex_thread_id),
+                (executor, session_id, client_thread_id, agent_session_id),
             )
 
     def _upsert_run_conn(self, conn: sqlite3.Connection, run: RunRecord) -> None:

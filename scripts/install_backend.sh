@@ -18,6 +18,21 @@ require_cmd() {
   fi
 }
 
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return
+  fi
+  echo "uv not found. Installing uv..."
+  require_cmd curl
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="${HOME}/.local/bin:${PATH}"
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv install completed but uv is still not on PATH." >&2
+    echo "Open a new shell and run again, or add ~/.local/bin to PATH." >&2
+    exit 1
+  fi
+}
+
 gen_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 24
@@ -45,6 +60,39 @@ print((datetime.now(timezone.utc) + timedelta(minutes=ttl)).isoformat().replace(
 PY
 }
 
+detect_lan_ip() {
+  local ip=""
+
+  if command -v ipconfig >/dev/null 2>&1; then
+    local iface
+    for iface in en0 en1 en2; do
+      ip="$(ipconfig getifaddr "${iface}" 2>/dev/null || true)"
+      if [[ -n "${ip}" ]]; then
+        printf "%s" "${ip}"
+        return
+      fi
+    done
+  fi
+
+  if command -v hostname >/dev/null 2>&1; then
+    local candidate
+    for candidate in $(hostname -I 2>/dev/null || true); do
+      if [[ "${candidate}" != 127.* && "${candidate}" != "::1" ]]; then
+        printf "%s" "${candidate}"
+        return
+      fi
+    done
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    ip="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+    if [[ -n "${ip}" && "${ip}" != 127.* ]]; then
+      printf "%s" "${ip}"
+      return
+    fi
+  fi
+}
+
 detect_url() {
   if [[ "${EXPOSE_NETWORK}" != "true" ]]; then
     printf "http://127.0.0.1:8000"
@@ -59,7 +107,13 @@ detect_url() {
     fi
   fi
   if [[ -z "${url}" ]]; then
-    url="http://127.0.0.1:8000"
+    local lan_ip
+    lan_ip="$(detect_lan_ip)"
+    if [[ -n "${lan_ip}" ]]; then
+      url="http://${lan_ip}:8000"
+    else
+      url="http://127.0.0.1:8000"
+    fi
   fi
   printf "%s" "${url}"
 }
@@ -129,17 +183,23 @@ VOICE_AGENT_API_TOKEN=${token}
 VOICE_AGENT_HOST=${host_value}
 VOICE_AGENT_PORT=8000
 VOICE_AGENT_SECURITY_MODE=${SECURITY_MODE}
+VOICE_AGENT_DEFAULT_EXECUTOR=codex
 VOICE_AGENT_CODEX_BINARY=codex
 VOICE_AGENT_CODEX_UNRESTRICTED=${codex_unrestricted}
 VOICE_AGENT_CODEX_GUARDRAILS=warn
 VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]
 VOICE_AGENT_CODEX_USE_CONTEXT=true
 VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md
+# Optional Claude Code support:
+VOICE_AGENT_CLAUDE_BINARY=claude
+# VOICE_AGENT_CLAUDE_MODEL=sonnet
+# VOICE_AGENT_CLAUDE_PERMISSION_MODE=acceptEdits
 VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=${allow_abs_reads}
 VOICE_AGENT_PAIR_CODE_TTL_MIN=${PAIR_CODE_TTL_MIN}
 # Optional model override:
 # VOICE_AGENT_CODEX_MODEL=gpt-5.1
-# Transcription provider: openai (default) or mock
+# Transcription provider: openai or mock
+# Set this to mock for deterministic local testing.
 VOICE_AGENT_TRANSCRIBE_PROVIDER=openai
 # SQLite run store path:
 VOICE_AGENT_DB_PATH=data/runs.db
@@ -185,7 +245,7 @@ main() {
   fi
 
   require_cmd python3
-  require_cmd uv
+  ensure_uv
 
   local token
   token="$(gen_token)"
@@ -218,8 +278,13 @@ main() {
 }
 EOF
 
-  if ! command -v codex >/dev/null 2>&1; then
-    echo "Warning: codex CLI not found in PATH. Install/login before using executor=codex." >&2
+  local has_codex="false"
+  local has_claude="false"
+  if command -v codex >/dev/null 2>&1; then
+    has_codex="true"
+  fi
+  if command -v claude >/dev/null 2>&1; then
+    has_claude="true"
   fi
 
   echo
@@ -229,8 +294,11 @@ EOF
   echo "  cd \"${BACKEND_DIR}\""
   echo "  bash ./run_backend.sh"
   echo
-  echo "Install always-on macOS service (recommended on Mac):"
+  echo "Install always-on service:"
+  echo "  # macOS"
   echo "  bash ./scripts/service_macos.sh install"
+  echo "  # Linux (systemd user service)"
+  echo "  bash ./scripts/service_linux.sh install"
   echo
   echo "Pairing info written to:"
   echo "  ${PAIRING_FILE}"
@@ -255,9 +323,22 @@ EOF
     echo "Re-run with --expose-network to pair over LAN/Tailscale."
   fi
   echo
+  if [[ "${has_codex}" == "true" || "${has_claude}" == "true" ]]; then
+    echo "Agent executors detected:"
+    [[ "${has_codex}" == "true" ]] && echo "  codex"
+    [[ "${has_claude}" == "true" ]] && echo "  claude"
+  else
+    echo "No Codex/Claude CLI detected. MOBaiLE will keep only the internal local smoke/dev fallback available."
+  fi
+  echo
   echo "Generate pairing QR deep link (recommended):"
   echo "  bash ./scripts/pairing_qr.sh"
   echo "  # then scan with iPhone Camera and open in MOBaiLE"
+  if [[ "${EXPOSE_NETWORK}" == "true" && "${server_url}" == "http://127.0.0.1:8000" ]]; then
+    echo
+    echo "Warning: could not detect a LAN/Tailscale IP, so pairing URL still points to 127.0.0.1." >&2
+    echo "Set server_url manually in the app if your machine is reachable at another address." >&2
+  fi
 }
 
 main "$@"

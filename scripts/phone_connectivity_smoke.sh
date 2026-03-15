@@ -71,6 +71,10 @@ main() {
   fi
 
   echo "Using server: ${SERVER_URL}"
+  echo "Executor: ${EXECUTOR}"
+  if [[ "${EXECUTOR}" == "local" ]]; then
+    echo "Using internal local smoke/dev fallback."
+  fi
 
   local health_code
   health_code="$(curl -s -o /dev/null -w "%{http_code}" "${SERVER_URL}/health" || true)"

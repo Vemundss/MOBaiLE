@@ -66,7 +66,17 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var responseMode: String = "concise"
     @Published var agentGuidanceMode: String = "guided"
     @Published var developerMode: Bool = false
-    @Published var promptText: String = "create a hello python script and run it"
+    @Published var promptText: String = "" {
+        didSet {
+            persistDraftStateIfNeeded()
+        }
+    }
+    @Published var draftAttachments: [DraftAttachment] = [] {
+        didSet {
+            persistDraftStateIfNeeded()
+        }
+    }
+    @Published private(set) var draftAttachmentTransferStates: [UUID: DraftAttachmentTransferState] = [:]
     @Published var isLoading: Bool = false
     @Published var statusText: String = "Idle"
     @Published var runID: String = ""
@@ -77,12 +87,16 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var conversation: [ConversationMessage] = []
     @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
+    @Published var recordingStartedAt: Date?
     @Published var didCompleteRun: Bool = false
     @Published var activeRunExecutor: String = "codex"
     @Published var threads: [ChatThread] = []
     @Published var activeThreadID: UUID?
     @Published var backendSecurityMode: String = "unknown"
     @Published var backendCodexModel: String = "default"
+    @Published var backendClaudeModel: String = "default"
+    @Published var backendDefaultExecutor: String = "codex"
+    @Published var backendAvailableExecutors: [String] = ["codex"]
     @Published var backendWorkdirRoot: String = ""
     @Published var showDirectoryBrowser: Bool = false
     @Published var isLoadingDirectoryBrowser: Bool = false
@@ -105,14 +119,21 @@ final class VoiceAgentViewModel: ObservableObject {
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
     private let recorder = AudioRecorderService()
+    private let speechTranscriber = SpeechTranscriptionService()
     private let threadStore = ChatThreadStore()
     private let defaults = UserDefaults.standard
+    private let draftAttachmentDirectory: URL
     private var seenEventIDs: Set<String> = []
     private var seenEventFingerprints: Set<String> = []
-    private var lastSubmittedUserText: String = ""
+    private var lastSubmittedUserMessage: ConversationMessage?
+    private var hasSeenMicrophonePrimer = false
     private var didBootstrapSession = false
     private var trustedPairHosts: Set<String> = []
     private var didConfigureRemoteCommands = false
+    private var isRestoringThreadState = false
+    private var activeAttachmentUploadCancellation: (() -> Void)?
+    private var backendTranscribeProvider: String = "unknown"
+    private var backendTranscribeReady = false
 
     private enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
@@ -133,63 +154,32 @@ final class VoiceAgentViewModel: ObservableObject {
         static let audioCuesEnabled = "mobaile.audio_cues_enabled"
         static let autoSendAfterSilenceEnabled = "mobaile.auto_send_after_silence_enabled"
         static let autoSendAfterSilenceSeconds = "mobaile.auto_send_after_silence_seconds"
+        static let microphonePrimerSeen = "mobaile.microphone_primer_seen"
         static let pendingShortcutAction = "mobaile.pending_shortcut_action"
     }
 
     init() {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        draftAttachmentDirectory = appSupport
+            .appendingPathComponent("MOBaiLE", isDirectory: true)
+            .appendingPathComponent("draft-attachments", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: draftAttachmentDirectory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
         loadSettings()
         loadThreads()
         configureRemoteCommandsIfNeeded()
     }
 
     func sendPrompt() async {
-        let sentPrompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sentPrompt.isEmpty else { return }
-        didCompleteRun = false
-        errorText = ""
-        summaryText = ""
-        events = []
-        seenEventIDs = []
-        seenEventFingerprints = []
-        resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
-        isLoading = true
-        runPhaseText = "Planning"
-        runStartedAt = Date()
-        runEndedAt = nil
-        statusText = "Starting run..."
-        appendConversation(role: "user", text: sentPrompt)
-        lastSubmittedUserText = sentPrompt
-        promptText = ""
-        activeRunExecutor = effectiveExecutor
-
-        do {
-            let response = try await client.createUtterance(
-                serverURL: normalizedServerURL,
-                token: apiToken,
-                requestBody: UtteranceRequest(
-                    sessionId: sessionID,
-                    threadID: activeThreadID?.uuidString,
-                    utteranceText: sentPrompt,
-                    mode: "execute",
-                    executor: effectiveExecutor,
-                    workingDirectory: normalizedWorkingDirectory,
-                    responseMode: effectiveResponseMode,
-                    responseProfile: effectiveAgentGuidanceMode
-                )
-            )
-            runID = response.runId
-            statusText = "Run started (\(response.runId))"
-            persistActiveThreadSnapshot()
-            try await observeRun(runID: response.runId)
-        } catch {
-            maybeAutoFixWorkingDirectory(from: error)
-            errorText = error.localizedDescription
-            statusText = "Failed"
-            isLoading = false
-            runPhaseText = "Failed"
-            runEndedAt = Date()
-            persistActiveThreadSnapshot()
-        }
+        await submitPrompt(
+            text: promptText,
+            stagedAttachments: draftAttachments,
+            existingAttachments: []
+        )
     }
 
     func startRecording() async {
@@ -202,6 +192,7 @@ final class VoiceAgentViewModel: ObservableObject {
             return
         }
         errorText = ""
+        recordingStartedAt = nil
         do {
             let silenceConfig: AudioRecorderService.SilenceConfig?
             if autoSendAfterSilenceEnabled {
@@ -221,10 +212,26 @@ final class VoiceAgentViewModel: ObservableObject {
                 }
             }
             isRecording = true
+            recordingStartedAt = Date()
             statusText = "Recording..."
             syncNowPlayingRecordingState()
             emitRecordingStartedFeedback()
+            Task { [speechTranscriber] in
+                await speechTranscriber.warmupAuthorization()
+            }
+        } catch let recorderError as RecorderError {
+            recordingStartedAt = nil
+            switch recorderError {
+            case .permissionDenied:
+                errorText = "Microphone access is off. Enable it in Settings and try again."
+                statusText = "Microphone access needed"
+            case .recorderUnavailable:
+                errorText = recorderError.localizedDescription
+                statusText = "Recorder unavailable"
+            }
+            emitFailureFeedback()
         } catch {
+            recordingStartedAt = nil
             errorText = error.localizedDescription
             statusText = "Failed to start recording"
             emitFailureFeedback()
@@ -233,7 +240,10 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func cancelCurrentRun() async {
         let activeRun = runID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !activeRun.isEmpty else { return }
+        guard !activeRun.isEmpty else {
+            cancelActiveAttachmentUploadIfNeeded()
+            return
+        }
         errorText = ""
         runPhaseText = "Cancelling"
         do {
@@ -269,12 +279,22 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
+    func cancelActiveOperation() {
+        if isUploadingAttachments {
+            cancelActiveAttachmentUploadIfNeeded()
+            return
+        }
+        guard !runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task { await cancelCurrentRun() }
+    }
+
     func stopRecordingAndSend() async {
         guard isRecording else { return }
         didCompleteRun = false
         isRecording = false
+        recordingStartedAt = nil
         syncNowPlayingRecordingState()
-        statusText = "Uploading audio..."
+        statusText = "Preparing voice input..."
         errorText = ""
         summaryText = ""
         transcriptText = ""
@@ -297,26 +317,58 @@ final class VoiceAgentViewModel: ObservableObject {
         }
 
         do {
-            let response = try await client.createAudioRun(
-                serverURL: normalizedServerURL,
-                token: apiToken,
-                sessionID: sessionID,
-                threadID: activeThreadID?.uuidString,
-                executor: effectiveExecutor,
-                workingDirectory: normalizedWorkingDirectory,
-                responseMode: effectiveResponseMode,
-                responseProfile: effectiveAgentGuidanceMode,
-                audioFileURL: audioFile
-            )
-            runID = response.runId
-            transcriptText = response.transcriptText
-            appendConversation(role: "user", text: response.transcriptText)
-            lastSubmittedUserText = response.transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
-            activeRunExecutor = effectiveExecutor
-            statusText = "Audio run started (\(response.runId))"
+            let localTranscription: SpeechTranscriptionResult?
+            do {
+                runPhaseText = "Transcribing"
+                statusText = "Transcribing on iPhone..."
+                localTranscription = try await speechTranscriber.transcribeFile(at: audioFile)
+            } catch {
+                if await backendAudioUploadAvailable(forceRefresh: true) {
+                    localTranscription = nil
+                } else {
+                    throw voiceInputUnavailableError(from: error)
+                }
+            }
+
+            if let localTranscription {
+                transcriptText = localTranscription.text
+                appendConversation(
+                    ConversationMessage(role: "user", text: localTranscription.text, attachments: [])
+                )
+                runPhaseText = "Planning"
+                statusText = "Starting run..."
+                let response = try await createUtteranceRun(
+                    utteranceText: localTranscription.text,
+                    attachments: []
+                )
+                runID = response.runId
+                activeRunExecutor = effectiveExecutor
+                statusText = "Voice run started (\(response.runId))"
+            } else {
+                runPhaseText = "Uploading"
+                statusText = "Uploading audio to backend..."
+                let response = try await client.createAudioRun(
+                    serverURL: normalizedServerURL,
+                    token: apiToken,
+                    sessionID: sessionID,
+                    threadID: activeThreadID?.uuidString,
+                    executor: effectiveExecutor,
+                    workingDirectory: normalizedWorkingDirectory,
+                    responseMode: effectiveResponseMode,
+                    responseProfile: effectiveAgentGuidanceMode,
+                    audioFileURL: audioFile
+                )
+                runID = response.runId
+                transcriptText = response.transcriptText
+                appendConversation(
+                    ConversationMessage(role: "user", text: response.transcriptText, attachments: [])
+                )
+                activeRunExecutor = effectiveExecutor
+                statusText = "Audio run started (\(response.runId))"
+            }
             emitRecordingSentFeedback()
             persistActiveThreadSnapshot()
-            try await observeRun(runID: response.runId)
+            try await observeRun(runID: runID)
         } catch {
             maybeAutoFixWorkingDirectory(from: error)
             errorText = error.localizedDescription
@@ -357,6 +409,16 @@ final class VoiceAgentViewModel: ObservableObject {
         statusText = "No previous prompt to resend."
     }
 
+    var shouldPresentMicrophonePrimer: Bool {
+        !hasSeenMicrophonePrimer
+    }
+
+    func markMicrophonePrimerSeen() {
+        guard !hasSeenMicrophonePrimer else { return }
+        hasSeenMicrophonePrimer = true
+        defaults.set(true, forKey: DefaultsKey.microphonePrimerSeen)
+    }
+
     func consumePendingShortcutActionIfNeeded() async {
         let action = defaults.string(forKey: DefaultsKey.pendingShortcutAction)?.trimmingCharacters(
             in: .whitespacesAndNewlines
@@ -371,6 +433,52 @@ final class VoiceAgentViewModel: ObservableObject {
         default:
             break
         }
+    }
+
+    var hasDraftContent: Bool {
+        !promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty
+    }
+
+    var draftAttachmentFailureNotice: String? {
+        let failedAttachments = draftAttachments.filter { attachment in
+            if case .failed = draftAttachmentTransferState(for: attachment) {
+                return true
+            }
+            return false
+        }
+        guard !failedAttachments.isEmpty else { return nil }
+        if failedAttachments.count == 1, let attachment = failedAttachments.first {
+            return "\(attachment.fileName) failed to upload. Check the connection and send again, or remove the file."
+        }
+        return "\(failedAttachments.count) attachments failed to upload. Check the connection and send again, or remove the files."
+    }
+
+    func addDraftAttachment(fromImportedFile sourceURL: URL) async {
+        do {
+            let attachment = try stageImportedAttachment(from: sourceURL)
+            appendDraftAttachment(attachment)
+        } catch {
+            errorText = "Couldn't add file: \(error.localizedDescription)"
+        }
+    }
+
+    func addDraftAttachment(data: Data, fileName: String, mimeType: String?) async {
+        do {
+            let attachment = try stageAttachmentData(data, fileName: fileName, mimeType: mimeType)
+            appendDraftAttachment(attachment)
+        } catch {
+            errorText = "Couldn't add attachment: \(error.localizedDescription)"
+        }
+    }
+
+    func removeDraftAttachment(_ attachment: DraftAttachment) {
+        draftAttachments.removeAll { $0.id == attachment.id }
+        clearDraftAttachmentTransferState(for: attachment.id)
+        try? FileManager.default.removeItem(at: attachment.localFileURL)
+    }
+
+    func draftAttachmentTransferState(for attachment: DraftAttachment) -> DraftAttachmentTransferState {
+        draftAttachmentTransferStates[attachment.id] ?? .idle
     }
 
     private func observeRun(runID: String) async throws {
@@ -456,21 +564,6 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func startNewChat() {
         createNewThread()
-        runID = ""
-        summaryText = ""
-        transcriptText = ""
-        errorText = ""
-        statusText = "Idle"
-        runPhaseText = "Idle"
-        runStartedAt = nil
-        runEndedAt = nil
-        events = []
-        conversation = []
-        seenEventIDs = []
-        seenEventFingerprints = []
-        didCompleteRun = false
-        activeRunExecutor = effectiveExecutor
-        persistActiveThreadSnapshot()
     }
 
     func toggleDirectoryBrowser() async {
@@ -680,13 +773,252 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     var canRetryLastPrompt: Bool {
-        !isLoading && !lastSubmittedUserText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !isLoading, let lastSubmittedUserMessage else { return false }
+        return !lastSubmittedUserMessage.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !lastSubmittedUserMessage.attachments.isEmpty
+    }
+
+    var isUploadingAttachments: Bool {
+        activeAttachmentUploadCancellation != nil
+    }
+
+    var canCancelActiveOperation: Bool {
+        isLoading && (isUploadingAttachments || !runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     func retryLastPrompt() async {
-        guard canRetryLastPrompt else { return }
-        promptText = lastSubmittedUserText
-        await sendPrompt()
+        guard let lastSubmittedUserMessage, canRetryLastPrompt else { return }
+        await submitPrompt(
+            text: lastSubmittedUserMessage.text,
+            stagedAttachments: [],
+            existingAttachments: lastSubmittedUserMessage.attachments
+        )
+    }
+
+    private func uploadDraftAttachmentsIfNeeded(_ attachments: [DraftAttachment]) async throws -> [UploadResponse] {
+        guard !attachments.isEmpty else { return [] }
+        activeAttachmentUploadCancellation = nil
+        clearDraftAttachmentTransferStates(for: attachments)
+        var uploaded: [UploadResponse] = []
+        for (index, attachment) in attachments.enumerated() {
+            if attachments.count == 1 {
+                statusText = "Uploading attachment..."
+            } else {
+                statusText = "Uploading attachment \(index + 1) of \(attachments.count)..."
+            }
+            setDraftAttachmentTransferState(.uploading(progress: 0), for: attachment.id)
+            let response: UploadResponse
+            do {
+                response = try await client.uploadAttachment(
+                    serverURL: normalizedServerURL,
+                    token: apiToken,
+                    sessionID: sessionID,
+                    fileURL: attachment.localFileURL,
+                    mimeType: attachment.mimeType,
+                    onProgress: { [weak self] progress in
+                        Task { @MainActor in
+                            self?.setDraftAttachmentTransferState(
+                                .uploading(progress: progress),
+                                for: attachment.id
+                            )
+                        }
+                    },
+                    registerCancellation: { [weak self] cancel in
+                        Task { @MainActor in
+                            self?.activeAttachmentUploadCancellation = cancel
+                        }
+                    }
+                )
+            } catch {
+                activeAttachmentUploadCancellation = nil
+                if isAttachmentTransferCancellation(error) {
+                    clearDraftAttachmentTransferState(for: attachment.id)
+                    throw CancellationError()
+                }
+                setDraftAttachmentTransferState(
+                    .failed(message: summarizedAttachmentTransferError(error)),
+                    for: attachment.id
+                )
+                throw error
+            }
+            activeAttachmentUploadCancellation = nil
+            clearDraftAttachmentTransferState(for: attachment.id)
+            uploaded.append(response)
+        }
+        activeAttachmentUploadCancellation = nil
+        return uploaded
+    }
+
+    private func submitPrompt(
+        text rawText: String,
+        stagedAttachments: [DraftAttachment],
+        existingAttachments: [ChatArtifact]
+    ) async {
+        let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty || !stagedAttachments.isEmpty || !existingAttachments.isEmpty else { return }
+
+        didCompleteRun = false
+        errorText = ""
+        summaryText = ""
+        events = []
+        seenEventIDs = []
+        seenEventFingerprints = []
+        resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
+        isLoading = true
+        runPhaseText = stagedAttachments.isEmpty ? "Planning" : "Preparing"
+        runStartedAt = Date()
+        runEndedAt = nil
+        activeRunExecutor = effectiveExecutor
+
+        do {
+            let uploadedAttachments = try await uploadDraftAttachmentsIfNeeded(stagedAttachments)
+            let explicitAttachments = existingAttachments + uploadedAttachments.map(\.artifact)
+            statusText = "Starting run..."
+            runPhaseText = "Planning"
+
+            let message = ConversationMessage(
+                role: "user",
+                text: trimmedText,
+                attachments: explicitAttachments
+            )
+            appendConversation(message)
+            promptText = ""
+            clearDraftAttachments()
+
+            let response = try await createUtteranceRun(
+                utteranceText: trimmedText,
+                attachments: explicitAttachments
+            )
+            runID = response.runId
+            statusText = "Run started (\(response.runId))"
+            persistActiveThreadSnapshot()
+            try await observeRun(runID: response.runId)
+        } catch {
+            activeAttachmentUploadCancellation = nil
+            if error is CancellationError || isAttachmentTransferCancellation(error) {
+                errorText = ""
+                statusText = "Cancelled"
+                isLoading = false
+                runPhaseText = "Cancelled"
+                runEndedAt = Date()
+                persistActiveThreadSnapshot()
+                return
+            }
+            maybeAutoFixWorkingDirectory(from: error)
+            errorText = error.localizedDescription
+            statusText = hasFailedDraftAttachments ? "Upload failed" : "Failed"
+            isLoading = false
+            runPhaseText = "Failed"
+            runEndedAt = Date()
+            emitFailureFeedback()
+            persistActiveThreadSnapshot()
+        }
+    }
+
+    private func createUtteranceRun(
+        utteranceText: String,
+        attachments: [ChatArtifact]
+    ) async throws -> UtteranceResponse {
+        try await client.createUtterance(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            requestBody: UtteranceRequest(
+                sessionId: sessionID,
+                threadID: activeThreadID?.uuidString,
+                utteranceText: utteranceText,
+                attachments: attachments,
+                mode: "execute",
+                executor: effectiveExecutor,
+                workingDirectory: normalizedWorkingDirectory,
+                responseMode: effectiveResponseMode,
+                responseProfile: effectiveAgentGuidanceMode
+            )
+        )
+    }
+
+    private func backendAudioUploadAvailable(forceRefresh: Bool) async -> Bool {
+        if forceRefresh, hasConfiguredConnection {
+            _ = try? await refreshRuntimeConfiguration()
+        }
+        let provider = backendTranscribeProvider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard backendTranscribeReady else { return false }
+        return provider != "mock" && !provider.isEmpty && provider != "unknown"
+    }
+
+    private func voiceInputUnavailableError(from error: Error) -> Error {
+        let speechMessage = error.localizedDescription
+        if backendTranscribeReady && backendTranscribeProvider.lowercased() == "mock" {
+            return SpeechTranscriptionError.unavailable(
+                "\(speechMessage) The backend is currently using mock transcription, so voice upload would not produce a real transcript."
+            )
+        }
+        return SpeechTranscriptionError.unavailable(
+            "\(speechMessage) Enable Speech Recognition on the iPhone, or configure OPENAI_API_KEY on the backend for audio upload fallback."
+        )
+    }
+
+    private func stageImportedAttachment(from sourceURL: URL) throws -> DraftAttachment {
+        let startedAccessing = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if startedAccessing {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        let fileName = sourceURL.lastPathComponent.isEmpty ? "attachment" : sourceURL.lastPathComponent
+        let resourceValues = try? sourceURL.resourceValues(forKeys: [.contentTypeKey])
+        let mimeType = resourceValues?.contentType?.preferredMIMEType
+        let data = try Data(contentsOf: sourceURL)
+        return try stageAttachmentData(data, fileName: fileName, mimeType: mimeType)
+    }
+
+    private func stageAttachmentData(_ data: Data, fileName: String, mimeType: String?) throws -> DraftAttachment {
+        try FileManager.default.createDirectory(
+            at: draftAttachmentDirectory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        let safeName = sanitizeAttachmentFileName(fileName)
+        let targetURL = draftAttachmentDirectory.appendingPathComponent("\(UUID().uuidString)-\(safeName)")
+        try data.write(to: targetURL, options: .atomic)
+        let resolvedMimeType = inferAttachmentMimeType(fileName: safeName, fallback: mimeType)
+        return DraftAttachment(
+            id: UUID(),
+            localFileURL: targetURL,
+            fileName: safeName,
+            mimeType: resolvedMimeType,
+            kind: inferAttachmentKind(fileName: safeName, mimeType: resolvedMimeType),
+            sizeBytes: Int64(data.count)
+        )
+    }
+
+    private func appendDraftAttachment(_ attachment: DraftAttachment) {
+        if draftAttachments.contains(where: {
+            $0.fileName == attachment.fileName && $0.sizeBytes == attachment.sizeBytes
+        }) {
+            try? FileManager.default.removeItem(at: attachment.localFileURL)
+            return
+        }
+        errorText = ""
+        clearDraftAttachmentTransferState(for: attachment.id)
+        draftAttachments.append(attachment)
+    }
+
+    private func clearDraftAttachments() {
+        let existing = draftAttachments
+        draftAttachments = []
+        clearDraftAttachmentTransferStates(for: existing)
+        for attachment in existing {
+            try? FileManager.default.removeItem(at: attachment.localFileURL)
+        }
+    }
+
+    private func sanitizeAttachmentFileName(_ rawName: String) -> String {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let cleaned = trimmed.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let collapsed = String(cleaned).replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
+        let final = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        return final.isEmpty ? "attachment" : final
     }
 
     private func configureRemoteCommandsIfNeeded() {
@@ -771,10 +1103,8 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func persistSettings() {
-        if !developerMode {
-            if executor != "codex" {
-                executor = "codex"
-            }
+        if !developerMode, executor == "local", backendDefaultExecutor != "local" {
+            executor = backendDefaultExecutor
         }
         if responseMode != "concise" {
             responseMode = "concise"
@@ -807,14 +1137,7 @@ final class VoiceAgentViewModel: ObservableObject {
         guard !normalizedServerURL.isEmpty, !apiToken.isEmpty, !sessionID.isEmpty else { return }
         didBootstrapSession = true
         do {
-            if let cfg = try? await client.fetchRuntimeConfig(
-                serverURL: normalizedServerURL,
-                token: apiToken
-            ) {
-                backendSecurityMode = cfg.securityMode
-                backendCodexModel = displayModelName(cfg.codexModel)
-                backendWorkdirRoot = cfg.workdirRoot ?? ""
-            }
+            _ = try? await refreshRuntimeConfiguration()
             let runs = try await client.fetchSessionRuns(
                 serverURL: normalizedServerURL,
                 token: apiToken,
@@ -972,27 +1295,36 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func switchToThread(_ threadID: UUID) {
         guard let thread = threads.first(where: { $0.id == threadID }) else { return }
-        activeThreadID = threadID
-        conversation = threadStore.loadMessages(threadID: threadID)
-        runID = thread.runID
-        summaryText = thread.summaryText
-        transcriptText = thread.transcriptText
-        statusText = thread.statusText
-        runPhaseText = phaseText(forStatusText: thread.statusText)
-        runStartedAt = nil
-        runEndedAt = nil
-        isLoading = thread.statusText.lowercased().contains("running")
-        resolvedWorkingDirectory = thread.resolvedWorkingDirectory
-        activeRunExecutor = thread.activeRunExecutor
-        errorText = ""
-        events = []
-        seenEventIDs = []
-        seenEventFingerprints = []
-        didCompleteRun = isTerminalStatusText(thread.statusText)
+        persistActiveThreadSnapshot()
+        let restoredAttachments = availableDraftAttachments(from: thread.draftAttachments)
+        performThreadStateRestore {
+            activeThreadID = threadID
+            conversation = threadStore.loadMessages(threadID: threadID)
+            lastSubmittedUserMessage = conversation.last(where: { $0.role == "user" })
+            promptText = thread.draftText
+            draftAttachments = restoredAttachments
+            draftAttachmentTransferStates = [:]
+            runID = thread.runID
+            summaryText = thread.summaryText
+            transcriptText = thread.transcriptText
+            statusText = thread.statusText
+            runPhaseText = phaseText(forStatusText: thread.statusText)
+            runStartedAt = nil
+            runEndedAt = nil
+            isLoading = thread.statusText.lowercased().contains("running")
+            resolvedWorkingDirectory = thread.resolvedWorkingDirectory
+            activeRunExecutor = thread.activeRunExecutor
+            errorText = ""
+            events = []
+            seenEventIDs = []
+            seenEventFingerprints = []
+            didCompleteRun = isTerminalStatusText(thread.statusText)
+        }
         defaults.set(threadID.uuidString, forKey: DefaultsKey.activeThreadID)
     }
 
     func createNewThread() {
+        persistActiveThreadSnapshot()
         let thread = ChatThread(
             id: UUID(),
             title: "New Chat",
@@ -1003,23 +1335,34 @@ final class VoiceAgentViewModel: ObservableObject {
             transcriptText: "",
             statusText: "Idle",
             resolvedWorkingDirectory: resolvedWorkingDirectory,
-            activeRunExecutor: effectiveExecutor
+            activeRunExecutor: effectiveExecutor,
+            draftText: "",
+            draftAttachments: []
         )
         threads.append(thread)
-        activeThreadID = thread.id
-        conversation = []
-        runID = ""
-        summaryText = ""
-        transcriptText = ""
-        statusText = "Idle"
-        runPhaseText = "Idle"
-        runStartedAt = nil
-        runEndedAt = nil
-        errorText = ""
-        events = []
-        seenEventIDs = []
-        seenEventFingerprints = []
-        didCompleteRun = false
+        performThreadStateRestore {
+            activeThreadID = thread.id
+            conversation = []
+            lastSubmittedUserMessage = nil
+            promptText = ""
+            draftAttachments = []
+            draftAttachmentTransferStates = [:]
+            runID = ""
+            summaryText = ""
+            transcriptText = ""
+            statusText = "Idle"
+            runPhaseText = "Idle"
+            runStartedAt = nil
+            runEndedAt = nil
+            recordingStartedAt = nil
+            isLoading = false
+            errorText = ""
+            events = []
+            seenEventIDs = []
+            seenEventFingerprints = []
+            didCompleteRun = false
+            activeRunExecutor = effectiveExecutor
+        }
         threadStore.upsertThread(thread)
         defaults.set(thread.id.uuidString, forKey: DefaultsKey.activeThreadID)
     }
@@ -1034,6 +1377,11 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func deleteThread(_ threadID: UUID) {
+        if activeThreadID == threadID {
+            persistActiveThreadSnapshot()
+        }
+        guard let thread = threads.first(where: { $0.id == threadID }) else { return }
+        deleteDraftAttachments(thread.draftAttachments)
         threads.removeAll { $0.id == threadID }
         threadStore.deleteThread(threadID: threadID)
         if threads.isEmpty {
@@ -1047,6 +1395,43 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func refreshRuntimeConfiguration() async throws -> RuntimeConfig {
+        guard hasConfiguredConnection else {
+            clearRuntimeConfiguration()
+            throw APIError.missingCredentials
+        }
+        let cfg = try await client.fetchRuntimeConfig(
+            serverURL: normalizedServerURL,
+            token: apiToken
+        )
+        backendSecurityMode = cfg.securityMode
+        backendDefaultExecutor = normalizedExecutor(from: cfg.defaultExecutor) ?? "codex"
+        backendAvailableExecutors = normalizedAvailableExecutors(
+            cfg.availableExecutors,
+            defaultExecutor: backendDefaultExecutor
+        )
+        backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
+        backendTranscribeReady = cfg.transcribeReady ?? false
+        backendCodexModel = displayModelName(cfg.codexModel)
+        backendClaudeModel = displayModelName(cfg.claudeModel)
+        backendWorkdirRoot = cfg.workdirRoot ?? ""
+        if !developerMode, executor == "local", backendDefaultExecutor != "local" {
+            executor = backendDefaultExecutor
+        } else if !selectableExecutors.contains(executor) {
+            executor = backendDefaultExecutor
+        }
+        return cfg
+    }
+
+    func useCurrentBrowserDirectoryAsWorkingDirectory() {
+        let path = directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        workingDirectory = path
+        resolvedWorkingDirectory = path
+        persistSettings()
+    }
+
     private func speak(_ text: String) {
         guard !text.isEmpty else { return }
         let utterance = AVSpeechUtterance(string: text)
@@ -1058,7 +1443,7 @@ final class VoiceAgentViewModel: ObservableObject {
         serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
-    private var hasConfiguredConnection: Bool {
+    var hasConfiguredConnection: Bool {
         !normalizedServerURL.isEmpty && !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -1080,8 +1465,48 @@ final class VoiceAgentViewModel: ObservableObject {
         return value
     }
 
+    var selectableExecutors: [String] {
+        var values = backendAvailableExecutors.filter { $0 == "local" || $0 == "codex" || $0 == "claude" }
+        if values.isEmpty {
+            if let preferred = normalizedExecutor(from: backendDefaultExecutor) {
+                values = [preferred]
+            } else {
+                values = ["codex"]
+            }
+        }
+        if developerMode {
+            if !values.contains("local") {
+                values.append("local")
+            }
+            return values
+        }
+        if backendDefaultExecutor == "local", values.contains("local") {
+            return ["local"]
+        }
+        let agentExecutors = values.filter { $0 == "codex" || $0 == "claude" }
+        if !agentExecutors.isEmpty {
+            return agentExecutors
+        }
+        return values
+    }
+
+    var currentBackendModelLabel: String {
+        modelLabel(for: effectiveExecutor)
+    }
+
     private var effectiveExecutor: String {
-        developerMode ? executor : "codex"
+        let trimmed = executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if trimmed == "local" {
+            return "local"
+        }
+        if trimmed == "codex" || trimmed == "claude" {
+            return trimmed
+        }
+        let backendDefault = backendDefaultExecutor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if backendDefault == "local" || backendDefault == "codex" || backendDefault == "claude" {
+            return backendDefault
+        }
+        return "codex"
     }
 
     private var effectiveResponseMode: String {
@@ -1116,6 +1541,17 @@ final class VoiceAgentViewModel: ObservableObject {
         let value = autoSendAfterSilenceSeconds.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let parsed = Double(value) else { return 1.2 }
         return min(5.0, max(0.8, parsed))
+    }
+
+    func modelLabel(for executor: String) -> String {
+        switch executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "claude":
+            return backendClaudeModel
+        case "local":
+            return "n/a"
+        default:
+            return backendCodexModel
+        }
     }
 
     private func isTerminalStatus(_ status: String) -> Bool {
@@ -1205,12 +1641,12 @@ final class VoiceAgentViewModel: ObservableObject {
             return message
         case "assistant.message":
             if message.isEmpty { return nil }
-            if message == lastSubmittedUserText { return nil }
+            if message == lastSubmittedUserMessage?.text { return nil }
             return message
         case "log.message", "action.stdout", "action.stderr":
             return nil
         case "action.completed":
-            if activeRunExecutor == "codex" { return nil }
+            if activeRunExecutor != "local" { return nil }
             if message.isEmpty { return nil }
             return message
         case "run.failed":
@@ -1223,38 +1659,51 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func appendConversation(role: String, text: String) {
-        let prepared = role == "assistant" ? normalizeAssistantText(text) : text
-        let trimmed = prepared.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if role == "assistant",
-           shouldCoalesceAssistantProgress(with: trimmed),
+        appendConversation(ConversationMessage(role: role, text: text))
+    }
+
+    private func appendConversation(_ message: ConversationMessage) {
+        let preparedText = message.role == "assistant" ? normalizeAssistantText(message.text) : message.text
+        let normalized = ConversationMessage(
+            id: message.id,
+            role: message.role,
+            text: preparedText.trimmingCharacters(in: .whitespacesAndNewlines),
+            attachments: message.attachments
+        )
+        guard !normalized.text.isEmpty || !normalized.attachments.isEmpty else { return }
+
+        if normalized.role == "assistant",
+           shouldCoalesceAssistantProgress(with: normalized.text),
            let last = conversation.last,
            last.role == "assistant",
            isProgressAssistantMessage(last.text),
            !isTerminalStatusText(statusText) {
-            conversation[conversation.count - 1] = ConversationMessage(role: role, text: trimmed)
+            conversation[conversation.count - 1] = normalized
             persistConversationMessage(at: conversation.count - 1)
             persistActiveThreadSnapshot()
             return
         }
-        if let last = conversation.last, last.role == role {
-            if last.text == trimmed {
+        if let last = conversation.last, last.role == normalized.role {
+            if last.text == normalized.text && last.attachments == normalized.attachments {
                 return
             }
-            if role == "assistant" {
+            if normalized.role == "assistant" {
                 // Keep assistant updates as separate bubbles for readability.
-                conversation.append(ConversationMessage(role: role, text: trimmed))
+                conversation.append(normalized)
                 persistConversationMessage(at: conversation.count - 1)
                 persistActiveThreadSnapshot()
                 return
             }
         }
-        conversation.append(ConversationMessage(role: role, text: trimmed))
+        conversation.append(normalized)
         persistConversationMessage(at: conversation.count - 1)
-        if role == "user",
+        if normalized.role == "user",
            let idx = activeThreadIndex(),
            threads[idx].title == "New Chat" {
-            threads[idx].title = suggestThreadTitle(from: trimmed)
+            threads[idx].title = suggestThreadTitle(for: normalized)
+            lastSubmittedUserMessage = normalized
+        } else if normalized.role == "user" {
+            lastSubmittedUserMessage = normalized
         }
         persistActiveThreadSnapshot()
     }
@@ -1376,9 +1825,10 @@ final class VoiceAgentViewModel: ObservableObject {
         if let value = defaults.string(forKey: DefaultsKey.autoSendAfterSilenceSeconds), !value.isEmpty {
             autoSendAfterSilenceSeconds = value
         }
+        hasSeenMicrophonePrimer = defaults.bool(forKey: DefaultsKey.microphonePrimerSeen)
         trustedPairHosts = Set(defaults.stringArray(forKey: DefaultsKey.trustedPairHosts) ?? [])
-        if !developerMode {
-            executor = "codex"
+        if !developerMode, executor == "local", backendDefaultExecutor != "local" {
+            executor = backendDefaultExecutor
         }
     }
 
@@ -1392,14 +1842,7 @@ final class VoiceAgentViewModel: ObservableObject {
             self.apiToken = response.apiToken
             self.sessionID = response.sessionId
             self.backendSecurityMode = response.securityMode
-            if let cfg = try? await client.fetchRuntimeConfig(
-                serverURL: normalizedServerURL,
-                token: response.apiToken
-            ) {
-                self.backendSecurityMode = cfg.securityMode
-                self.backendCodexModel = self.displayModelName(cfg.codexModel)
-                self.backendWorkdirRoot = cfg.workdirRoot ?? ""
-            }
+            _ = try? await self.refreshRuntimeConfiguration()
             self.persistSettings()
             self.errorText = ""
             self.statusText = "Paired successfully (\(response.securityMode))"
@@ -1417,6 +1860,38 @@ final class VoiceAgentViewModel: ObservableObject {
     private func displayModelName(_ rawModel: String?) -> String {
         let value = rawModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return value.isEmpty ? "default" : value
+    }
+
+    private func normalizedExecutor(from rawValue: String?) -> String? {
+        let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if value == "local" || value == "codex" || value == "claude" {
+            return value
+        }
+        return nil
+    }
+
+    private func normalizedAvailableExecutors(_ rawValues: [String]?, defaultExecutor: String) -> [String] {
+        var values = (rawValues ?? []).compactMap(normalizedExecutor(from:))
+        if let preferred = normalizedExecutor(from: defaultExecutor), !values.contains(preferred) {
+            values.append(preferred)
+        }
+        return Array(NSOrderedSet(array: values)) as? [String] ?? values
+    }
+
+    private func normalizedTranscribeProvider(from rawValue: String?) -> String {
+        let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return value.isEmpty ? "unknown" : value
+    }
+
+    private func clearRuntimeConfiguration() {
+        backendSecurityMode = "unknown"
+        backendDefaultExecutor = "codex"
+        backendAvailableExecutors = ["codex"]
+        backendTranscribeProvider = "unknown"
+        backendTranscribeReady = false
+        backendCodexModel = "default"
+        backendClaudeModel = "default"
+        backendWorkdirRoot = ""
     }
 
     private func isLocalOrPrivateHost(_ host: String) -> Bool {
@@ -1466,7 +1941,7 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func persistActiveThreadSnapshot() {
-        guard let idx = activeThreadIndex() else { return }
+        guard !isRestoringThreadState, let idx = activeThreadIndex() else { return }
         threads[idx].conversation = []
         threads[idx].runID = runID
         threads[idx].summaryText = summaryText
@@ -1474,8 +1949,24 @@ final class VoiceAgentViewModel: ObservableObject {
         threads[idx].statusText = statusText
         threads[idx].resolvedWorkingDirectory = resolvedWorkingDirectory
         threads[idx].activeRunExecutor = activeRunExecutor
+        threads[idx].draftText = promptText
+        threads[idx].draftAttachments = draftAttachments
         threads[idx].updatedAt = Date()
         threadStore.upsertThread(threads[idx])
+    }
+
+    private func persistDraftStateIfNeeded() {
+        guard !isRestoringThreadState else { return }
+        persistActiveThreadSnapshot()
+    }
+
+    private var hasFailedDraftAttachments: Bool {
+        draftAttachments.contains { attachment in
+            if case .failed = draftAttachmentTransferState(for: attachment) {
+                return true
+            }
+            return false
+        }
     }
 
     private func persistConversationMessage(at index: Int) {
@@ -1496,13 +1987,88 @@ final class VoiceAgentViewModel: ObservableObject {
         return threads.firstIndex(where: { $0.id == id })
     }
 
-    private func suggestThreadTitle(from text: String) -> String {
-        let collapsed = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        if collapsed.count <= 42 {
+    private func performThreadStateRestore(_ updates: () -> Void) {
+        isRestoringThreadState = true
+        updates()
+        isRestoringThreadState = false
+    }
+
+    private func availableDraftAttachments(from attachments: [DraftAttachment]) -> [DraftAttachment] {
+        attachments.filter { FileManager.default.fileExists(atPath: $0.localFileURL.path) }
+    }
+
+    private func deleteDraftAttachments(_ attachments: [DraftAttachment]) {
+        clearDraftAttachmentTransferStates(for: attachments)
+        for attachment in attachments {
+            try? FileManager.default.removeItem(at: attachment.localFileURL)
+        }
+    }
+
+    private func setDraftAttachmentTransferState(_ state: DraftAttachmentTransferState, for attachmentID: UUID) {
+        switch state {
+        case .idle:
+            draftAttachmentTransferStates.removeValue(forKey: attachmentID)
+        default:
+            draftAttachmentTransferStates[attachmentID] = state
+        }
+    }
+
+    private func clearDraftAttachmentTransferState(for attachmentID: UUID) {
+        draftAttachmentTransferStates.removeValue(forKey: attachmentID)
+    }
+
+    private func clearDraftAttachmentTransferStates(for attachments: [DraftAttachment]) {
+        let ids = Set(attachments.map(\.id))
+        guard !ids.isEmpty else { return }
+        draftAttachmentTransferStates = draftAttachmentTransferStates.filter { !ids.contains($0.key) }
+    }
+
+    private func cancelActiveAttachmentUploadIfNeeded() {
+        guard let cancel = activeAttachmentUploadCancellation else { return }
+        errorText = ""
+        statusText = "Cancelling upload..."
+        runPhaseText = "Cancelling"
+        activeAttachmentUploadCancellation = nil
+        cancel()
+    }
+
+    private func isAttachmentTransferCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        if let urlError = error as? URLError, urlError.code == .cancelled {
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+    }
+
+    private func summarizedAttachmentTransferError(_ error: Error) -> String {
+        let collapsed = error.localizedDescription
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !collapsed.isEmpty else { return "Upload failed." }
+        if collapsed.count <= 72 {
             return collapsed
         }
-        let cut = collapsed.index(collapsed.startIndex, offsetBy: 42)
+        let cut = collapsed.index(collapsed.startIndex, offsetBy: 72)
         return String(collapsed[..<cut]) + "..."
+    }
+
+    private func suggestThreadTitle(for message: ConversationMessage) -> String {
+        let collapsed = message.text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !collapsed.isEmpty {
+            if collapsed.count <= 42 {
+                return collapsed
+            }
+            let cut = collapsed.index(collapsed.startIndex, offsetBy: 42)
+            return String(collapsed[..<cut]) + "..."
+        }
+        if message.attachments.count == 1 {
+            let name = message.attachments[0].title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? "Attachment" : name
+        }
+        return "\(message.attachments.count) attachments"
     }
 
     private func isTerminalStatusText(_ value: String) -> Bool {

@@ -32,14 +32,14 @@ def make_client(
     return TestClient(module.app), api_token
 
 
-def test_codex_prompt_context_injection(monkeypatch, tmp_path: Path):
+def test_runtime_agent_prompt_injects_context(monkeypatch, tmp_path: Path):
     context_file = tmp_path / "ctx.md"
     context_file.write_text("You are in test context.", encoding="utf-8")
     monkeypatch.setenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true")
     monkeypatch.setenv("VOICE_AGENT_CODEX_CONTEXT_FILE", str(context_file))
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
-    built = module._build_codex_prompt("create hello script")
+    built = module._build_runtime_agent_prompt("create hello script", executor="codex")
     assert "MOBaiLE runtime context" in built
     assert "You are in test context." in built
     assert "create hello script" in built
@@ -53,8 +53,9 @@ def test_profile_memory_seed_and_prompt_block(monkeypatch, tmp_path: Path):
     assert "MOBaiLE AGENTS" in agents
     assert "MOBaiLE MEMORY" in memory
 
-    built = module._build_codex_prompt(
+    built = module._build_runtime_agent_prompt(
         "check calendar today",
+        executor="codex",
         profile_agents=agents,
         profile_memory=memory,
     )
@@ -91,28 +92,29 @@ def test_profile_memory_sync_accepts_memory_file_fallback(monkeypatch, tmp_path:
     assert "old memory" not in text
 
 
-def test_codex_structured_message_filters_noise(monkeypatch, tmp_path: Path):
+def test_codex_output_filter_drops_runtime_noise(monkeypatch, tmp_path: Path):
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
     user_prompt = "create a python file"
+    leak_markers = module._runtime_context_leak_markers()
 
-    assert module._codex_structured_message("/bin/zsh -lc \"python3 hello.py\"", user_prompt) is None
-    assert module._codex_structured_message("tokens used", user_prompt) is None
-    assert module._codex_structured_message("You are running through MOBaiLE.", user_prompt) is None
-    assert module._codex_structured_message("MOBaiLE runtime context:", user_prompt) is None
-    assert module._codex_structured_message("You are the coding agent used by MOBaiLE.", user_prompt) is None
-    assert module._codex_structured_message("Product intent: MOBaiLE makes a user's computer available from their phone.", user_prompt) is None
-    assert module._codex_structured_message("Keep responses concise and grouped; avoid verbose step-by-step chatter.", user_prompt) is None
-    assert module._codex_structured_message("```text", user_prompt) is None
-    assert module._codex_structured_message("Created `hello.py` and ran it successfully.", user_prompt) is None
-    assert module._codex_structured_message("1,147", user_prompt) is None
-    assert module._codex_structured_message("Done. Created hello.py.", user_prompt) == "Done. Created hello.py."
+    assert module.filter_codex_assistant_message("/bin/zsh -lc \"python3 hello.py\"", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("tokens used", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("You are running through MOBaiLE.", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("MOBaiLE runtime context:", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("You are the coding agent used by MOBaiLE.", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("Product intent: MOBaiLE makes a user's computer available from their phone.", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("Keep responses concise and grouped; avoid verbose step-by-step chatter.", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("```text", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("Created `hello.py` and ran it successfully.", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("1,147", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("Done. Created hello.py.", user_prompt, leak_markers) == "Done. Created hello.py."
 
 
 def test_codex_assistant_extractor_emits_only_assistant_blocks(monkeypatch, tmp_path: Path):
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
-    extractor = module._CodexAssistantExtractor("hello")
+    extractor = module.CodexAssistantExtractor("hello", module._runtime_context_leak_markers())
     lines = [
         "OpenAI Codex v0.0",
         "user",
@@ -330,6 +332,51 @@ def test_local_utterance_flow(monkeypatch, tmp_path: Path):
     assert final == "completed"
 
 
+def test_local_utterance_flow_accepts_typed_attachments(monkeypatch, tmp_path: Path):
+    attached = tmp_path / "workspace" / "notes.txt"
+    attached.parent.mkdir(parents=True, exist_ok=True)
+    attached.write_text("remember this", encoding="utf-8")
+
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={"VOICE_AGENT_DEFAULT_WORKDIR": str(tmp_path / "workspace")},
+    )
+    resp = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "typed-attachments",
+            "utterance_text": "",
+            "executor": "local",
+            "attachments": [
+                {
+                    "type": "file",
+                    "title": "notes.txt",
+                    "path": str(attached),
+                    "mime": "text/plain",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+
+    final = None
+    payload = None
+    for _ in range(30):
+        run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert run_resp.status_code == 200
+        payload = run_resp.json()
+        final = payload["status"]
+        if final != "running":
+            break
+        time.sleep(0.05)
+    assert final == "completed"
+    assert payload is not None
+    assert payload["utterance_text"] == "Inspect notes.txt"
+
+
 def test_audio_mock_flow(monkeypatch, tmp_path: Path):
     client, token = make_client(monkeypatch, tmp_path, provider="mock")
     resp = client.post(
@@ -528,6 +575,59 @@ def test_directory_create_endpoint(monkeypatch, tmp_path: Path):
     assert list_resp.json()["entries"] == []
 
 
+def test_upload_endpoint_stores_file_inside_allowed_roots(monkeypatch, tmp_path: Path):
+    workdir = tmp_path / "workspace"
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={"VOICE_AGENT_DEFAULT_WORKDIR": str(workdir)},
+    )
+    resp = client.post(
+        "/v1/uploads",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("notes.txt", BytesIO(b"hello from phone"), "text/plain")},
+        data={"session_id": "ios-session"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    artifact = payload["artifact"]
+    stored_path = Path(artifact["path"])
+    assert artifact["type"] == "code"
+    assert artifact["title"] == "notes.txt"
+    assert stored_path.exists()
+    assert workdir in stored_path.parents
+    assert ".mobaile_uploads" in stored_path.parts
+
+    file_resp = client.get(
+        "/v1/files",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(stored_path)},
+    )
+    assert file_resp.status_code == 200
+    assert file_resp.content == b"hello from phone"
+
+
+def test_upload_endpoint_rejects_large_file(monkeypatch, tmp_path: Path):
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(tmp_path / "workspace"),
+            "VOICE_AGENT_MAX_UPLOAD_MB": "0.0001",
+        },
+    )
+    resp = client.post(
+        "/v1/uploads",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("large.bin", BytesIO(b"x" * 512), "application/octet-stream")},
+        data={"session_id": "ios-session"},
+    )
+    assert resp.status_code == 413
+    assert "file payload too large" in resp.json()["detail"]
+
+
 def test_directory_listing_rejects_outside_allowed_roots(monkeypatch, tmp_path: Path):
     allowed = tmp_path / "allowed"
     allowed.mkdir(parents=True, exist_ok=True)
@@ -569,11 +669,23 @@ def test_workdir_restricted_in_safe_mode(monkeypatch, tmp_path: Path):
 
 
 def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    fake_claude = tmp_path / "claude"
+    fake_claude.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_claude.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
     client, token = make_client(
         monkeypatch,
         tmp_path,
         provider="mock",
-        extra_env={"VOICE_AGENT_CODEX_MODEL": "gpt-5.1"},
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_CODEX_MODEL": "gpt-5.1",
+            "VOICE_AGENT_CLAUDE_MODEL": "claude-sonnet-4-5",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "claude",
+        },
     )
     resp = client.get(
         "/v1/config",
@@ -582,6 +694,71 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["codex_model"] == "gpt-5.1"
+    assert payload["claude_model"] == "claude-sonnet-4-5"
+    assert payload["default_executor"] == "claude"
+    assert "codex" in payload["available_executors"]
+    assert "claude" in payload["available_executors"]
+    assert "local" not in payload["available_executors"]
+    assert payload["transcribe_provider"] == "mock"
+    assert payload["transcribe_ready"] is True
+
+
+def test_utterance_and_audio_omit_executor_use_resolved_default(monkeypatch, tmp_path: Path):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo '{\"type\":\"thread.started\",\"thread_id\":\"thread-abc\"}'\n"
+        "echo '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"done\"}}'\n"
+        "echo '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}'\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+        },
+    )
+
+    utterance_resp = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "default-executor-text",
+            "utterance_text": "inspect this repo",
+        },
+    )
+    assert utterance_resp.status_code == 200
+    text_run_id = utterance_resp.json()["run_id"]
+
+    audio_resp = client.post(
+        "/v1/audio",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
+        data={
+            "session_id": "default-executor-audio",
+            "transcript_hint": "inspect this repo",
+        },
+    )
+    assert audio_resp.status_code == 200
+    audio_run_id = audio_resp.json()["run_id"]
+
+    for run_id in (text_run_id, audio_run_id):
+        final_payload = None
+        for _ in range(80):
+            run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+            assert run_resp.status_code == 200
+            final_payload = run_resp.json()
+            if final_payload["status"] != "running":
+                break
+            time.sleep(0.05)
+        assert final_payload is not None
+        assert final_payload["status"] == "completed"
+        assert final_payload["executor"] == "codex"
 
 
 def test_capabilities_endpoint_returns_report(monkeypatch, tmp_path: Path):
@@ -603,6 +780,29 @@ def test_capabilities_endpoint_returns_report(monkeypatch, tmp_path: Path):
     assert report_path.exists()
     report_payload = json.loads(report_path.read_text(encoding="utf-8"))
     assert report_payload["checked_at"]
+    assert "claude_cli" in capability_ids
+
+
+def test_config_endpoint_keeps_local_as_internal_fallback_when_binaries_are_missing(monkeypatch, tmp_path: Path):
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "PATH": str(empty_path),
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+        },
+    )
+    resp = client.get(
+        "/v1/config",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["default_executor"] == "local"
+    assert payload["available_executors"] == []
 
 
 def test_capabilities_openai_probe_requires_key(monkeypatch, tmp_path: Path):
@@ -622,6 +822,23 @@ def test_capabilities_openai_probe_requires_key(monkeypatch, tmp_path: Path):
     transcribe_probe = by_id["transcribe_provider"]
     assert transcribe_probe["status"] == "blocked"
     assert transcribe_probe["code"] == "auth_missing"
+
+
+def test_config_endpoint_reports_openai_transcription_not_ready_without_key(monkeypatch, tmp_path: Path):
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="openai",
+        openai_api_key="",
+    )
+    resp = client.get(
+        "/v1/config",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["transcribe_provider"] == "openai"
+    assert payload["transcribe_ready"] is False
 
 
 def test_pair_exchange_returns_api_token_and_rotates_code(monkeypatch, tmp_path: Path):
@@ -944,3 +1161,107 @@ def test_codex_profile_memory_persists_across_sessions(monkeypatch, tmp_path: Pa
     profile_memory = profile_root / "user-1" / "MEMORY.md"
     assert profile_memory.exists()
     assert "workflow-v1" in profile_memory.read_text(encoding="utf-8")
+
+
+def test_claude_run_streams_assistant_messages_and_resumes_session(monkeypatch, tmp_path: Path):
+    fake_claude = tmp_path / "claude"
+    fake_claude.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "resume_id=\"\"\n"
+        "while [[ $# -gt 0 ]]; do\n"
+        "  case \"$1\" in\n"
+        "    -p)\n"
+        "      shift 2\n"
+        "      ;;\n"
+        "    --resume)\n"
+        "      resume_id=\"${2:-}\"\n"
+        "      shift 2\n"
+        "      ;;\n"
+        "    --output-format|--permission-mode)\n"
+        "      shift 2\n"
+        "      ;;\n"
+        "    --verbose|--dangerously-skip-permissions)\n"
+        "      shift\n"
+        "      ;;\n"
+        "    *)\n"
+        "      shift\n"
+        "      ;;\n"
+        "  esac\n"
+        "done\n"
+        "if [[ -n \"$resume_id\" ]]; then\n"
+        "  session=\"$resume_id\"\n"
+        "  text=\"continued from claude\"\n"
+        "else\n"
+        "  session=\"claude-session-1\"\n"
+        "  text=\"started from claude\"\n"
+        "fi\n"
+        "echo \"{\\\"type\\\":\\\"system\\\",\\\"session_id\\\":\\\"${session}\\\"}\"\n"
+        "echo \"{\\\"type\\\":\\\"assistant\\\",\\\"session_id\\\":\\\"${session}\\\",\\\"message\\\":{\\\"content\\\":[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"${text}\\\"}]}}\"\n"
+        "echo \"{\\\"type\\\":\\\"result\\\",\\\"session_id\\\":\\\"${session}\\\",\\\"result\\\":\\\"ok\\\"}\"\n",
+        encoding="utf-8",
+    )
+    fake_claude.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_CLAUDE_BINARY": "claude",
+            "VOICE_AGENT_CLAUDE_TIMEOUT_SEC": "60",
+        },
+    )
+
+    create_first = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "claude-resume",
+            "thread_id": "chat-claude",
+            "utterance_text": "first prompt",
+            "executor": "claude",
+        },
+    )
+    assert create_first.status_code == 200
+    first_run_id = create_first.json()["run_id"]
+
+    first_payload = None
+    for _ in range(80):
+        first_run = client.get(f"/v1/runs/{first_run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert first_run.status_code == 200
+        first_payload = first_run.json()
+        if first_payload["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert first_payload is not None
+    assert first_payload["status"] == "completed"
+    first_chat_messages = [e["message"] for e in first_payload["events"] if e["type"] == "chat.message"]
+    assert any("started from claude" in msg for msg in first_chat_messages)
+
+    create_second = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "claude-resume",
+            "thread_id": "chat-claude",
+            "utterance_text": "second prompt",
+            "executor": "claude",
+        },
+    )
+    assert create_second.status_code == 200
+    second_run_id = create_second.json()["run_id"]
+
+    second_payload = None
+    for _ in range(80):
+        second_run = client.get(f"/v1/runs/{second_run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert second_run.status_code == 200
+        second_payload = second_run.json()
+        if second_payload["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert second_payload is not None
+    assert second_payload["status"] == "completed"
+    second_chat_messages = [e["message"] for e in second_payload["events"] if e["type"] == "chat.message"]
+    assert any("continued from claude" in msg for msg in second_chat_messages)

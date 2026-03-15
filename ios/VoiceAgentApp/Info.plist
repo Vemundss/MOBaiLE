@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Voice Agent needs microphone access to record audio and send it to your backend.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Voice Agent uses Speech Recognition to turn your recordings into text before starting a run.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

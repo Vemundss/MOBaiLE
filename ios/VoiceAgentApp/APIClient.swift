@@ -1,12 +1,15 @@
 import Foundation
 
 enum APIError: Error, LocalizedError {
+    case missingCredentials
     case invalidURL
     case invalidResponse
     case httpError(Int, String)
 
     var errorDescription: String? {
         switch self {
+        case .missingCredentials:
+            return "Enter server URL and API token first."
         case .invalidURL:
             return "Invalid server URL."
         case .invalidResponse:
@@ -229,6 +232,49 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try jsonDecoder.decode(AudioRunResponse.self, from: data)
+    }
+
+    func uploadAttachment(
+        serverURL: String,
+        token: String,
+        sessionID: String,
+        fileURL: URL,
+        mimeType: String?,
+        onProgress: ((Double) -> Void)? = nil,
+        registerCancellation: ((@escaping () -> Void) -> Void)? = nil
+    ) async throws -> UploadResponse {
+        guard let url = URL(string: serverURL + "/v1/uploads") else {
+            throw APIError.invalidURL
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let fileData = try Data(contentsOf: fileURL)
+        let bodyData = buildMultipartBody(
+            boundary: boundary,
+            fields: ["session_id": sessionID],
+            fileData: fileData,
+            fileFieldName: "file",
+            fileName: fileURL.lastPathComponent,
+            mimeType: inferAttachmentMimeType(fileName: fileURL.lastPathComponent, fallback: mimeType)
+        )
+        let delegate = UploadTaskDelegate(progressHandler: onProgress)
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+
+        let (data, response) = try await delegate.upload(
+            session: session,
+            request: request,
+            bodyData: bodyData,
+            registerCancellation: registerCancellation
+        )
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(UploadResponse.self, from: data)
     }
 
     func streamRunEvents(
@@ -472,6 +518,73 @@ final class APIClient {
 private extension Data {
     mutating func append(_ string: String) {
         self.append(contentsOf: string.utf8)
+    }
+}
+
+private final class UploadTaskDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate {
+    private let progressHandler: ((Double) -> Void)?
+    private var responseData = Data()
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+
+    init(progressHandler: ((Double) -> Void)?) {
+        self.progressHandler = progressHandler
+    }
+
+    func upload(
+        session: URLSession,
+        request: URLRequest,
+        bodyData: Data,
+        registerCancellation: ((@escaping () -> Void) -> Void)?
+    ) async throws -> (Data, URLResponse) {
+        progressHandler?(0)
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let task = session.uploadTask(with: request, from: bodyData)
+            registerCancellation? { [weak task] in
+                task?.cancel()
+            }
+            task.resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        responseData.append(data)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        let progress = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+        progressHandler?(min(1, max(0, progress)))
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            resume(with: .failure(error))
+            return
+        }
+        guard let response = task.response else {
+            resume(with: .failure(APIError.invalidResponse))
+            return
+        }
+        progressHandler?(1)
+        resume(with: .success((responseData, response)))
+    }
+
+    private func resume(with result: Result<(Data, URLResponse), Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        switch result {
+        case let .success(value):
+            continuation.resume(returning: value)
+        case let .failure(error):
+            continuation.resume(throwing: error)
+        }
     }
 }
 

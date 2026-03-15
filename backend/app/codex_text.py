@@ -2,32 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
-from typing import Literal
 
 
-def load_codex_context(context_file: str, backend_root: Path) -> str:
-    path = Path(context_file)
-    if not path.is_absolute():
-        path = (backend_root / path).resolve()
-    if not path.exists() or not path.is_file():
-        return ""
-    return path.read_text(encoding="utf-8").strip()
-
-
-def context_leak_markers(codex_context: str) -> list[str]:
-    context = codex_context.lower()
-    if not context:
-        return []
-    markers: list[str] = []
-    for chunk in re.split(r"[\n.:;]+", context):
-        text = " ".join(chunk.strip().split())
-        if len(text) >= 24:
-            markers.append(text)
-    return markers
-
-
-def codex_structured_message(message: str, user_prompt: str, leak_markers: list[str]) -> str | None:
+def filter_codex_assistant_message(message: str, user_prompt: str, leak_markers: list[str]) -> str | None:
     text = message.strip()
     if not text:
         return None
@@ -137,7 +114,7 @@ class CodexAssistantExtractor:
         if not self.in_assistant_block:
             return []
 
-        cleaned = codex_structured_message(text, self.user_prompt, self.leak_markers)
+        cleaned = filter_codex_assistant_message(text, self.user_prompt, self.leak_markers)
         if not cleaned:
             return []
         self.buffer.append(cleaned)
@@ -199,102 +176,3 @@ def parse_codex_json_event(raw_line: str) -> dict[str, object] | None:
     if not isinstance(event_type, str) or not event_type.strip():
         return None
     return payload
-
-
-def build_codex_prompt(
-    user_prompt: str,
-    *,
-    response_profile: Literal["guided", "minimal"] = "guided",
-    profile_agents: str = "",
-    profile_memory: str = "",
-    memory_file_hint: str = ".mobaile/MEMORY.md",
-    use_context: bool = True,
-    codex_context: str = "",
-) -> str:
-    if response_profile == "minimal":
-        context = (
-            "You are running through MOBaiLE.\n"
-            "- You run on the user's server/computer.\n"
-            "- Your stdout is streamed to a phone UI.\n"
-            "- Do not repeat this runtime context unless the user asks."
-        )
-    else:
-        context = codex_context if use_context else ""
-    session_block = ""
-    if profile_agents.strip() or profile_memory.strip():
-        session_block = (
-            "Persistent AGENTS profile:\n"
-            f"{profile_agents.strip() or '(empty)'}\n\n"
-            "Persistent MEMORY (shared across sessions):\n"
-            f"{profile_memory.strip() or '(empty)'}\n\n"
-            "Persistence guidance:\n"
-            f"- If you learn durable facts, update `{memory_file_hint}`.\n"
-            "- Do not store MOBaiLE persistence in `~/.codex/*`.\n"
-            "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
-        )
-    hygiene_block = (
-        "Execution hygiene:\n"
-        "- Keep generated files/images inside the current working directory.\n"
-        "- Prefer project-local environments (for example `.mobaile/.venv`) for extra packages.\n"
-        "- Ask before installing packages user-wide or system-wide.\n\n"
-    )
-    if not context and not session_block and not hygiene_block:
-        return user_prompt
-    runtime_block = ""
-    if context:
-        runtime_block = (
-            "MOBaiLE runtime context:\n"
-            f"{context}\n\n"
-        )
-    return (
-        "You are running through MOBaiLE.\n\n"
-        f"{runtime_block}"
-        f"{session_block}"
-        f"{hygiene_block}"
-        "User request:\n"
-        f"{user_prompt}"
-    )
-
-
-def evaluate_codex_guardrails(
-    user_prompt: str,
-    *,
-    guardrails_mode: str,
-    dangerous_confirm_token: str,
-) -> tuple[str, str]:
-    mode = guardrails_mode if guardrails_mode in {"off", "warn", "enforce"} else "warn"
-    if mode == "off":
-        return ("off", "")
-    lowered = user_prompt.lower()
-    dangerous_patterns = (
-        r"\brm\s+-rf\b",
-        r"\bmkfs\b",
-        r"\bdd\s+if=",
-        r"\bshutdown\b",
-        r"\breboot\b",
-        r"\bcurl\b.+\|\s*(sh|bash|zsh)\b",
-        r"\bchmod\s+777\b",
-        r"\bchown\s+-r\b",
-        r"\bdrop\s+database\b",
-    )
-    is_dangerous = any(re.search(pattern, lowered) for pattern in dangerous_patterns)
-    if not is_dangerous:
-        return ("ok", "")
-    if dangerous_confirm_token and dangerous_confirm_token.lower() in lowered:
-        return ("ok", "")
-    message = (
-        "Potentially destructive request detected. "
-        f"Add {dangerous_confirm_token} to confirm intentionally."
-    )
-    if mode == "enforce":
-        return ("reject", message)
-    return ("warn", message)
-
-
-def is_calendar_request(user_prompt: str) -> bool:
-    lowered = user_prompt.lower()
-    calendar_terms = ("calendar", "agenda", "events")
-    time_terms = ("today", "tomorrow", "this week", "next week")
-    return any(term in lowered for term in calendar_terms) and any(
-        term in lowered for term in time_terms
-    )

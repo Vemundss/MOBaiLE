@@ -9,32 +9,50 @@ Think of it as a practical "remote teammate in your pocket": you speak or type a
 
 ## Quick Start
 
-### What this solves
+Choose the shortest path that matches what you need.
+
+### Backend on this machine
+
+If you already have `python3`:
+
+```bash
+bash ./scripts/install_backend.sh --mode safe
+cd backend
+bash ./run_backend.sh
+curl http://127.0.0.1:8000/health
+```
+
+`install_backend.sh` now installs `uv` for you if it is missing.
+
+If you prefer a no-clone / managed install in `~/MOBaiLE`, use the bootstrap flow instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
+```
+
+`bootstrap_server.sh` installs into `~/MOBaiLE` by default, so use `install_backend.sh` when you want to work from this checkout.
+If no Codex/Claude CLI is installed, MOBaiLE keeps the internal `local` executor available for smoke/dev text requests.
+
+### iOS app on simulator
+
+```bash
+cd ios
+open VoiceAgentApp.xcodeproj
+```
+
+Use `xcodegen generate` only after editing `ios/project.yml` or if the checked-in Xcode project gets out of sync.
+
+### iPhone + backend over Tailscale
+
+Install Tailscale on both devices, then follow the full on-the-go setup below.
+
+Need more detail? Jump to [`docs/USAGE.md`](docs/USAGE.md), [`backend/README.md`](backend/README.md), [`ios/README.md`](ios/README.md), or [`scripts/README.md`](scripts/README.md).
+
+## What this solves
 
 - Run real tasks on your own computer while away from your desk.
 - Keep a single control plane for auth, run history, and live event updates.
 - Choose a safer default mode (`safe`) or unlock full power on trusted hosts (`full-access`).
-
-## Privacy Policy URL (App Store Connect)
-
-Apple requires a public privacy policy URL for App Store submissions.
-
-Current live policy URL (public):
-
-- `https://gist.github.com/Vemundss/c2ae60485e23c0c8a93115c039b03044`
-
-Use that URL in App Store Connect now.
-
-The repo also includes a privacy page at `docs/privacy-policy.html` and an optional GitHub Pages deploy workflow:
-`.github/workflows/deploy-privacy-policy.yml` (works when Pages is enabled/supported for the repo).
-
-### Publish it
-
-1. Push `main` to GitHub.
-2. In GitHub repo settings, enable Pages and select `GitHub Actions` as source.
-3. Wait for the `Deploy Privacy Policy` workflow to complete.
-
-Also include the same public URL inside the app (Settings -> App -> Privacy Policy).
 
 ## Setup For On-The-Go Use (Outside Local Network)
 
@@ -44,7 +62,7 @@ This is the recommended end-to-end setup for most users.
 
 On your computer:
 - `git`, `python3`, `curl`
-- [`uv`](https://docs.astral.sh/uv/) (auto-installed by bootstrap if missing)
+- [`uv`](https://docs.astral.sh/uv/) (auto-installed by `install_backend.sh` / bootstrap if missing)
 - [Tailscale](https://tailscale.com/download) (recommended for remote access without port forwarding)
 
 On your iPhone:
@@ -78,7 +96,9 @@ Option B (manual, if you want full control):
 git clone https://github.com/vemundss/MOBaiLE.git
 cd MOBaiLE
 bash ./scripts/install_backend.sh --mode safe --expose-network
-bash ./scripts/service_macos.sh install   # macOS only
+bash ./scripts/service_macos.sh install   # macOS
+# or on Linux:
+bash ./scripts/service_linux.sh install
 bash ./scripts/doctor.sh
 bash ./scripts/pairing_qr.sh
 ```
@@ -87,8 +107,10 @@ What bootstrap does:
 - clones/updates repo to `~/MOBaiLE`
 - installs backend deps and creates `backend/.env`
 - creates `backend/pairing.json` (uses Tailscale URL when available)
-- on macOS: installs and starts background service
+- on macOS: installs and starts `launchd` background service
+- on Linux: installs and starts `systemd --user` background service when available
 - generates `backend/pairing-qr.png`
+- keeps the internal `local` executor available for smoke/dev requests if no Codex/Claude CLI is installed
 
 ### 4) Verify backend is healthy
 
@@ -191,7 +213,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
     "session_id": "demo-session",
     "utterance_text": "create a hello python script and run it",
     "mode": "execute",
-    "executor": "local",
+    "executor": "codex",
     "working_directory": "~/MOBaiLE-workspace"
   }'
 ```
@@ -206,9 +228,10 @@ bash ./scripts/phone_connectivity_smoke.sh
 
 ```bash
 cd ios
-xcodegen generate
 open VoiceAgentApp.xcodeproj
 ```
+
+If you changed `ios/project.yml`, run `xcodegen generate` first.
 
 ## Test, Rerun, and Maintenance
 
@@ -218,12 +241,18 @@ bash ./scripts/pairing_qr.sh         # regenerate pairing QR
 cd backend && bash ./run_backend.sh  # start backend in foreground
 ```
 
-macOS service control:
+Service control:
 
 ```bash
+# macOS
 bash ./scripts/service_macos.sh status
 bash ./scripts/service_macos.sh restart
 bash ./scripts/service_macos.sh logs
+
+# Linux
+bash ./scripts/service_linux.sh status
+bash ./scripts/service_linux.sh restart
+bash ./scripts/service_linux.sh logs
 ```
 
 Backend tests:
@@ -260,9 +289,12 @@ pre-commit run --all-files
 - iPhone can pair on Wi-Fi but not on cellular:
   - confirm Tailscale is connected on iPhone and computer
   - confirm backend is running (`bash ./scripts/doctor.sh`)
-- Audio uploads fail:
+- iPhone voice works on text but not through the mic:
+  - enable `Speech Recognition` for MOBaiLE in iOS Settings
+  - on a real iPhone, MOBaiLE transcribes locally first; `OPENAI_API_KEY` is only needed for backend audio upload fallback
+- Backend audio uploads fail:
   - set `OPENAI_API_KEY` in `backend/.env`
-  - or set `VOICE_AGENT_TRANSCRIBE_PROVIDER=mock` for deterministic local tests
+  - text prompts still work without it; `/v1/audio` depends on backend transcription
 
 Optional npm wrappers (if you use Node):
 
@@ -271,6 +303,7 @@ npm run setup:server
 npm run backend:start
 npm run doctor
 npm run pair:qr
+npm run ios:open
 ```
 
 ## More Docs
@@ -281,7 +314,26 @@ npm run pair:qr
 - Scripts reference: [`scripts/README.md`](scripts/README.md)
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Current status: [`STATUS.md`](STATUS.md)
-- Planned features: [`NEW_FEATURES.md`](NEW_FEATURES.md)
+
+## Publishing and Privacy Policy
+
+Apple requires a public privacy policy URL for App Store submissions.
+
+Repo source of truth:
+- `docs/privacy-policy.html`
+
+Optional GitHub Pages deploy workflow:
+- `.github/workflows/deploy-privacy-policy.yml`
+
+Current public fallback URL:
+- `https://gist.github.com/Vemundss/c2ae60485e23c0c8a93115c039b03044`
+
+If you enable GitHub Pages for the repo:
+
+1. Push `main` to GitHub.
+2. In GitHub repo settings, enable Pages and select `GitHub Actions` as source.
+3. Wait for the `Deploy Privacy Policy` workflow to complete.
+4. Prefer the GitHub Pages URL in App Store Connect and inside the app once it is live.
 
 ## License
 

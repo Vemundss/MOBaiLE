@@ -17,6 +17,7 @@ def collect_capabilities(
     *,
     security_mode: str,
     codex_binary: str,
+    claude_binary: str,
     transcribe_provider: str,
     report_path: Path | None = None,
     deep: bool = False,
@@ -27,6 +28,7 @@ def collect_capabilities(
     capabilities: list[CapabilityProbe] = []
 
     capabilities.append(_probe_binary("codex_cli", "Codex CLI", codex_binary))
+    capabilities.append(_probe_binary("claude_cli", "Claude Code CLI", claude_binary))
     capabilities.append(_probe_binary("uv_cli", "uv package manager", "uv"))
     capabilities.append(_probe_transcriber(transcribe_provider))
     capabilities.append(

@@ -1,6 +1,7 @@
 import Foundation
 import QuickLook
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 struct MessageBubble: View {
@@ -10,16 +11,19 @@ struct MessageBubble: View {
     @State private var artifactOpenError: String = ""
     @State private var openingArtifactID: String?
     @State private var previewDocument: PreviewDocument?
+    @State private var copiedMessage = false
     private let client = APIClient()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            bubbleHeader
+
             ForEach(segments) { segment in
                 switch segment.kind {
                 case .markdown:
-                    MarkdownText(text: segment.content, isUser: isUser)
-                case .code:
-                    CodeBlock(text: segment.content)
+                    ExpandableMarkdownBlock(text: segment.content, isUser: isUser)
+                case let .code(language):
+                    CodeBlock(text: segment.content, language: language)
                 case let .status(text):
                     AgentStatusCard(text: text)
                 case let .image(url):
@@ -45,14 +49,42 @@ struct MessageBubble: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.vertical, 10)
         .foregroundStyle(isUser ? Color.white : Color.primary)
         .background(
-            isUser
-                ? Color.blue
-                : Color(.secondarySystemBackground)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    isUser
+                        ? AnyShapeStyle(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.17, green: 0.48, blue: 0.96),
+                                    Color(red: 0.12, green: 0.39, blue: 0.90)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        : AnyShapeStyle(Color(.secondarySystemBackground))
+                )
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    isUser ? Color.white.opacity(0.14) : Color(.separator).opacity(0.18),
+                    lineWidth: 1
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contextMenu {
+            if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    UIPasteboard.general.string = message.text
+                } label: {
+                    Label("Copy message", systemImage: "doc.on.doc")
+                }
+            }
+        }
         .alert("Open failed", isPresented: Binding(
             get: { !artifactOpenError.isEmpty },
             set: { if !$0 { artifactOpenError = "" } }
@@ -71,7 +103,39 @@ struct MessageBubble: View {
     }
 
     private var segments: [MessageSegment] {
-        parseSegments(from: message.text, serverURL: serverURL, massageForDisplay: !isUser)
+        let parsed = parseSegments(from: message.text, serverURL: serverURL, massageForDisplay: !isUser)
+        let explicitAttachments = message.attachments.compactMap(messageSegment(for:))
+        guard !explicitAttachments.isEmpty else { return parsed }
+        if parsed.isEmpty {
+            return explicitAttachments
+        }
+        return parsed + explicitAttachments
+    }
+
+    private var bubbleHeader: some View {
+        HStack(spacing: 8) {
+            Label(isUser ? "You" : "MOBaiLE", systemImage: isUser ? "person.fill" : "sparkles")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isUser ? Color.white.opacity(0.92) : Color.secondary)
+
+            Spacer()
+
+            if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    UIPasteboard.general.string = message.text
+                    copiedMessage = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_100_000_000)
+                        copiedMessage = false
+                    }
+                } label: {
+                    Label(copiedMessage ? "Copied" : "Copy", systemImage: copiedMessage ? "checkmark" : "doc.on.doc")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(isUser ? Color.white.opacity(0.88) : Color.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private func openArtifact(_ artifact: ChatArtifact) async {
@@ -121,6 +185,15 @@ struct MessageBubble: View {
             return 80
         }
     }
+
+    private func messageSegment(for artifact: ChatArtifact) -> MessageSegment? {
+        if artifact.type.lowercased() == "image",
+           let raw = artifact.url ?? artifact.path,
+           let url = resolveImageURL(from: raw, serverURL: serverURL) {
+            return MessageSegment(kind: .image(url: url), content: url)
+        }
+        return MessageSegment(kind: .artifact(item: artifact), content: artifact.title)
+    }
 }
 
 private struct MarkdownText: View {
@@ -128,24 +201,74 @@ private struct MarkdownText: View {
     let isUser: Bool
 
     var body: some View {
-        if shouldRenderAsMarkdown(text),
-           let rendered = try? AttributedString(
-               markdown: text,
-               options: AttributedString.MarkdownParsingOptions(
-                   interpretedSyntax: .full,
-                   failurePolicy: .returnPartiallyParsedIfPossible
-               )
-           ) {
-            Text(rendered)
-                .font(.body)
-                .lineSpacing(1.5)
-                .foregroundStyle(isUser ? Color.white : Color.primary)
-        } else {
-            Text(verbatim: text)
-                .font(.body)
-                .lineSpacing(1.5)
-                .foregroundStyle(isUser ? Color.white : Color.primary)
+        Group {
+            if shouldRenderAsMarkdown(text),
+               let rendered = try? AttributedString(
+                   markdown: text,
+                   options: AttributedString.MarkdownParsingOptions(
+                       interpretedSyntax: .full,
+                       failurePolicy: .returnPartiallyParsedIfPossible
+                   )
+               ) {
+                Text(rendered)
+                    .font(.body)
+                    .lineSpacing(1.5)
+                    .foregroundStyle(isUser ? Color.white : Color.primary)
+            } else {
+                Text(verbatim: text)
+                    .font(.body)
+                    .lineSpacing(1.5)
+                    .foregroundStyle(isUser ? Color.white : Color.primary)
+            }
         }
+        .textSelection(.enabled)
+    }
+}
+
+private struct ExpandableMarkdownBlock: View {
+    let text: String
+    let isUser: Bool
+    @State private var expanded: Bool
+
+    init(text: String, isUser: Bool) {
+        self.text = text
+        self.isUser = isUser
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        _expanded = State(initialValue: !Self.shouldCollapse(trimmed, isUser: isUser))
+    }
+
+    var body: some View {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if Self.shouldCollapse(trimmed, isUser: isUser) {
+            VStack(alignment: .leading, spacing: 8) {
+                if expanded {
+                    MarkdownText(text: trimmed, isUser: isUser)
+                } else {
+                    Text(collapsedPreviewText(from: trimmed))
+                        .font(.body)
+                        .lineSpacing(1.5)
+                        .foregroundStyle(isUser ? Color.white : Color.primary)
+                        .textSelection(.enabled)
+                }
+
+                Button(expanded ? "Show less" : "Show full response") {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        expanded.toggle()
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isUser ? Color.white.opacity(0.92) : Color.blue)
+            }
+        } else {
+            MarkdownText(text: trimmed, isUser: isUser)
+        }
+    }
+
+    private static func shouldCollapse(_ text: String, isUser: Bool) -> Bool {
+        guard !isUser else { return false }
+        let lineCount = text.split(separator: "\n", omittingEmptySubsequences: false).count
+        return text.count > 420 || lineCount > 9
     }
 }
 
@@ -168,15 +291,67 @@ private func shouldRenderAsMarkdown(_ text: String) -> Bool {
     return false
 }
 
+private func collapsedPreviewText(from text: String, limit: Int = 240) -> String {
+    let normalized: String
+    if let rendered = try? AttributedString(
+        markdown: text,
+        options: AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .full,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+    ) {
+        normalized = String(rendered.characters)
+    } else {
+        normalized = text
+    }
+
+    let collapsed = normalized
+        .components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+
+    guard collapsed.count > limit else { return collapsed }
+    let index = collapsed.index(collapsed.startIndex, offsetBy: limit)
+    return String(collapsed[..<index]).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+}
+
 private struct CodeBlock: View {
     let text: String
+    let language: String?
+    @State private var copied = false
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(text)
-                .font(.system(.footnote, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(language?.uppercased() ?? "CODE")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.72))
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = text
+                    copied = true
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        copied = false
+                    }
+                } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.04))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(text)
+                    .font(.system(.footnote, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .textSelection(.enabled)
+            }
         }
         .background(Color(red: 0.08, green: 0.10, blue: 0.14))
         .foregroundStyle(Color(red: 0.86, green: 0.91, blue: 0.97))
@@ -188,7 +363,18 @@ private struct SectionCard: View {
     let title: String
     let content: String
     let isUser: Bool
-    @State private var expanded = false
+    @State private var expanded: Bool
+
+    init(title: String, content: String, isUser: Bool) {
+        self.title = title
+        self.content = content
+        self.isUser = isUser
+
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isLong = trimmed.count > 280 || trimmed.contains("\n\n")
+        _expanded = State(initialValue: Self.defaultExpanded(for: lower, isLong: isLong))
+    }
 
     var body: some View {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -203,10 +389,25 @@ private struct SectionCard: View {
             }
             .foregroundStyle(isUser ? Color.white.opacity(0.9) : style.tint)
             if isLong {
-                DisclosureGroup(expanded ? "Hide details" : "Show details", isExpanded: $expanded) {
-                    MarkdownText(text: trimmed, isUser: isUser)
+                VStack(alignment: .leading, spacing: 8) {
+                    if expanded {
+                        MarkdownText(text: trimmed, isUser: isUser)
+                    } else {
+                        Text(collapsedPreviewText(from: trimmed, limit: 180))
+                            .font(.subheadline)
+                            .foregroundStyle(isUser ? Color.white.opacity(0.92) : Color.primary.opacity(0.84))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button(expanded ? "Hide details" : "Show details") {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            expanded.toggle()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isUser ? Color.white.opacity(0.9) : style.tint)
                 }
-                .font(.footnote)
             } else {
                 MarkdownText(text: trimmed, isUser: isUser)
             }
@@ -214,6 +415,16 @@ private struct SectionCard: View {
         .padding(10)
         .background(isUser ? Color.white.opacity(0.08) : style.background)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private static func defaultExpanded(for title: String, isLong: Bool) -> Bool {
+        guard isLong else { return true }
+        switch title {
+        case "result", "output", "next step":
+            return true
+        default:
+            return false
+        }
     }
 
     private var sectionStyle: (icon: String, tint: Color, background: Color) {
@@ -270,6 +481,12 @@ private struct ArtifactCard: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if let mime = artifact.mime, !mime.isEmpty {
+                    Text(mime)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             if resolvedURL != nil {
@@ -295,6 +512,15 @@ private struct ArtifactCard: View {
         .padding(10)
         .background(Color(.tertiarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contextMenu {
+            if let rawReference = artifact.path ?? artifact.url {
+                Button {
+                    UIPasteboard.general.string = rawReference
+                } label: {
+                    Label("Copy reference", systemImage: "doc.on.doc")
+                }
+            }
+        }
     }
 
     private var iconName: String {
@@ -368,7 +594,7 @@ private struct QuickLookPreview: UIViewControllerRepresentable {
 private struct MessageSegment: Identifiable {
     enum Kind {
         case markdown
-        case code
+        case code(language: String?)
         case status(text: String)
         case image(url: String)
         case section(title: String, body: String)
@@ -444,10 +670,12 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
     }
 
     var remaining = massageForDisplay ? massageAssistantTextForDisplay(text) : text
+    var inlineMediaSegments: [MessageSegment] = []
 
-    if let imageURL = extractImageURL(from: remaining, serverURL: serverURL) {
-        remaining = removeImageMarkdown(from: remaining)
-        segments.append(MessageSegment(kind: .image(url: imageURL), content: imageURL))
+    let inlineMedia = extractInlineMediaReferences(from: remaining, serverURL: serverURL)
+    if !inlineMedia.isEmpty {
+        remaining = removingInlineMediaReferences(from: remaining, references: inlineMedia)
+        inlineMediaSegments = inlineMedia.map(\.segment)
     }
 
     if let agendaItems = parseAgendaItemsLoosely(from: remaining), !agendaItems.isEmpty {
@@ -460,6 +688,7 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
             }
         }
         segments.append(MessageSegment(kind: .agenda(items: agendaItems), content: "agenda"))
+        segments.append(contentsOf: inlineMediaSegments)
         return segments
     }
 
@@ -473,6 +702,7 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
             }
         }
         segments.append(MessageSegment(kind: .emailDigest(items: emails), content: "emails"))
+        segments.append(contentsOf: inlineMediaSegments)
         return segments
     }
 
@@ -490,19 +720,22 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
             if !tail.isEmpty {
                 segments.append(MessageSegment(kind: .markdown, content: tail))
             }
+            segments.append(contentsOf: inlineMediaSegments)
             return segments
         }
 
         var code = String(afterOpen[..<close.lowerBound])
+        var language: String?
         if let firstNewline = code.firstIndex(of: "\n") {
-            let firstLine = code[..<firstNewline]
-            if !firstLine.contains(" ") && firstLine.count <= 20 {
+            let firstLine = code[..<firstNewline].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !firstLine.contains(" "), firstLine.count <= 20 {
+                language = firstLine.isEmpty ? nil : String(firstLine)
                 code = String(code[code.index(after: firstNewline)...])
             }
         }
         code = code.trimmingCharacters(in: .newlines)
         if !code.isEmpty {
-            segments.append(MessageSegment(kind: .code, content: code))
+            segments.append(MessageSegment(kind: .code(language: language), content: code))
         }
 
         remainingSlice = afterOpen[close.upperBound...]
@@ -512,6 +745,7 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
     if !tail.isEmpty {
         segments.append(MessageSegment(kind: .markdown, content: tail))
     }
+    segments.append(contentsOf: inlineMediaSegments)
     return segments
 }
 
@@ -807,18 +1041,33 @@ private struct RemoteImageView: View {
     let apiToken: String
 
     private let client = APIClient()
-    @State private var loadedImage: Image?
+    @State private var loadedImage: UIImage?
     @State private var isLoading = false
     @State private var didFail = false
     @State private var failureMessage = "Image failed to load"
+    @State private var showingPreview = false
 
     var body: some View {
         Group {
             if let image = loadedImage {
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Button {
+                    showingPreview = true
+                } label: {
+                    ZStack(alignment: .bottomTrailing) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(8)
+                            .background(Color.black.opacity(0.45))
+                            .clipShape(Circle())
+                            .padding(10)
+                    }
+                }
+                .buttonStyle(.plain)
             } else if isLoading {
                 ProgressView()
             } else if didFail {
@@ -832,6 +1081,11 @@ private struct RemoteImageView: View {
         .frame(maxHeight: 260)
         .task(id: urlString) {
             await loadImage()
+        }
+        .sheet(isPresented: $showingPreview) {
+            if let image = loadedImage {
+                ImagePreviewSheet(image: image, title: previewTitle)
+            }
         }
     }
 
@@ -857,7 +1111,7 @@ private struct RemoteImageView: View {
                 isLoading = false
                 return
             }
-            loadedImage = Image(uiImage: uiImage)
+            loadedImage = uiImage
             isLoading = false
         } catch let apiError as APIError {
             switch apiError {
@@ -883,23 +1137,135 @@ private struct RemoteImageView: View {
             isLoading = false
         }
     }
+
+    private var previewTitle: String {
+        let raw = URL(string: urlString)?.lastPathComponent ?? "Image"
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Image" : trimmed
+    }
 }
 
-private func extractImageURL(from text: String, serverURL: String) -> String? {
-    let pattern = #"\!\[[^\]]*\]\(([^)]+)\)"#
-    guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+private struct ImagePreviewSheet: View {
+    let image: UIImage
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(20)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct InlineMediaReference {
+    let range: NSRange
+    let segment: MessageSegment
+}
+
+private func extractInlineMediaReferences(from text: String, serverURL: String) -> [InlineMediaReference] {
+    var references: [InlineMediaReference] = []
     let nsRange = NSRange(text.startIndex..., in: text)
-    guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
-          let range = Range(match.range(at: 1), in: text) else { return nil }
-    let raw = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-    return resolveImageURL(from: raw, serverURL: serverURL)
+
+    if let imageRegex = try? NSRegularExpression(pattern: #"\!\[[^\]]*\]\(([^)]+)\)"#) {
+        for match in imageRegex.matches(in: text, options: [], range: nsRange) {
+            guard let valueRange = Range(match.range(at: 1), in: text) else { continue }
+            let raw = String(text[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let resolved = resolveImageURL(from: raw, serverURL: serverURL) else { continue }
+            references.append(
+                InlineMediaReference(
+                    range: match.range,
+                    segment: MessageSegment(kind: .image(url: resolved), content: resolved)
+                )
+            )
+        }
+    }
+
+    if let linkRegex = try? NSRegularExpression(pattern: #"(?<!!)\[([^\]]+)\]\(([^)]+)\)"#) {
+        for match in linkRegex.matches(in: text, options: [], range: nsRange) {
+            guard let titleRange = Range(match.range(at: 1), in: text),
+                  let targetRange = Range(match.range(at: 2), in: text) else {
+                continue
+            }
+            let title = String(text[titleRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let raw = String(text[targetRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let artifact = resolveInlineArtifact(title: title, rawReference: raw, serverURL: serverURL) else {
+                continue
+            }
+            references.append(
+                InlineMediaReference(
+                    range: match.range,
+                    segment: MessageSegment(kind: .artifact(item: artifact), content: artifact.title)
+                )
+            )
+        }
+    }
+
+    return references.sorted { $0.range.location < $1.range.location }
 }
 
-private func removeImageMarkdown(from text: String) -> String {
-    let pattern = #"\!\[[^\]]*\]\([^)]+\)"#
-    guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-    let range = NSRange(text.startIndex..., in: text)
-    return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+private func removingInlineMediaReferences(from text: String, references: [InlineMediaReference]) -> String {
+    guard !references.isEmpty else { return text }
+    let sorted = references.sorted { $0.range.location < $1.range.location }
+    var output = ""
+    var cursor = text.startIndex
+    for reference in sorted {
+        guard let range = Range(reference.range, in: text) else { continue }
+        output += String(text[cursor..<range.lowerBound])
+        cursor = range.upperBound
+    }
+    output += String(text[cursor...])
+    return collapseNewlines(output).trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func resolveInlineArtifact(title: String, rawReference: String, serverURL: String) -> ChatArtifact? {
+    let trimmed = rawReference.trimmingCharacters(in: .whitespacesAndNewlines)
+    let lower = trimmed.lowercased()
+    if lower.contains("path/to/") || lower.contains("absolute/path") {
+        return nil
+    }
+
+    let resolvedTitle = title.isEmpty ? fallbackArtifactTitle(from: trimmed) : title
+    if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+        guard let url = URL(string: trimmed), isBackendFileURL(url, serverURL: serverURL) else {
+            return nil
+        }
+        let mime = inferArtifactMimeType(from: url.lastPathComponent)
+        return ChatArtifact(
+            type: inferArtifactType(fileName: url.lastPathComponent, mimeType: mime),
+            title: resolvedTitle,
+            path: nil,
+            mime: mime,
+            url: trimmed
+        )
+    }
+
+    let path = extractArtifactPath(from: trimmed)
+    let fileName = URL(fileURLWithPath: path).lastPathComponent
+    let mime = inferArtifactMimeType(from: fileName)
+    return ChatArtifact(
+        type: inferArtifactType(fileName: fileName, mimeType: mime),
+        title: resolvedTitle,
+        path: path,
+        mime: mime,
+        url: nil
+    )
 }
 
 private func resolveImageURL(from raw: String, serverURL: String) -> String? {
@@ -917,6 +1283,12 @@ private func resolveImageURL(from raw: String, serverURL: String) -> String? {
     }
     let normalizedServer = serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     return "\(normalizedServer)/v1/files?path=\(encoded)"
+}
+
+private func extractArtifactPath(from text: String) -> String {
+    text
+        .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" <>"))
+        .replacingOccurrences(of: "file://", with: "")
 }
 
 private func extractImagePath(from text: String) -> String {
@@ -943,6 +1315,53 @@ private func extractImagePath(from text: String) -> String {
     return stripped
 }
 
+private func fallbackArtifactTitle(from reference: String) -> String {
+    let name = URL(fileURLWithPath: extractArtifactPath(from: reference)).lastPathComponent
+    return name.isEmpty ? "file" : name
+}
+
+private func inferArtifactMimeType(from fileName: String) -> String? {
+    let ext = URL(fileURLWithPath: fileName).pathExtension
+    guard let type = UTType(filenameExtension: ext) else { return nil }
+    return type.preferredMIMEType
+}
+
+private func inferArtifactType(fileName: String, mimeType: String?) -> String {
+    let lowerMime = (mimeType ?? "").lowercased()
+    if lowerMime.hasPrefix("image/") {
+        return "image"
+    }
+    if lowerMime.hasPrefix("text/") {
+        return "code"
+    }
+    switch URL(fileURLWithPath: fileName).pathExtension.lowercased() {
+    case "c", "cc", "cpp", "css", "go", "h", "hpp", "html", "java", "js", "json", "kt", "md", "mjs",
+         "php", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml":
+        return "code"
+    default:
+        return "file"
+    }
+}
+
+private func isBackendFileURL(_ url: URL, serverURL: String) -> Bool {
+    guard let backend = URL(string: serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else {
+        return false
+    }
+    return url.host == backend.host &&
+        (url.port ?? defaultPort(for: url.scheme)) == (backend.port ?? defaultPort(for: backend.scheme)) &&
+        url.scheme == backend.scheme &&
+        url.path.hasPrefix("/v1/files")
+}
+
+private func defaultPort(for scheme: String?) -> Int {
+    switch scheme?.lowercased() {
+    case "https":
+        return 443
+    default:
+        return 80
+    }
+}
+
 #if DEBUG
 func _test_extractImagePath(_ text: String) -> String {
     extractImagePath(from: text)
@@ -950,6 +1369,19 @@ func _test_extractImagePath(_ text: String) -> String {
 
 func _test_resolveImageURL(_ raw: String, serverURL: String) -> String? {
     resolveImageURL(from: raw, serverURL: serverURL)
+}
+
+func _test_extractInlineArtifactTitles(_ text: String, serverURL: String) -> [String] {
+    extractInlineMediaReferences(from: text, serverURL: serverURL).map { reference in
+        switch reference.segment.kind {
+        case let .artifact(item):
+            return item.title
+        case let .image(url):
+            return url
+        default:
+            return reference.segment.content
+        }
+    }
 }
 #endif
 

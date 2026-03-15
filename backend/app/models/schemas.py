@@ -6,15 +6,27 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+AgentExecutorName = Literal["codex", "claude"]
+RunExecutorName = Literal["local", "codex", "claude"]
+ResponseProfile = Literal["guided", "minimal"]
+
+
 class UtteranceRequest(BaseModel):
     session_id: str = Field(min_length=1)
     thread_id: str | None = Field(default=None, min_length=1)
-    utterance_text: str = Field(min_length=1)
+    utterance_text: str = ""
+    attachments: list["ChatArtifact"] = Field(default_factory=list)
     mode: Literal["assistant", "execute"] = "execute"
-    executor: Literal["local", "codex"] = "local"
+    executor: RunExecutorName | None = None
     working_directory: str | None = None
     response_mode: Literal["concise", "verbose"] = "concise"
-    response_profile: Literal["guided", "minimal"] = "guided"
+    response_profile: ResponseProfile = "guided"
+
+    @model_validator(mode="after")
+    def validate_content(self) -> "UtteranceRequest":
+        if self.utterance_text.strip() or self.attachments:
+            return self
+        raise ValueError("utterance_text or attachments must be provided")
 
 
 class Action(BaseModel):
@@ -93,6 +105,11 @@ class ChatArtifact(BaseModel):
     url: str | None = None
 
 
+class UploadResponse(BaseModel):
+    artifact: ChatArtifact
+    size_bytes: int
+
+
 class ActionResult(BaseModel):
     success: bool
     exit_code: int | None = None
@@ -104,7 +121,7 @@ class ActionResult(BaseModel):
 class RunRecord(BaseModel):
     run_id: str
     session_id: str
-    executor: Literal["local", "codex"] = "local"
+    executor: RunExecutorName = "local"
     utterance_text: str
     working_directory: str | None = None
     status: Literal["running", "completed", "failed", "rejected", "cancelled"]
@@ -118,7 +135,7 @@ class RunRecord(BaseModel):
 class RunSummary(BaseModel):
     run_id: str
     session_id: str
-    executor: Literal["local", "codex"] = "local"
+    executor: RunExecutorName = "local"
     utterance_text: str
     status: Literal["running", "completed", "failed", "rejected", "cancelled"]
     summary: str

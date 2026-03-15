@@ -76,6 +76,6 @@ Create a new Shortcut with these actions:
 
 ## Notes
 
-- For safer first test, set `"executor": "local"` before switching to `"codex"`.
+- Prefer `"executor": "codex"` or `"claude"` for normal use; keep `"local"` for internal smoke/dev testing.
 - If backend is private-network only (for example Tailscale), iPhone must be on that same network.
 - If Codex run fails, the run payload includes detailed failure events.

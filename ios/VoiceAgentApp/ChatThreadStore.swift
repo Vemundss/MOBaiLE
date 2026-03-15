@@ -38,7 +38,9 @@ final class ChatThreadStore {
                 transcriptText: thread.transcriptText,
                 statusText: thread.statusText,
                 resolvedWorkingDirectory: thread.resolvedWorkingDirectory,
-                activeRunExecutor: thread.activeRunExecutor
+                activeRunExecutor: thread.activeRunExecutor,
+                draftText: thread.draftText,
+                draftAttachments: thread.draftAttachments
             )
             upsertThread(metadata)
             for (position, message) in thread.conversation.enumerated() {
@@ -53,7 +55,7 @@ final class ChatThreadStore {
         defer { sqlite3_close(db) }
 
         let sql = """
-        SELECT id, title, updated_at, run_id, summary_text, transcript_text, status_text, resolved_working_directory, active_run_executor
+        SELECT id, title, updated_at, run_id, summary_text, transcript_text, status_text, resolved_working_directory, active_run_executor, draft_text, draft_attachments_json
         FROM threads
         ORDER BY updated_at DESC
         """
@@ -78,7 +80,9 @@ final class ChatThreadStore {
                     transcriptText: stringColumn(statement, index: 5),
                     statusText: stringColumn(statement, index: 6),
                     resolvedWorkingDirectory: stringColumn(statement, index: 7),
-                    activeRunExecutor: stringColumn(statement, index: 8)
+                    activeRunExecutor: stringColumn(statement, index: 8),
+                    draftText: stringColumn(statement, index: 9),
+                    draftAttachments: decodeDraftAttachments(from: stringColumn(statement, index: 10))
                 )
             )
         }
@@ -90,7 +94,7 @@ final class ChatThreadStore {
         defer { sqlite3_close(db) }
 
         let sql = """
-        SELECT message_id, role, text
+        SELECT message_id, role, text, attachments_json
         FROM thread_messages
         WHERE thread_id = ?
         ORDER BY position ASC
@@ -105,7 +109,8 @@ final class ChatThreadStore {
             let id = UUID(uuidString: stringColumn(statement, index: 0)) ?? UUID()
             let role = stringColumn(statement, index: 1)
             let text = stringColumn(statement, index: 2)
-            rows.append(ConversationMessage(id: id, role: role, text: text))
+            let attachments = decodeAttachments(from: stringColumn(statement, index: 3))
+            rows.append(ConversationMessage(id: id, role: role, text: text, attachments: attachments))
         }
         return rows
     }
@@ -116,9 +121,9 @@ final class ChatThreadStore {
 
         let sql = """
         INSERT INTO threads (
-            id, title, updated_at, run_id, summary_text, transcript_text, status_text, resolved_working_directory, active_run_executor
+            id, title, updated_at, run_id, summary_text, transcript_text, status_text, resolved_working_directory, active_run_executor, draft_text, draft_attachments_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title,
             updated_at=excluded.updated_at,
@@ -127,7 +132,9 @@ final class ChatThreadStore {
             transcript_text=excluded.transcript_text,
             status_text=excluded.status_text,
             resolved_working_directory=excluded.resolved_working_directory,
-            active_run_executor=excluded.active_run_executor
+            active_run_executor=excluded.active_run_executor,
+            draft_text=excluded.draft_text,
+            draft_attachments_json=excluded.draft_attachments_json
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
@@ -142,6 +149,8 @@ final class ChatThreadStore {
         bindText(statement, index: 7, value: thread.statusText)
         bindText(statement, index: 8, value: thread.resolvedWorkingDirectory)
         bindText(statement, index: 9, value: thread.activeRunExecutor)
+        bindText(statement, index: 10, value: thread.draftText)
+        bindText(statement, index: 11, value: encodeDraftAttachments(thread.draftAttachments))
         _ = sqlite3_step(statement)
     }
 
@@ -150,12 +159,13 @@ final class ChatThreadStore {
         defer { sqlite3_close(db) }
 
         let sql = """
-        INSERT INTO thread_messages (thread_id, position, message_id, role, text)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO thread_messages (thread_id, position, message_id, role, text, attachments_json)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(thread_id, position) DO UPDATE SET
             message_id=excluded.message_id,
             role=excluded.role,
-            text=excluded.text
+            text=excluded.text,
+            attachments_json=excluded.attachments_json
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
@@ -166,6 +176,7 @@ final class ChatThreadStore {
         bindText(statement, index: 3, value: message.id.uuidString)
         bindText(statement, index: 4, value: message.role)
         bindText(statement, index: 5, value: message.text)
+        bindText(statement, index: 6, value: encodeAttachments(message.attachments))
         _ = sqlite3_step(statement)
     }
 
@@ -193,7 +204,9 @@ final class ChatThreadStore {
             transcript_text TEXT NOT NULL,
             status_text TEXT NOT NULL,
             resolved_working_directory TEXT NOT NULL,
-            active_run_executor TEXT NOT NULL
+            active_run_executor TEXT NOT NULL,
+            draft_text TEXT NOT NULL DEFAULT '',
+            draft_attachments_json TEXT NOT NULL DEFAULT '[]'
         );
         CREATE TABLE IF NOT EXISTS thread_messages (
             thread_id TEXT NOT NULL,
@@ -201,12 +214,16 @@ final class ChatThreadStore {
             message_id TEXT NOT NULL,
             role TEXT NOT NULL,
             text TEXT NOT NULL,
+            attachments_json TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY (thread_id, position),
             FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_thread_messages_thread ON thread_messages(thread_id, position);
         """
         _ = sqlite3_exec(db, schema, nil, nil, nil)
+        ensureDraftTextColumnExists(db)
+        ensureDraftAttachmentsColumnExists(db)
+        ensureAttachmentsColumnExists(db)
     }
 
     private func openConnection() -> OpaquePointer? {
@@ -228,5 +245,85 @@ final class ChatThreadStore {
     private func stringColumn(_ statement: OpaquePointer?, index: Int32) -> String {
         guard let raw = sqlite3_column_text(statement, index) else { return "" }
         return String(cString: raw)
+    }
+
+    private func ensureAttachmentsColumnExists(_ db: OpaquePointer?) {
+        guard !hasColumn(named: "attachments_json", in: "thread_messages", db: db) else { return }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE thread_messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]';",
+            nil,
+            nil,
+            nil
+        )
+    }
+
+    private func ensureDraftTextColumnExists(_ db: OpaquePointer?) {
+        guard !hasColumn(named: "draft_text", in: "threads", db: db) else { return }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE threads ADD COLUMN draft_text TEXT NOT NULL DEFAULT '';",
+            nil,
+            nil,
+            nil
+        )
+    }
+
+    private func ensureDraftAttachmentsColumnExists(_ db: OpaquePointer?) {
+        guard !hasColumn(named: "draft_attachments_json", in: "threads", db: db) else { return }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE threads ADD COLUMN draft_attachments_json TEXT NOT NULL DEFAULT '[]';",
+            nil,
+            nil,
+            nil
+        )
+    }
+
+    private func hasColumn(named columnName: String, in tableName: String, db: OpaquePointer?) -> Bool {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(tableName));", -1, &statement, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if stringColumn(statement, index: 1) == columnName {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func encodeAttachments(_ attachments: [ChatArtifact]) -> String {
+        guard let data = try? JSONEncoder().encode(attachments),
+              let rendered = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return rendered
+    }
+
+    private func decodeAttachments(from raw: String) -> [ChatArtifact] {
+        guard let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([ChatArtifact].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    private func encodeDraftAttachments(_ attachments: [DraftAttachment]) -> String {
+        guard let data = try? JSONEncoder().encode(attachments),
+              let rendered = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return rendered
+    }
+
+    private func decodeDraftAttachments(from raw: String) -> [DraftAttachment] {
+        guard let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([DraftAttachment].self, from: data) else {
+            return []
+        }
+        return decoded
     }
 }

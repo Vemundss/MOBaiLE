@@ -5,6 +5,7 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import threading
 import time
@@ -19,24 +20,29 @@ from typing import Iterator, Literal
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from app.agent_runtime import build_agent_prompt
+from app.agent_runtime import context_leak_markers
+from app.agent_runtime import evaluate_agent_guardrails
+from app.agent_runtime import is_calendar_request
+from app.agent_runtime import load_runtime_context
 from app.capabilities import collect_capabilities
 from app.chat_envelope import coerce_assistant_text_to_envelope as _coerce_assistant_text_to_envelope
 from app.chat_envelope import extract_artifacts_from_text as _extract_artifacts_from_text
 from app.chat_envelope import merge_assistant_lines as _merge_assistant_lines
 from app.chat_envelope import parse_chat_envelope_payload as _parse_chat_envelope_payload
 from app.chat_envelope import split_sections_from_text as _split_sections_from_text
-from app.codex_text import CodexAssistantExtractor as _CodexAssistantExtractorImpl
-from app.codex_text import build_codex_prompt as _build_codex_prompt_impl
-from app.codex_text import codex_structured_message as _codex_structured_message_impl
-from app.codex_text import context_leak_markers as _context_leak_markers_impl
-from app.codex_text import evaluate_codex_guardrails as _evaluate_codex_guardrails_impl
-from app.codex_text import is_calendar_request as _is_calendar_request_impl
-from app.codex_text import load_codex_context as _load_codex_context_impl
-from app.codex_text import parse_codex_json_event as _parse_codex_json_event_impl
+from app.claude_text import claude_assistant_text
+from app.claude_text import claude_session_id
+from app.claude_text import parse_claude_stream_event
+from app.codex_text import CodexAssistantExtractor
+from app.codex_text import filter_codex_assistant_message
+from app.codex_text import parse_codex_json_event
+from app.executors.claude_executor import ClaudeExecutor
 from app.executors.codex_executor import CodexExecutor
 from app.executors.local_executor import LocalExecutor
 from app.models.schemas import (
     ActionPlan,
+    AgentExecutorName,
     AgendaItem,
     AudioRunResponse,
     CapabilitiesResponse,
@@ -50,9 +56,12 @@ from app.models.schemas import (
     ExecutionEvent,
     PairExchangeRequest,
     PairExchangeResponse,
+    ResponseProfile,
+    RunExecutorName,
     RunDiagnostics,
     RunRecord,
     RunSummary,
+    UploadResponse,
     UtteranceRequest,
     UtteranceResponse,
 )
@@ -87,6 +96,61 @@ RUNS_LOCK = threading.Lock()
 ACTIVE_PROCS_LOCK = threading.Lock()
 ACTIVE_PROCS: dict[str, subprocess.Popen[str]] = {}
 RUN_CANCELLED: set[str] = set()
+
+
+def _binary_available(binary: str) -> bool:
+    trimmed = binary.strip()
+    if not trimmed:
+        return False
+    if "/" in trimmed or trimmed.startswith("."):
+        return Path(trimmed).expanduser().exists()
+    return shutil.which(trimmed) is not None
+
+
+def _available_agent_executors() -> list[AgentExecutorName]:
+    executors: list[AgentExecutorName] = []
+    if _binary_available(os.getenv("VOICE_AGENT_CODEX_BINARY", "codex")):
+        executors.append("codex")
+    if _binary_available(os.getenv("VOICE_AGENT_CLAUDE_BINARY", "claude")):
+        executors.append("claude")
+    return executors
+
+
+def _configured_default_executor() -> RunExecutorName:
+    configured = os.getenv("VOICE_AGENT_DEFAULT_EXECUTOR", "codex").strip().lower() or "codex"
+    if configured not in {"local", "codex", "claude"}:
+        configured = "codex"
+    return configured  # type: ignore[return-value]
+
+
+def _resolve_default_executor() -> RunExecutorName:
+    configured = CONFIGURED_DEFAULT_EXECUTOR
+    available_agents = _available_agent_executors()
+    if configured == "local":
+        return configured  # type: ignore[return-value]
+    if configured in available_agents:
+        return configured  # type: ignore[return-value]
+    for candidate in ("codex", "claude"):
+        if candidate in available_agents:
+            return candidate  # type: ignore[return-value]
+    return "local"
+
+
+def _resolve_request_executor(requested: RunExecutorName | None) -> RunExecutorName:
+    if requested is None:
+        return DEFAULT_EXECUTOR
+    return requested
+
+
+def _transcriber_ready() -> bool:
+    provider = TRANSCRIBER.provider.strip().lower() or "openai"
+    if provider == "mock":
+        return True
+    if provider == "openai":
+        return bool(os.getenv("OPENAI_API_KEY", "").strip())
+    return False
+
+
 DEFAULT_WORKDIR = Path(
     os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))
 ).expanduser().resolve()
@@ -125,9 +189,13 @@ CODEX_USE_CONTEXT = os.getenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true").strip().l
 CODEX_CONTEXT_FILE = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "AGENT_CONTEXT.md").strip()
 CODEX_GUARDRAILS = os.getenv("VOICE_AGENT_CODEX_GUARDRAILS", "warn").strip().lower()
 CODEX_MODEL_OVERRIDE = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
+CLAUDE_MODEL_OVERRIDE = os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
+CLAUDE_TIMEOUT_SEC = int(os.getenv("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", str(CODEX_TIMEOUT_SEC)))
 CODEX_DANGEROUS_CONFIRM_TOKEN = os.getenv(
     "VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN", "[allow-dangerous]"
 ).strip()
+CONFIGURED_DEFAULT_EXECUTOR = _configured_default_executor()
+DEFAULT_EXECUTOR = _resolve_default_executor()
 PROFILE_STATE_ROOT = Path(
     os.getenv(
         "VOICE_AGENT_PROFILE_STATE_ROOT",
@@ -153,6 +221,8 @@ PROFILE_MEMORY_MAX_CHARS = int(
 )
 MAX_AUDIO_MB = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
 MAX_AUDIO_BYTES = int(MAX_AUDIO_MB * 1024 * 1024)
+MAX_UPLOAD_MB = float(os.getenv("VOICE_AGENT_MAX_UPLOAD_MB", "25"))
+MAX_UPLOAD_BYTES = int(MAX_UPLOAD_MB * 1024 * 1024)
 MAX_DIRECTORY_ENTRIES = int(os.getenv("VOICE_AGENT_MAX_DIRECTORY_ENTRIES", "200"))
 MAX_EVENT_MESSAGE_CHARS = int(os.getenv("VOICE_AGENT_MAX_EVENT_MESSAGE_CHARS", "16000"))
 CAPABILITIES_REPORT_PATH = Path(
@@ -183,6 +253,10 @@ PAIR_ATTEMPTS_LOCK = threading.Lock()
 PAIR_ATTEMPTS: dict[str, list[float]] = {}
 PAIR_ATTEMPT_LIMIT_PER_MIN = int(os.getenv("VOICE_AGENT_PAIR_ATTEMPT_LIMIT_PER_MIN", "20"))
 PROFILE_FILE_LOCK = threading.Lock()
+UPLOADS_ROOT = ((WORKDIR_ROOT or DEFAULT_WORKDIR) / ".mobaile_uploads").resolve()
+UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)
+if UPLOADS_ROOT not in FILE_ROOTS:
+    FILE_ROOTS.append(UPLOADS_ROOT)
 
 DEFAULT_PROFILE_AGENTS = """# MOBaiLE AGENTS
 You are an assistant running through MOBaiLE.
@@ -272,40 +346,44 @@ def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchang
 @app.post("/v1/utterances", response_model=UtteranceResponse)
 def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
     run_id = str(uuid.uuid4())
+    executor = _resolve_request_executor(request.executor)
     try:
         workdir = _resolve_workdir(request.working_directory)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if request.executor == "codex" and _is_calendar_request(request.utterance_text):
+    display_utterance_text = _display_utterance_text(request.utterance_text, request.attachments)
+    effective_utterance_text = _render_utterance_for_executor(request.utterance_text, request.attachments)
+
+    if _is_agent_executor(executor) and is_calendar_request(effective_utterance_text):
         _store_run(
             RunRecord(
                 run_id=run_id,
                 session_id=request.session_id,
-                executor="codex",
-                utterance_text=request.utterance_text,
+                executor=executor,
+                utterance_text=display_utterance_text,
                 working_directory=str(workdir),
                 status="running",
                 plan=None,
                 events=[],
                 summary="Run started",
-            )
+    )
         )
         threading.Thread(
             target=_run_calendar_adapter,
-            args=(run_id, request.utterance_text),
+            args=(run_id, effective_utterance_text),
             daemon=True,
         ).start()
         return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
 
-    if request.executor == "codex":
-        guardrail_status, guardrail_message = _evaluate_codex_guardrails(request.utterance_text)
+    if _is_agent_executor(executor):
+        guardrail_status, guardrail_message = _evaluate_runtime_guardrails(effective_utterance_text)
         if guardrail_status == "reject":
             _store_run(
                 RunRecord(
                     run_id=run_id,
                     session_id=request.session_id,
-                    executor="codex",
-                    utterance_text=request.utterance_text,
+                    executor=executor,
+                    utterance_text=display_utterance_text,
                     working_directory=str(workdir),
                     status="rejected",
                     plan=None,
@@ -318,8 +396,8 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
             RunRecord(
                 run_id=run_id,
                 session_id=request.session_id,
-                executor="codex",
-                utterance_text=request.utterance_text,
+                executor=executor,
+                utterance_text=display_utterance_text,
                 working_directory=str(workdir),
                 status="running",
                 plan=None,
@@ -328,12 +406,13 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
             )
         )
         threading.Thread(
-            target=_run_codex,
+            target=_run_agent,
             args=(
                 run_id,
-                request.utterance_text,
+                effective_utterance_text,
                 workdir,
                 request.session_id,
+                executor,
                 request.thread_id,
                 request.response_profile,
                 guardrail_message if guardrail_status == "warn" else None,
@@ -342,14 +421,14 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
         ).start()
         return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
 
-    plan = plan_from_utterance(request.utterance_text)
+    plan = plan_from_utterance(effective_utterance_text)
     allowed, message = validate_plan(plan)
     if not allowed:
         _store_run(
             RunRecord(
                 run_id=run_id,
                 session_id=request.session_id,
-                utterance_text=request.utterance_text,
+                utterance_text=display_utterance_text,
                 working_directory=str(workdir),
                 status="rejected",
                 plan=plan,
@@ -364,7 +443,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
             run_id=run_id,
             session_id=request.session_id,
             executor="local",
-            utterance_text=request.utterance_text,
+            utterance_text=display_utterance_text,
             working_directory=str(workdir),
             status="running",
             plan=plan,
@@ -381,7 +460,7 @@ async def create_audio_run(
     session_id: str = Form(...),
     thread_id: str | None = Form(None),
     audio: UploadFile = File(...),
-    executor: Literal["local", "codex"] = Form("codex"),
+    executor: RunExecutorName | None = Form(None),
     mode: Literal["assistant", "execute"] = Form("execute"),
     transcript_hint: str | None = Form(None),
     working_directory: str | None = Form(None),
@@ -436,6 +515,48 @@ async def create_audio_run(
     )
 
 
+@app.post("/v1/uploads", response_model=UploadResponse)
+async def upload_file(
+    session_id: str = Form(...),
+    file: UploadFile = File(...),
+) -> UploadResponse:
+    content_length_header = file.headers.get("content-length")
+    if content_length_header:
+        try:
+            if int(content_length_header) > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"file payload too large (max {MAX_UPLOAD_MB:g} MB)",
+                )
+        except ValueError:
+            pass
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file payload too large (max {MAX_UPLOAD_MB:g} MB)",
+        )
+
+    target_dir = _upload_session_dir(session_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    file_name = _sanitize_upload_name(file.filename or "attachment")
+    target = (target_dir / f"{uuid.uuid4()}-{file_name}").resolve()
+    if not _is_path_allowed(target):
+        raise HTTPException(status_code=403, detail="upload path is outside allowed roots")
+    target.write_bytes(file_bytes)
+
+    mime = (file.content_type or "").strip() or mimetypes.guess_type(file_name)[0]
+    artifact = ChatArtifact(
+        type=_artifact_type_for_upload(file_name, mime),
+        title=file_name,
+        path=str(target),
+        mime=mime,
+    )
+    return UploadResponse(artifact=artifact, size_bytes=len(file_bytes))
+
+
 @app.get("/v1/runs/{run_id}", response_model=RunRecord)
 def get_run(run_id: str) -> RunRecord:
     with RUNS_LOCK:
@@ -449,7 +570,12 @@ def get_run(run_id: str) -> RunRecord:
 def get_runtime_config() -> dict[str, object]:
     return {
         "security_mode": SECURITY_MODE,
+        "default_executor": DEFAULT_EXECUTOR,
+        "available_executors": _available_agent_executors(),
+        "transcribe_provider": TRANSCRIBER.provider,
+        "transcribe_ready": _transcriber_ready(),
         "codex_model": CODEX_MODEL_OVERRIDE or None,
+        "claude_model": CLAUDE_MODEL_OVERRIDE or None,
         "workdir_root": str(WORKDIR_ROOT) if WORKDIR_ROOT is not None else None,
         "allow_absolute_file_reads": ALLOW_ABSOLUTE_FILE_READS,
         "file_roots": [str(root) for root in FILE_ROOTS],
@@ -464,6 +590,7 @@ def get_capabilities(
     return collect_capabilities(
         security_mode=SECURITY_MODE,
         codex_binary=os.getenv("VOICE_AGENT_CODEX_BINARY", "codex"),
+        claude_binary=os.getenv("VOICE_AGENT_CLAUDE_BINARY", "claude"),
         transcribe_provider=TRANSCRIBER.provider,
         report_path=CAPABILITIES_REPORT_PATH,
         deep=deep,
@@ -838,35 +965,55 @@ def _run_local_plan(run_id: str, plan: ActionPlan, workdir: Path) -> None:
     _set_run_status(run_id, "completed" if success else "failed", summary)
 
 
-def _run_codex(
+def _make_agent_executor(executor: AgentExecutorName, workdir: Path) -> CodexExecutor | ClaudeExecutor:
+    if executor == "codex":
+        return CodexExecutor(workdir)
+    if executor == "claude":
+        return ClaudeExecutor(workdir)
+    raise ValueError(f"unsupported agent executor '{executor}'")
+
+
+def _agent_timeout_sec(executor: AgentExecutorName) -> int:
+    if executor == "claude":
+        return CLAUDE_TIMEOUT_SEC
+    return CODEX_TIMEOUT_SEC
+
+
+def _run_agent(
     run_id: str,
     prompt: str,
     workdir: Path,
     session_id: str,
+    executor: AgentExecutorName,
     client_thread_id: str | None = None,
-    response_profile: Literal["guided", "minimal"] = "guided",
+    response_profile: ResponseProfile = "guided",
     guardrail_message: str | None = None,
 ) -> None:
-    codex_executor = CodexExecutor(workdir)
+    agent_executor = _make_agent_executor(executor, workdir)
     profile_agents, profile_memory = _load_profile_context(session_id_hint=session_id)
     workdir_memory_path = _stage_profile_files_in_workdir(workdir, session_id_hint=session_id)
-    codex_prompt = _build_codex_prompt(
+    agent_prompt = _build_runtime_agent_prompt(
         prompt,
+        executor=executor,
         response_profile=response_profile,
         profile_agents=profile_agents,
         profile_memory=profile_memory,
         memory_file_hint=".mobaile/MEMORY.md",
     )
     normalized_client_thread_id = (client_thread_id or "").strip() or None
-    resume_thread_id: str | None = None
+    resume_session_id: str | None = None
     if normalized_client_thread_id:
-        resume_thread_id = RUN_STORE.get_codex_thread_id(session_id, normalized_client_thread_id)
+        resume_session_id = RUN_STORE.get_agent_session_id(
+            executor,
+            session_id,
+            normalized_client_thread_id,
+        )
     _append_event(
         run_id,
         ExecutionEvent(
             type="action.started",
             action_index=0,
-            message=f"starting codex exec (cwd={workdir})",
+            message=f"starting {executor} exec (cwd={workdir})",
         ),
     )
     if guardrail_message:
@@ -876,15 +1023,15 @@ def _run_codex(
             sections=[ChatSection(title="Safety", body=guardrail_message)],
         )
     try:
-        proc = codex_executor.start(codex_prompt, resume_thread_id=resume_thread_id)
+        proc = agent_executor.start(agent_prompt, resume_session_id=resume_session_id)
     except FileNotFoundError:
         _append_event(
             run_id,
-            ExecutionEvent(type="action.stderr", action_index=0, message="codex binary not found"),
+            ExecutionEvent(type="action.stderr", action_index=0, message=f"{executor} binary not found"),
         )
         _append_event(
             run_id,
-            ExecutionEvent(type="action.completed", action_index=0, message="codex exec failed"),
+            ExecutionEvent(type="action.completed", action_index=0, message=f"{executor} exec failed"),
         )
         _append_event(run_id, ExecutionEvent(type="run.failed", message="Run failed"))
         _set_run_status(run_id, "failed", "Run failed")
@@ -906,10 +1053,13 @@ def _run_codex(
     reader = threading.Thread(target=_drain_stdout, daemon=True)
     reader.start()
 
-    chat_extractor = _CodexAssistantExtractor(prompt)
+    leak_markers = _runtime_context_leak_markers()
+    chat_extractor = CodexAssistantExtractor(prompt, leak_markers) if executor == "codex" else None
     timed_out = False
     cancelled = False
-    deadline = time.monotonic() + CODEX_TIMEOUT_SEC
+    timeout_sec = _agent_timeout_sec(executor)
+    deadline = time.monotonic() + timeout_sec
+    linked_session_id = resume_session_id
     while True:
         try:
             line = line_queue.get(timeout=0.2)
@@ -919,34 +1069,65 @@ def _run_codex(
         if line is not None:
             message = line.rstrip()
             if message:
-                parsed = _parse_codex_json_event(message)
-                if parsed is not None:
-                    event_type = str(parsed.get("type", "")).strip()
-                    if event_type == "thread.started":
-                        codex_thread_id = str(parsed.get("thread_id", "")).strip()
-                        if codex_thread_id and normalized_client_thread_id:
-                            RUN_STORE.set_codex_thread_id(
+                if executor == "codex":
+                    parsed = parse_codex_json_event(message)
+                    if parsed is not None:
+                        event_type = str(parsed.get("type", "")).strip()
+                        if event_type == "thread.started":
+                            agent_session_id = str(parsed.get("thread_id", "")).strip()
+                            if agent_session_id and normalized_client_thread_id:
+                                RUN_STORE.set_agent_session_id(
+                                    executor=executor,
+                                    session_id=session_id,
+                                    client_thread_id=normalized_client_thread_id,
+                                    agent_session_id=agent_session_id,
+                                )
+                                linked_session_id = agent_session_id
+                                _append_log_message(
+                                    run_id,
+                                    f"{executor} session linked ({agent_session_id})",
+                                    action_index=0,
+                                )
+                        elif event_type == "item.completed":
+                            item = parsed.get("item")
+                            if isinstance(item, dict):
+                                item_type = str(item.get("type", "")).strip()
+                                item_text = str(item.get("text", "")).strip()
+                                if item_type == "agent_message" and item_text:
+                                    _append_assistant_payload(run_id, item_text)
+                        continue
+
+                    _append_log_message(run_id, message, action_index=0)
+                    assert chat_extractor is not None
+                    for structured in chat_extractor.consume(message):
+                        _append_assistant_payload(run_id, structured)
+                else:
+                    parsed = parse_claude_stream_event(message)
+                    if parsed is not None:
+                        agent_session_id = claude_session_id(parsed)
+                        if (
+                            agent_session_id
+                            and normalized_client_thread_id
+                            and agent_session_id != linked_session_id
+                        ):
+                            RUN_STORE.set_agent_session_id(
+                                executor=executor,
                                 session_id=session_id,
                                 client_thread_id=normalized_client_thread_id,
-                                codex_thread_id=codex_thread_id,
+                                agent_session_id=agent_session_id,
                             )
+                            linked_session_id = agent_session_id
                             _append_log_message(
                                 run_id,
-                                f"codex thread linked ({codex_thread_id})",
+                                f"{executor} session linked ({agent_session_id})",
                                 action_index=0,
                             )
-                    elif event_type == "item.completed":
-                        item = parsed.get("item")
-                        if isinstance(item, dict):
-                            item_type = str(item.get("type", "")).strip()
-                            item_text = str(item.get("text", "")).strip()
-                            if item_type == "agent_message" and item_text:
-                                _append_assistant_payload(run_id, item_text)
-                    continue
+                        assistant_text = claude_assistant_text(parsed)
+                        if assistant_text:
+                            _append_assistant_payload(run_id, assistant_text)
+                        continue
 
-                _append_log_message(run_id, message, action_index=0)
-                for structured in chat_extractor.consume(message):
-                    _append_assistant_payload(run_id, structured)
+                    _append_log_message(run_id, message, action_index=0)
         else:
             if proc.poll() is not None:
                 break
@@ -958,8 +1139,9 @@ def _run_codex(
             timed_out = True
             break
 
-    for structured in chat_extractor.flush():
-        _append_assistant_payload(run_id, structured)
+    if chat_extractor is not None:
+        for structured in chat_extractor.flush():
+            _append_assistant_payload(run_id, structured)
 
     if cancelled or timed_out:
         if proc.poll() is None:
@@ -980,7 +1162,7 @@ def _run_codex(
         ExecutionEvent(
             type="action.completed",
             action_index=0,
-            message=f"codex exec finished (exit={exit_code})",
+            message=f"{executor} exec finished (exit={exit_code})",
         ),
     )
 
@@ -991,7 +1173,7 @@ def _run_codex(
         _sync_profile_memory_from_workdir(workdir_memory_path)
         return
     if timed_out:
-        summary = f"Run timed out after {CODEX_TIMEOUT_SEC}s"
+        summary = f"Run timed out after {timeout_sec}s"
         _append_event(run_id, ExecutionEvent(type="run.failed", message=summary))
         _set_run_status(run_id, "failed", summary)
         _sync_profile_memory_from_workdir(workdir_memory_path)
@@ -1005,7 +1187,6 @@ def _run_codex(
     )
     _set_run_status(run_id, "completed" if success else "failed", summary)
     _sync_profile_memory_from_workdir(workdir_memory_path)
-
 
 def _execute_plan(run_id: str, plan: ActionPlan, executor: LocalExecutor) -> bool:
     for idx, action in enumerate(plan.actions):
@@ -1062,7 +1243,7 @@ def _execute_plan(run_id: str, plan: ActionPlan, executor: LocalExecutor) -> boo
 def _store_run(run: RunRecord) -> None:
     with RUNS_LOCK:
         RUNS[run.run_id] = run
-        RUN_STORE.upsert_run(run)
+    RUN_STORE.upsert_run(run)
 
 
 def _append_event(run_id: str, event: ExecutionEvent) -> None:
@@ -1092,6 +1273,59 @@ def _set_run_status(run_id: str, status: str, summary: str) -> None:
         RUN_STORE.update_run_status(run_id, status, summary)
 
 
+def _display_utterance_text(raw_text: str, attachments: list[ChatArtifact]) -> str:
+    trimmed = raw_text.strip()
+    if trimmed:
+        return trimmed
+    if len(attachments) == 1:
+        title = attachments[0].title.strip() or "attachment"
+        return f"Inspect {title}"
+    return f"Inspect {len(attachments)} attachments"
+
+
+def _render_utterance_for_executor(raw_text: str, attachments: list[ChatArtifact]) -> str:
+    trimmed = raw_text.strip()
+    if not attachments:
+        return trimmed
+
+    images = [artifact for artifact in attachments if artifact.type == "image"]
+    files = [artifact for artifact in attachments if artifact.type != "image"]
+    sections: list[str] = [
+        trimmed or _default_attachment_prompt(len(attachments))
+    ]
+
+    if images:
+        sections.append(
+            "Attached images:\n" + "\n".join(
+                line for line in (_attachment_reference_line(item) for item in images) if line
+            )
+        )
+    if files:
+        sections.append(
+            "Attached files:\n" + "\n".join(
+                line for line in (_attachment_reference_line(item) for item in files) if line
+            )
+        )
+    return "\n\n".join(section for section in sections if section.strip())
+
+
+def _default_attachment_prompt(count: int) -> str:
+    if count == 1:
+        return "Please inspect the attached file and summarize the important details."
+    return "Please inspect the attached files and summarize the important details."
+
+
+def _attachment_reference_line(artifact: ChatArtifact) -> str | None:
+    reference = (artifact.path or artifact.url or "").strip()
+    if not reference:
+        title = artifact.title.strip()
+        return f"- {title}" if title else None
+    title = artifact.title.strip() or "attachment"
+    if artifact.type == "image":
+        return f"![{title}]({reference})"
+    return f"[{title}]({reference})"
+
+
 def _resolve_workdir(raw_path: str | None) -> Path:
     if raw_path and raw_path.strip():
         requested = Path(raw_path.strip()).expanduser()
@@ -1104,6 +1338,57 @@ def _resolve_workdir(raw_path: str | None) -> Path:
         requested.mkdir(parents=True, exist_ok=True)
         return requested
     return DEFAULT_WORKDIR
+
+
+def _upload_session_dir(session_id: str) -> Path:
+    return (UPLOADS_ROOT / _profile_key(session_id)).resolve()
+
+
+def _sanitize_upload_name(raw_name: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", raw_name.strip()).strip(".-")
+    return cleaned or "attachment"
+
+
+def _artifact_type_for_upload(file_name: str, mime: str | None) -> Literal["image", "file", "code"]:
+    lower_mime = (mime or "").lower()
+    if lower_mime.startswith("image/"):
+        return "image"
+    if lower_mime.startswith("text/"):
+        return "code"
+
+    suffix = Path(file_name).suffix.lower()
+    if suffix in {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".css",
+        ".go",
+        ".h",
+        ".hpp",
+        ".html",
+        ".java",
+        ".js",
+        ".json",
+        ".kt",
+        ".md",
+        ".mjs",
+        ".php",
+        ".py",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".txt",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }:
+        return "code"
+    return "file"
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -1265,17 +1550,36 @@ def _sync_profile_memory_from_workdir(workdir_memory_path: Path) -> None:
     _profile_memory_path().write_text(bounded + "\n", encoding="utf-8")
 
 
-def _codex_structured_message(message: str, user_prompt: str) -> str | None:
-    return _codex_structured_message_impl(message, user_prompt, _context_leak_markers())
+def _is_agent_executor(executor: str) -> bool:
+    return executor in {"codex", "claude"}
 
 
-class _CodexAssistantExtractor(_CodexAssistantExtractorImpl):
-    def __init__(self, user_prompt: str) -> None:
-        super().__init__(user_prompt=user_prompt, leak_markers=_context_leak_markers())
+def _build_runtime_agent_prompt(
+    user_prompt: str,
+    *,
+    executor: AgentExecutorName,
+    response_profile: ResponseProfile = "guided",
+    profile_agents: str = "",
+    profile_memory: str = "",
+    memory_file_hint: str = ".mobaile/MEMORY.md",
+) -> str:
+    return build_agent_prompt(
+        user_prompt,
+        response_profile=response_profile,
+        profile_agents=profile_agents,
+        profile_memory=profile_memory,
+        memory_file_hint=memory_file_hint,
+        use_context=CODEX_USE_CONTEXT,
+        runtime_context=_load_runtime_context(),
+        global_agent_home="~/.claude/*" if executor == "claude" else "~/.codex/*",
+    )
 
-
-def _parse_codex_json_event(raw_line: str) -> dict[str, object] | None:
-    return _parse_codex_json_event_impl(raw_line)
+def _evaluate_runtime_guardrails(user_prompt: str) -> tuple[str, str]:
+    return evaluate_agent_guardrails(
+        user_prompt,
+        guardrails_mode=CODEX_GUARDRAILS,
+        dangerous_confirm_token=CODEX_DANGEROUS_CONFIRM_TOKEN,
+    )
 
 
 def _is_cancelled(run_id: str) -> bool:
@@ -1283,39 +1587,9 @@ def _is_cancelled(run_id: str) -> bool:
         return run_id in RUN_CANCELLED
 
 
-def _build_codex_prompt(
-    user_prompt: str,
-    response_profile: Literal["guided", "minimal"] = "guided",
-    profile_agents: str = "",
-    profile_memory: str = "",
-    memory_file_hint: str = ".mobaile/MEMORY.md",
-) -> str:
-    return _build_codex_prompt_impl(
-        user_prompt,
-        response_profile=response_profile,
-        profile_agents=profile_agents,
-        profile_memory=profile_memory,
-        memory_file_hint=memory_file_hint,
-        use_context=CODEX_USE_CONTEXT,
-        codex_context=_load_codex_context(),
-    )
+def _load_runtime_context() -> str:
+    return load_runtime_context(CODEX_CONTEXT_FILE, Path(__file__).resolve().parent.parent)
 
 
-def _evaluate_codex_guardrails(user_prompt: str) -> tuple[str, str]:
-    return _evaluate_codex_guardrails_impl(
-        user_prompt,
-        guardrails_mode=CODEX_GUARDRAILS,
-        dangerous_confirm_token=CODEX_DANGEROUS_CONFIRM_TOKEN,
-    )
-
-
-def _is_calendar_request(user_prompt: str) -> bool:
-    return _is_calendar_request_impl(user_prompt)
-
-
-def _load_codex_context() -> str:
-    return _load_codex_context_impl(CODEX_CONTEXT_FILE, Path(__file__).resolve().parent.parent)
-
-
-def _context_leak_markers() -> list[str]:
-    return _context_leak_markers_impl(_load_codex_context())
+def _runtime_context_leak_markers() -> list[str]:
+    return context_leak_markers(_load_runtime_context())

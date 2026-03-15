@@ -35,10 +35,23 @@ main() {
   check_cmd python3 || exit_code=1
   check_cmd uv || exit_code=1
 
+  local has_codex=0
+  local has_claude=0
   if command -v codex >/dev/null 2>&1; then
     ok "found command: codex"
+    has_codex=1
+  fi
+  if command -v claude >/dev/null 2>&1; then
+    ok "found command: claude"
+    has_claude=1
+  fi
+  if [[ "${has_codex}" -eq 0 && "${has_claude}" -eq 0 ]]; then
+    warn "no Codex/Claude CLI found (only the internal local smoke/dev fallback will be available)"
+  fi
+  if command -v claude >/dev/null 2>&1; then
+    ok "found command: claude"
   else
-    warn "codex not found (executor=codex will fail until installed/logged in)"
+    warn "claude not found (executor=claude will fail until installed/logged in)"
   fi
 
   if [[ -f "${BACKEND_DIR}/pyproject.toml" ]]; then

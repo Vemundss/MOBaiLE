@@ -8,13 +8,33 @@ Quick ways to install and operate the backend.
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
 ```
 
-## If You Already Cloned the Repo
+This flow can install `uv` for you and manages a repo clone in `~/MOBaiLE` by default.
+
+## Managed Install In `~/MOBaiLE`
 
 ```bash
 bash ./scripts/bootstrap_server.sh --mode safe
 # or:
 bash ./scripts/bootstrap_server.sh --mode full-access
 ```
+
+Note:
+- `bootstrap_server.sh` clones or updates `~/MOBaiLE` unless you pass `--dir`
+- use this when you want a managed install location, not when you specifically want to use your current checkout
+
+## Use Your Current Checkout
+
+```bash
+bash ./scripts/install_backend.sh --mode safe
+# or:
+bash ./scripts/install_backend.sh --mode full-access
+```
+
+Notes:
+- `install_backend.sh` installs `uv` for you when it is missing
+- `install_backend.sh` defaults to local-only bind (`127.0.0.1`)
+- add `--expose-network` when you want phone pairing over LAN/Tailscale
+- if no Codex/Claude CLI is installed, MOBaiLE keeps the internal `local` executor available for smoke/dev flows
 
 ## npm Command Wrappers (Optional)
 
@@ -25,22 +45,14 @@ npm run setup:server
 npm run backend:start
 npm run doctor
 npm run pair:qr
+npm run ios:open
 ```
 
 ## Direct Script Commands
 
-Install backend only:
+After install, these are the most useful direct script commands.
 
-```bash
-bash ./scripts/install_backend.sh --mode safe
-# or:
-bash ./scripts/install_backend.sh --mode full-access
-```
-
-Notes:
-- `install_backend.sh` defaults to local-only bind (`127.0.0.1`).
-- Add `--expose-network` when you want phone pairing over LAN/Tailscale.
-- `bootstrap_server.sh` already enables network exposure for you.
+`bootstrap_server.sh` already enables network exposure for you.
 
 Run environment and connectivity checks:
 
@@ -57,6 +69,20 @@ bash ./scripts/service_macos.sh status
 bash ./scripts/service_macos.sh logs
 bash ./scripts/service_macos.sh warmup
 ```
+
+Install and manage backend as Linux systemd user service:
+
+```bash
+bash ./scripts/service_linux.sh install
+bash ./scripts/service_linux.sh sync
+bash ./scripts/service_linux.sh status
+bash ./scripts/service_linux.sh logs
+bash ./scripts/service_linux.sh warmup
+```
+
+Notes:
+- Linux service management uses `systemd --user`.
+- For always-on behavior after logout/reboot on headless hosts, you may need `sudo loginctl enable-linger $USER`.
 
 Warmup runs automatically after `install/start/restart` unless disabled with:
 

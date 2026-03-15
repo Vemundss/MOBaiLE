@@ -10,7 +10,8 @@
     "backend:start": "cd backend && bash ./run_backend.sh",
     "doctor": "bash ./scripts/doctor.sh",
     "pair:qr": "bash ./scripts/pairing_qr.sh",
-    "ios:open": "cd ios && xcodegen generate && open VoiceAgentApp.xcodeproj",
+    "ios:open": "cd ios && open VoiceAgentApp.xcodeproj",
+    "ios:generate": "cd ios && xcodegen generate",
     "contracts:sync": "cd backend && uv run python ../scripts/sync_contracts.py",
     "contracts:check": "cd backend && uv run python ../scripts/sync_contracts.py --check"
   }
