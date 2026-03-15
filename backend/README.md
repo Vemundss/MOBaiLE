@@ -103,6 +103,7 @@ Important:
 ### Core endpoints
 
 - `GET /health`
+- `GET /v1/config` (runtime defaults, generic executor descriptors, file/workdir limits)
 - `POST /v1/utterances` (start run; supports `executor=codex|claude`, plus `local` for internal smoke/dev fallback)
 - `POST /v1/audio` (audio upload, transcription, then run)
 - `GET /v1/runs/{run_id}` (run state + events)
@@ -114,6 +115,7 @@ Important:
 
 - Run records are stored in SQLite (`data/runs.db` by default)
 - Override with `VOICE_AGENT_DB_PATH`
+- Legacy Codex/session compatibility shims are still read during startup migration, with removal targeted after `2026-07-01`
 
 ### Transcription provider
 

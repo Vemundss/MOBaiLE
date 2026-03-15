@@ -447,8 +447,9 @@ struct ContentView: View {
                                 .font(.footnote.monospaced())
                         }
                         LabeledContent("Backend Mode", value: vm.backendSecurityMode)
-                        LabeledContent("Codex Model", value: vm.backendCodexModel)
-                        LabeledContent("Claude Model", value: vm.backendClaudeModel)
+                        ForEach(vm.backendExecutorModelRows, id: \.id) { row in
+                            LabeledContent("\(row.title) Model", value: row.model)
+                        }
                         if let privacyPolicyURL {
                             Link("Privacy Policy", destination: privacyPolicyURL)
                         }

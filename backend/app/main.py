@@ -5,7 +5,6 @@ import mimetypes
 import os
 import re
 import secrets
-import shutil
 import subprocess
 import threading
 import time
@@ -13,42 +12,22 @@ import uuid
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
-from queue import Empty, Queue
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from app.agent_runtime import build_agent_prompt
-from app.agent_runtime import context_leak_markers
-from app.agent_runtime import evaluate_agent_guardrails
 from app.agent_runtime import is_calendar_request
-from app.agent_runtime import load_runtime_context
 from app.capabilities import collect_capabilities
-from app.chat_envelope import coerce_assistant_text_to_envelope as _coerce_assistant_text_to_envelope
-from app.chat_envelope import extract_artifacts_from_text as _extract_artifacts_from_text
-from app.chat_envelope import merge_assistant_lines as _merge_assistant_lines
-from app.chat_envelope import parse_chat_envelope_payload as _parse_chat_envelope_payload
-from app.chat_envelope import split_sections_from_text as _split_sections_from_text
-from app.claude_text import claude_assistant_text
-from app.claude_text import claude_session_id
-from app.claude_text import parse_claude_stream_event
 from app.codex_text import CodexAssistantExtractor
 from app.codex_text import filter_codex_assistant_message
-from app.codex_text import parse_codex_json_event
-from app.executors.claude_executor import ClaudeExecutor
-from app.executors.codex_executor import CodexExecutor
-from app.executors.local_executor import LocalExecutor
+from app.execution_service import ExecutionService
 from app.models.schemas import (
-    ActionPlan,
-    AgentExecutorName,
     AgendaItem,
     AudioRunResponse,
     CapabilitiesResponse,
     ChatArtifact,
-    ChatEnvelope,
-    ChatSection,
     DirectoryCreateRequest,
     DirectoryCreateResponse,
     DirectoryEntry,
@@ -56,234 +35,49 @@ from app.models.schemas import (
     ExecutionEvent,
     PairExchangeRequest,
     PairExchangeResponse,
-    ResponseProfile,
-    RunExecutorName,
     RunDiagnostics,
+    RunExecutorName,
     RunRecord,
     RunSummary,
+    RuntimeConfigResponse,
     UploadResponse,
     UtteranceRequest,
     UtteranceResponse,
 )
 from app.orchestrator.planner import plan_from_utterance
 from app.policy.validator import validate_plan
+from app.profile_store import ProfileStore
+from app.run_state import RunState
+from app.runtime_environment import load_env_defaults
+from app.runtime_environment import RuntimeEnvironment
 from app.storage import RunStore
 from app.transcription import Transcriber, TranscriptionError
 
 
-def _load_env_defaults() -> None:
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        key = key.strip()
-        if not key:
-            continue
-        os.environ.setdefault(key, value.strip().strip("'\""))
-
-
-_load_env_defaults()
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+load_env_defaults(BACKEND_ROOT / ".env")
 
 
 app = FastAPI(title="Voice Agent Backend", version="0.1.0")
-RUNS_LOCK = threading.Lock()
-ACTIVE_PROCS_LOCK = threading.Lock()
-ACTIVE_PROCS: dict[str, subprocess.Popen[str]] = {}
-RUN_CANCELLED: set[str] = set()
-
-
-def _binary_available(binary: str) -> bool:
-    trimmed = binary.strip()
-    if not trimmed:
-        return False
-    if "/" in trimmed or trimmed.startswith("."):
-        return Path(trimmed).expanduser().exists()
-    return shutil.which(trimmed) is not None
-
-
-def _available_agent_executors() -> list[AgentExecutorName]:
-    executors: list[AgentExecutorName] = []
-    if _binary_available(os.getenv("VOICE_AGENT_CODEX_BINARY", "codex")):
-        executors.append("codex")
-    if _binary_available(os.getenv("VOICE_AGENT_CLAUDE_BINARY", "claude")):
-        executors.append("claude")
-    return executors
-
-
-def _configured_default_executor() -> RunExecutorName:
-    configured = os.getenv("VOICE_AGENT_DEFAULT_EXECUTOR", "codex").strip().lower() or "codex"
-    if configured not in {"local", "codex", "claude"}:
-        configured = "codex"
-    return configured  # type: ignore[return-value]
-
-
-def _resolve_default_executor() -> RunExecutorName:
-    configured = CONFIGURED_DEFAULT_EXECUTOR
-    available_agents = _available_agent_executors()
-    if configured == "local":
-        return configured  # type: ignore[return-value]
-    if configured in available_agents:
-        return configured  # type: ignore[return-value]
-    for candidate in ("codex", "claude"):
-        if candidate in available_agents:
-            return candidate  # type: ignore[return-value]
-    return "local"
-
-
-def _resolve_request_executor(requested: RunExecutorName | None) -> RunExecutorName:
-    if requested is None:
-        return DEFAULT_EXECUTOR
-    return requested
-
-
-def _transcriber_ready() -> bool:
-    provider = TRANSCRIBER.provider.strip().lower() or "openai"
-    if provider == "mock":
-        return True
-    if provider == "openai":
-        return bool(os.getenv("OPENAI_API_KEY", "").strip())
-    return False
-
-
-DEFAULT_WORKDIR = Path(
-    os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))
-).expanduser().resolve()
-DEFAULT_WORKDIR.mkdir(parents=True, exist_ok=True)
-SECURITY_MODE = os.getenv("VOICE_AGENT_SECURITY_MODE", "safe").strip().lower()
-if SECURITY_MODE not in {"safe", "full-access"}:
-    SECURITY_MODE = "safe"
-FULL_ACCESS_MODE = SECURITY_MODE == "full-access"
-WORKDIR_ROOT_RAW = os.getenv("VOICE_AGENT_WORKDIR_ROOT", "").strip()
-if WORKDIR_ROOT_RAW:
-    WORKDIR_ROOT = Path(WORKDIR_ROOT_RAW).expanduser().resolve()
-else:
-    WORKDIR_ROOT = None if FULL_ACCESS_MODE else DEFAULT_WORKDIR
-if WORKDIR_ROOT is not None:
-    WORKDIR_ROOT.mkdir(parents=True, exist_ok=True)
-ALLOW_ABSOLUTE_FILE_READS = os.getenv(
-    "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS",
-    "true" if FULL_ACCESS_MODE else "false",
-).strip().lower() in {"1", "true", "yes", "on"}
-FILE_ROOTS_RAW = os.getenv("VOICE_AGENT_FILE_ROOTS", "").strip()
-if FILE_ROOTS_RAW:
-    FILE_ROOTS = [Path(item.strip()).expanduser().resolve() for item in FILE_ROOTS_RAW.split(",") if item.strip()]
-else:
-    FILE_ROOTS = [] if FULL_ACCESS_MODE else [DEFAULT_WORKDIR]
-    if WORKDIR_ROOT is not None and WORKDIR_ROOT not in FILE_ROOTS:
-        FILE_ROOTS.append(WORKDIR_ROOT)
-for _root in FILE_ROOTS:
-    _root.mkdir(parents=True, exist_ok=True)
-CODEX_TIMEOUT_SEC = int(os.getenv("VOICE_AGENT_CODEX_TIMEOUT_SEC", "900"))
-CODEX_USE_CONTEXT = os.getenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true").strip().lower() not in {
-    "0",
-    "false",
-    "no",
-    "off",
-}
-CODEX_CONTEXT_FILE = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "AGENT_CONTEXT.md").strip()
-CODEX_GUARDRAILS = os.getenv("VOICE_AGENT_CODEX_GUARDRAILS", "warn").strip().lower()
-CODEX_MODEL_OVERRIDE = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
-CLAUDE_MODEL_OVERRIDE = os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
-CLAUDE_TIMEOUT_SEC = int(os.getenv("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", str(CODEX_TIMEOUT_SEC)))
-CODEX_DANGEROUS_CONFIRM_TOKEN = os.getenv(
-    "VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN", "[allow-dangerous]"
-).strip()
-CONFIGURED_DEFAULT_EXECUTOR = _configured_default_executor()
-DEFAULT_EXECUTOR = _resolve_default_executor()
-PROFILE_STATE_ROOT = Path(
-    os.getenv(
-        "VOICE_AGENT_PROFILE_STATE_ROOT",
-        os.getenv(
-            "VOICE_AGENT_SESSION_STATE_ROOT",
-            str(Path(__file__).resolve().parent.parent / "data" / "profiles"),
-        ),
-    )
-).resolve()
-PROFILE_STATE_ROOT.mkdir(parents=True, exist_ok=True)
-LEGACY_SESSION_STATE_ROOT = Path(
-    os.getenv(
-        "VOICE_AGENT_SESSION_STATE_ROOT",
-        str(Path(__file__).resolve().parent.parent / "data" / "sessions"),
-    )
-).resolve()
-PROFILE_ID = os.getenv("VOICE_AGENT_PROFILE_ID", "default-user").strip() or "default-user"
-PROFILE_AGENTS_MAX_CHARS = int(
-    os.getenv("VOICE_AGENT_PROFILE_AGENTS_MAX_CHARS", os.getenv("VOICE_AGENT_SESSION_AGENTS_MAX_CHARS", "3000"))
-)
-PROFILE_MEMORY_MAX_CHARS = int(
-    os.getenv("VOICE_AGENT_PROFILE_MEMORY_MAX_CHARS", os.getenv("VOICE_AGENT_SESSION_MEMORY_MAX_CHARS", "6000"))
-)
-MAX_AUDIO_MB = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
-MAX_AUDIO_BYTES = int(MAX_AUDIO_MB * 1024 * 1024)
-MAX_UPLOAD_MB = float(os.getenv("VOICE_AGENT_MAX_UPLOAD_MB", "25"))
-MAX_UPLOAD_BYTES = int(MAX_UPLOAD_MB * 1024 * 1024)
-MAX_DIRECTORY_ENTRIES = int(os.getenv("VOICE_AGENT_MAX_DIRECTORY_ENTRIES", "200"))
-MAX_EVENT_MESSAGE_CHARS = int(os.getenv("VOICE_AGENT_MAX_EVENT_MESSAGE_CHARS", "16000"))
-CAPABILITIES_REPORT_PATH = Path(
-    os.getenv(
-        "VOICE_AGENT_CAPABILITIES_REPORT_PATH",
-        str(Path(__file__).resolve().parent.parent / "data" / "capabilities.json"),
-    )
-).resolve()
+ENV = RuntimeEnvironment.from_env(BACKEND_ROOT)
 TRANSCRIBER = Transcriber()
-API_TOKEN = os.getenv("VOICE_AGENT_API_TOKEN", "")
-RUN_STORE = RunStore(
-    Path(
-        os.getenv(
-            "VOICE_AGENT_DB_PATH",
-            str(Path(__file__).resolve().parent.parent / "data" / "runs.db"),
-        )
-    )
+RUN_STORE = RunStore(ENV.db_path)
+RUN_STATE = RunState(RUN_STORE, max_event_message_chars=ENV.max_event_message_chars)
+PROFILE_STORE = ProfileStore(
+    profile_state_root=ENV.profile_state_root,
+    legacy_session_state_root=ENV.legacy_session_state_root,
+    profile_id=ENV.profile_id,
+    profile_agents_max_chars=ENV.profile_agents_max_chars,
+    profile_memory_max_chars=ENV.profile_memory_max_chars,
 )
-RUNS: dict[str, RunRecord] = RUN_STORE.load_all()
-PAIRING_FILE = Path(
-    os.getenv(
-        "VOICE_AGENT_PAIRING_FILE",
-        str(Path(__file__).resolve().parent.parent / "pairing.json"),
-    )
+EXECUTION_SERVICE = ExecutionService(
+    environment=ENV,
+    run_state=RUN_STATE,
+    profile_store=PROFILE_STORE,
+    fetch_calendar_events=lambda: _fetch_today_calendar_events(),
 )
-PAIR_CODE_TTL_MIN = int(os.getenv("VOICE_AGENT_PAIR_CODE_TTL_MIN", "30"))
 PAIR_ATTEMPTS_LOCK = threading.Lock()
 PAIR_ATTEMPTS: dict[str, list[float]] = {}
-PAIR_ATTEMPT_LIMIT_PER_MIN = int(os.getenv("VOICE_AGENT_PAIR_ATTEMPT_LIMIT_PER_MIN", "20"))
-PROFILE_FILE_LOCK = threading.Lock()
-UPLOADS_ROOT = ((WORKDIR_ROOT or DEFAULT_WORKDIR) / ".mobaile_uploads").resolve()
-UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)
-if UPLOADS_ROOT not in FILE_ROOTS:
-    FILE_ROOTS.append(UPLOADS_ROOT)
-
-DEFAULT_PROFILE_AGENTS = """# MOBaiLE AGENTS
-You are an assistant running through MOBaiLE.
-- You run on the user's server/computer.
-- Your output is displayed in a phone UI.
-- Prefer concise updates and clear final results.
-- Do not repeat runtime context unless asked.
-"""
-
-DEFAULT_PROFILE_MEMORY = """# MOBaiLE MEMORY
-Purpose: persistent notes across runs.
-
-Rules:
-- Keep this file concise and useful.
-- Store durable learnings only (preferences, environment facts, reliable workflows).
-- Avoid secrets/tokens.
-- Remove stale or duplicate notes.
-
-## User Preferences
-- (none yet)
-
-## Environment Notes
-- (none yet)
-
-## Reliable Workflows
-- (none yet)
-"""
 
 
 @app.get("/health")
@@ -298,14 +92,14 @@ async def require_api_token(request: Request, call_next):
     if request.url.path == "/v1/pair/exchange":
         return await call_next(request)
 
-    if not API_TOKEN:
+    if not ENV.api_token:
         return JSONResponse(
             status_code=503,
             content={"detail": "server auth token is not configured"},
         )
 
     auth_header = request.headers.get("Authorization", "")
-    expected = f"Bearer {API_TOKEN}"
+    expected = f"Bearer {ENV.api_token}"
     if not secrets.compare_digest(auth_header, expected):
         return JSONResponse(
             status_code=401,
@@ -332,30 +126,30 @@ def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchang
         raise HTTPException(status_code=401, detail="pairing code expired")
 
     _rotate_pair_code(pairing)
-    api_token = str(pairing.get("api_token", "")).strip() or API_TOKEN
+    api_token = str(pairing.get("api_token", "")).strip() or ENV.api_token
     if not api_token:
         raise HTTPException(status_code=503, detail="server auth token is not configured")
     session_id = payload.session_id or str(pairing.get("session_id", "iphone-app")).strip() or "iphone-app"
     return PairExchangeResponse(
         api_token=api_token,
         session_id=session_id,
-        security_mode=SECURITY_MODE,
+        security_mode=ENV.security_mode,  # type: ignore[arg-type]
     )
 
 
 @app.post("/v1/utterances", response_model=UtteranceResponse)
 def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
     run_id = str(uuid.uuid4())
-    executor = _resolve_request_executor(request.executor)
+    executor = ENV.resolve_request_executor(request.executor)
     try:
-        workdir = _resolve_workdir(request.working_directory)
+        workdir = ENV.resolve_workdir(request.working_directory)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     display_utterance_text = _display_utterance_text(request.utterance_text, request.attachments)
     effective_utterance_text = _render_utterance_for_executor(request.utterance_text, request.attachments)
 
-    if _is_agent_executor(executor) and is_calendar_request(effective_utterance_text):
-        _store_run(
+    if ENV.is_agent_executor(executor) and is_calendar_request(effective_utterance_text):
+        RUN_STATE.store_run(
             RunRecord(
                 run_id=run_id,
                 session_id=request.session_id,
@@ -366,19 +160,19 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
                 plan=None,
                 events=[],
                 summary="Run started",
-    )
+            )
         )
         threading.Thread(
-            target=_run_calendar_adapter,
+            target=EXECUTION_SERVICE.run_calendar_adapter,
             args=(run_id, effective_utterance_text),
             daemon=True,
         ).start()
         return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
 
-    if _is_agent_executor(executor):
-        guardrail_status, guardrail_message = _evaluate_runtime_guardrails(effective_utterance_text)
+    if ENV.is_agent_executor(executor):
+        guardrail_status, guardrail_message = ENV.evaluate_runtime_guardrails(effective_utterance_text)
         if guardrail_status == "reject":
-            _store_run(
+            RUN_STATE.store_run(
                 RunRecord(
                     run_id=run_id,
                     session_id=request.session_id,
@@ -392,7 +186,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
                 )
             )
             return UtteranceResponse(run_id=run_id, status="rejected", message=guardrail_message)
-        _store_run(
+        RUN_STATE.store_run(
             RunRecord(
                 run_id=run_id,
                 session_id=request.session_id,
@@ -406,7 +200,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
             )
         )
         threading.Thread(
-            target=_run_agent,
+            target=EXECUTION_SERVICE.run_agent,
             args=(
                 run_id,
                 effective_utterance_text,
@@ -424,7 +218,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
     plan = plan_from_utterance(effective_utterance_text)
     allowed, message = validate_plan(plan)
     if not allowed:
-        _store_run(
+        RUN_STATE.store_run(
             RunRecord(
                 run_id=run_id,
                 session_id=request.session_id,
@@ -438,7 +232,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
         )
         return UtteranceResponse(run_id=run_id, status="rejected", message=message)
 
-    _store_run(
+    RUN_STATE.store_run(
         RunRecord(
             run_id=run_id,
             session_id=request.session_id,
@@ -451,7 +245,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
             summary="Run started",
         )
     )
-    threading.Thread(target=_run_local_plan, args=(run_id, plan, workdir), daemon=True).start()
+    threading.Thread(target=EXECUTION_SERVICE.run_local_plan, args=(run_id, plan, workdir), daemon=True).start()
     return UtteranceResponse(run_id=run_id, status="accepted", message="Run started")
 
 
@@ -471,18 +265,18 @@ async def create_audio_run(
     content_length_header = audio.headers.get("content-length")
     if content_length_header:
         try:
-            if int(content_length_header) > MAX_AUDIO_BYTES:
+            if int(content_length_header) > ENV.max_audio_bytes:
                 raise HTTPException(
                     status_code=413,
-                    detail=f"audio payload too large (max {MAX_AUDIO_MB:g} MB)",
+                    detail=f"audio payload too large (max {ENV.max_audio_mb:g} MB)",
                 )
         except ValueError:
             pass
     audio_bytes = await audio.read()
-    if len(audio_bytes) > MAX_AUDIO_BYTES:
+    if len(audio_bytes) > ENV.max_audio_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"audio payload too large (max {MAX_AUDIO_MB:g} MB)",
+            detail=f"audio payload too large (max {ENV.max_audio_mb:g} MB)",
         )
     try:
         transcript_text = TRANSCRIBER.transcribe(
@@ -523,27 +317,27 @@ async def upload_file(
     content_length_header = file.headers.get("content-length")
     if content_length_header:
         try:
-            if int(content_length_header) > MAX_UPLOAD_BYTES:
+            if int(content_length_header) > ENV.max_upload_bytes:
                 raise HTTPException(
                     status_code=413,
-                    detail=f"file payload too large (max {MAX_UPLOAD_MB:g} MB)",
+                    detail=f"file payload too large (max {ENV.max_upload_mb:g} MB)",
                 )
         except ValueError:
             pass
 
     file_bytes = await file.read()
-    if len(file_bytes) > MAX_UPLOAD_BYTES:
+    if len(file_bytes) > ENV.max_upload_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"file payload too large (max {MAX_UPLOAD_MB:g} MB)",
+            detail=f"file payload too large (max {ENV.max_upload_mb:g} MB)",
         )
 
-    target_dir = _upload_session_dir(session_id)
+    target_dir = ENV.upload_session_dir(session_id)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     file_name = _sanitize_upload_name(file.filename or "attachment")
     target = (target_dir / f"{uuid.uuid4()}-{file_name}").resolve()
-    if not _is_path_allowed(target):
+    if not ENV.is_path_allowed(target):
         raise HTTPException(status_code=403, detail="upload path is outside allowed roots")
     target.write_bytes(file_bytes)
 
@@ -559,27 +353,18 @@ async def upload_file(
 
 @app.get("/v1/runs/{run_id}", response_model=RunRecord)
 def get_run(run_id: str) -> RunRecord:
-    with RUNS_LOCK:
-        run = RUNS.get(run_id)
+    run = RUN_STATE.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="run not found")
     return run
 
 
-@app.get("/v1/config")
-def get_runtime_config() -> dict[str, object]:
-    return {
-        "security_mode": SECURITY_MODE,
-        "default_executor": DEFAULT_EXECUTOR,
-        "available_executors": _available_agent_executors(),
-        "transcribe_provider": TRANSCRIBER.provider,
-        "transcribe_ready": _transcriber_ready(),
-        "codex_model": CODEX_MODEL_OVERRIDE or None,
-        "claude_model": CLAUDE_MODEL_OVERRIDE or None,
-        "workdir_root": str(WORKDIR_ROOT) if WORKDIR_ROOT is not None else None,
-        "allow_absolute_file_reads": ALLOW_ABSOLUTE_FILE_READS,
-        "file_roots": [str(root) for root in FILE_ROOTS],
-    }
+@app.get("/v1/config", response_model=RuntimeConfigResponse)
+def get_runtime_config() -> RuntimeConfigResponse:
+    return ENV.runtime_config_response(
+        transcribe_provider=TRANSCRIBER.provider,
+        transcribe_ready=ENV.transcriber_ready(TRANSCRIBER.provider),
+    )
 
 
 @app.get("/v1/capabilities", response_model=CapabilitiesResponse)
@@ -588,11 +373,11 @@ def get_capabilities(
     launch_apps: bool = Query(False),
 ) -> CapabilitiesResponse:
     return collect_capabilities(
-        security_mode=SECURITY_MODE,
-        codex_binary=os.getenv("VOICE_AGENT_CODEX_BINARY", "codex"),
-        claude_binary=os.getenv("VOICE_AGENT_CLAUDE_BINARY", "claude"),
+        security_mode=ENV.security_mode,
+        codex_binary=ENV.codex_binary,
+        claude_binary=ENV.claude_binary,
         transcribe_provider=TRANSCRIBER.provider,
-        report_path=CAPABILITIES_REPORT_PATH,
+        report_path=ENV.capabilities_report_path,
         deep=deep,
         launch_apps=launch_apps,
         fetch_calendar_events=_fetch_today_calendar_events,
@@ -612,49 +397,15 @@ def get_calendar_today() -> dict[str, object]:
 
 @app.get("/v1/sessions/{session_id}/runs", response_model=list[RunSummary])
 def list_session_runs(session_id: str, limit: int = Query(20, ge=1, le=100)) -> list[RunSummary]:
-    runs = RUN_STORE.list_runs_for_session(session_id, limit=limit)
-    return [
-        RunSummary(
-            run_id=run.run_id,
-            session_id=run.session_id,
-            executor=run.executor,
-            utterance_text=run.utterance_text,
-            status=run.status,
-            summary=run.summary,
-            updated_at=run.updated_at,
-            working_directory=run.working_directory,
-        )
-        for run in runs
-    ]
+    return RUN_STATE.list_session_runs(session_id, limit=limit)
 
 
 @app.get("/v1/runs/{run_id}/diagnostics", response_model=RunDiagnostics)
 def get_run_diagnostics(run_id: str) -> RunDiagnostics:
-    with RUNS_LOCK:
-        run = RUNS.get(run_id)
-    if not run:
+    diagnostics = RUN_STATE.diagnostics_for(run_id)
+    if diagnostics is None:
         raise HTTPException(status_code=404, detail="run not found")
-    counts: dict[str, int] = {}
-    last_error: str | None = None
-    has_stderr = False
-    for event in run.events:
-        counts[event.type] = counts.get(event.type, 0) + 1
-        if event.type == "action.stderr":
-            has_stderr = True
-            last_error = event.message
-        if event.type == "run.failed":
-            last_error = event.message
-    return RunDiagnostics(
-        run_id=run.run_id,
-        status=run.status,
-        summary=run.summary,
-        event_count=len(run.events),
-        event_type_counts=counts,
-        has_stderr=has_stderr,
-        last_error=last_error,
-        created_at=run.created_at,
-        updated_at=run.updated_at,
-    )
+    return diagnostics
 
 
 @app.get("/v1/files")
@@ -662,11 +413,11 @@ def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
     target = Path(path.strip()).expanduser()
     if target.is_absolute():
         target = target.resolve()
-        if not ALLOW_ABSOLUTE_FILE_READS:
+        if not ENV.allow_absolute_file_reads:
             raise HTTPException(status_code=403, detail="absolute file paths are disabled in safe mode")
     else:
-        target = (DEFAULT_WORKDIR / target).resolve()
-    if not _is_path_allowed(target):
+        target = (ENV.default_workdir / target).resolve()
+    if not ENV.is_path_allowed(target):
         raise HTTPException(status_code=403, detail="file path is outside allowed roots")
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="file not found")
@@ -682,11 +433,11 @@ def list_directory(path: str | None = Query(None)) -> DirectoryListingResponse:
         if target.is_absolute():
             target = target.resolve()
         else:
-            target = (DEFAULT_WORKDIR / target).resolve()
+            target = (ENV.default_workdir / target).resolve()
     else:
-        target = DEFAULT_WORKDIR
+        target = ENV.default_workdir
 
-    if not _is_path_allowed(target):
+    if not ENV.is_path_allowed(target):
         raise HTTPException(status_code=403, detail="directory path is outside allowed roots")
     if not target.exists():
         raise HTTPException(status_code=404, detail="directory not found")
@@ -701,7 +452,7 @@ def list_directory(path: str | None = Query(None)) -> DirectoryListingResponse:
     entries: list[DirectoryEntry] = []
     truncated = False
     for idx, child in enumerate(children):
-        if idx >= MAX_DIRECTORY_ENTRIES:
+        if idx >= ENV.max_directory_entries:
             truncated = True
             break
         entries.append(
@@ -721,9 +472,9 @@ def create_directory(request: DirectoryCreateRequest) -> DirectoryCreateResponse
     if target.is_absolute():
         target = target.resolve()
     else:
-        target = (DEFAULT_WORKDIR / target).resolve()
+        target = (ENV.default_workdir / target).resolve()
 
-    if not _is_path_allowed(target):
+    if not ENV.is_path_allowed(target):
         raise HTTPException(status_code=403, detail="directory path is outside allowed roots")
     if target.exists() and not target.is_dir():
         raise HTTPException(status_code=409, detail="path exists and is not a directory")
@@ -741,142 +492,23 @@ def create_directory(request: DirectoryCreateRequest) -> DirectoryCreateResponse
 
 @app.post("/v1/runs/{run_id}/cancel")
 def cancel_run(run_id: str) -> dict[str, str]:
-    with RUNS_LOCK:
-        run = RUNS.get(run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail="run not found")
-        if run.status in {"completed", "failed", "rejected", "cancelled"}:
-            raise HTTPException(status_code=409, detail=f"run already terminal ({run.status})")
-        RUN_CANCELLED.add(run_id)
+    try:
+        RUN_STATE.request_cancel(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=f"run already terminal ({exc})") from exc
 
-    with ACTIVE_PROCS_LOCK:
-        proc = ACTIVE_PROCS.get(run_id)
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
+    EXECUTION_SERVICE.terminate_active_process(run_id)
 
     return {"run_id": run_id, "status": "cancel_requested"}
 
 
 @app.get("/v1/runs/{run_id}/events")
 def stream_run_events(run_id: str) -> StreamingResponse:
-    with RUNS_LOCK:
-        if run_id not in RUNS:
-            raise HTTPException(status_code=404, detail="run not found")
-
-    def event_stream() -> Iterator[str]:
-        sent_count = 0
-        heartbeat_at = time.monotonic()
-        while True:
-            with RUNS_LOCK:
-                run = RUNS.get(run_id)
-                if run is None:
-                    break
-                pending_events = run.events[sent_count:]
-                status = run.status
-
-            for event in pending_events:
-                sent_count += 1
-                payload = json.dumps(event.model_dump())
-                yield f"event: {event.type}\ndata: {payload}\n\n"
-
-            done = status in {"completed", "failed", "rejected", "cancelled"}
-            if done and not pending_events:
-                break
-
-            now = time.monotonic()
-            if now - heartbeat_at > 10:
-                heartbeat_at = now
-                yield ": keep-alive\n\n"
-            time.sleep(0.25)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-def _append_chat_message(
-    run_id: str,
-    *,
-    summary: str,
-    sections: list[ChatSection] | None = None,
-    agenda_items: list[AgendaItem] | None = None,
-    artifacts: list[ChatArtifact] | None = None,
-) -> None:
-    envelope = ChatEnvelope(
-        message_id=str(uuid.uuid4()),
-        created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        summary=summary,
-        sections=sections or [],
-        agenda_items=agenda_items or [],
-        artifacts=artifacts or [],
-    )
-    _append_event(
-        run_id,
-        ExecutionEvent(type="chat.message", message=envelope.model_dump_json()),
-    )
-
-
-def _append_assistant_payload(run_id: str, raw_text: str) -> None:
-    payload = _parse_chat_envelope_payload(raw_text)
-    if payload is not None:
-        _append_event(run_id, ExecutionEvent(type="chat.message", message=json.dumps(payload)))
-        return
-    envelope = _coerce_assistant_text_to_envelope(raw_text)
-    _append_event(run_id, ExecutionEvent(type="chat.message", message=envelope.model_dump_json()))
-
-
-def _append_log_message(run_id: str, message: str, *, action_index: int | None = 0) -> None:
-    text = message.strip()
-    if not text:
-        return
-    _append_event(
-        run_id,
-        ExecutionEvent(type="log.message", action_index=action_index, message=text),
-    )
-
-
-def _run_calendar_adapter(run_id: str, prompt: str) -> None:
-    _append_event(
-        run_id,
-        ExecutionEvent(type="action.started", action_index=0, message="starting calendar adapter"),
-    )
-    _append_chat_message(
-        run_id,
-        summary="Checking your calendar for today.",
-        sections=[ChatSection(title="What I Did", body="Queried your local macOS Calendar for today's events.")],
-    )
-    try:
-        events = _fetch_today_calendar_events()
-    except Exception as exc:
-        message = f"Calendar adapter failed: {exc}"
-        _append_log_message(run_id, message)
-        _append_event(
-            run_id,
-            ExecutionEvent(type="action.completed", action_index=0, message="calendar adapter failed"),
-        )
-        _append_event(run_id, ExecutionEvent(type="run.failed", message="Run failed"))
-        _set_run_status(run_id, "failed", "Calendar query failed")
-        return
-
-    today = datetime.now().strftime("%A, %B %d, %Y")
-    if events:
-        _append_chat_message(
-            run_id,
-            summary=f"{len(events)} event(s) found for {today}.",
-            sections=[ChatSection(title="Result", body=f"Showing your agenda for {today}.")],
-            agenda_items=events,
-        )
-    else:
-        _append_chat_message(
-            run_id,
-            summary=f"No events found for {today}.",
-            sections=[ChatSection(title="Result", body="Your calendar appears free today.")],
-        )
-
-    _append_event(
-        run_id,
-        ExecutionEvent(type="action.completed", action_index=0, message="calendar adapter completed"),
-    )
-    _append_event(run_id, ExecutionEvent(type="run.completed", message="Run completed successfully"))
-    _set_run_status(run_id, "completed", "Run completed successfully")
+    if RUN_STATE.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return StreamingResponse(RUN_STATE.event_stream(run_id), media_type="text/event-stream")
 
 
 def _fetch_today_calendar_events() -> list[AgendaItem]:
@@ -946,333 +578,6 @@ return rows as text
     items.sort(key=lambda item: (item.start, item.end, item.title))
     return items
 
-
-def _run_local_plan(run_id: str, plan: ActionPlan, workdir: Path) -> None:
-    executor = LocalExecutor(workdir)
-    success = _execute_plan(run_id, plan, executor)
-    with RUNS_LOCK:
-        current_status = RUNS.get(run_id).status if run_id in RUNS else None
-    if current_status == "cancelled":
-        return
-    summary = "Run completed successfully" if success else "Run failed"
-    _append_event(
-        run_id,
-        ExecutionEvent(
-            type="run.completed" if success else "run.failed",
-            message=summary,
-        ),
-    )
-    _set_run_status(run_id, "completed" if success else "failed", summary)
-
-
-def _make_agent_executor(executor: AgentExecutorName, workdir: Path) -> CodexExecutor | ClaudeExecutor:
-    if executor == "codex":
-        return CodexExecutor(workdir)
-    if executor == "claude":
-        return ClaudeExecutor(workdir)
-    raise ValueError(f"unsupported agent executor '{executor}'")
-
-
-def _agent_timeout_sec(executor: AgentExecutorName) -> int:
-    if executor == "claude":
-        return CLAUDE_TIMEOUT_SEC
-    return CODEX_TIMEOUT_SEC
-
-
-def _run_agent(
-    run_id: str,
-    prompt: str,
-    workdir: Path,
-    session_id: str,
-    executor: AgentExecutorName,
-    client_thread_id: str | None = None,
-    response_profile: ResponseProfile = "guided",
-    guardrail_message: str | None = None,
-) -> None:
-    agent_executor = _make_agent_executor(executor, workdir)
-    profile_agents, profile_memory = _load_profile_context(session_id_hint=session_id)
-    workdir_memory_path = _stage_profile_files_in_workdir(workdir, session_id_hint=session_id)
-    agent_prompt = _build_runtime_agent_prompt(
-        prompt,
-        executor=executor,
-        response_profile=response_profile,
-        profile_agents=profile_agents,
-        profile_memory=profile_memory,
-        memory_file_hint=".mobaile/MEMORY.md",
-    )
-    normalized_client_thread_id = (client_thread_id or "").strip() or None
-    resume_session_id: str | None = None
-    if normalized_client_thread_id:
-        resume_session_id = RUN_STORE.get_agent_session_id(
-            executor,
-            session_id,
-            normalized_client_thread_id,
-        )
-    _append_event(
-        run_id,
-        ExecutionEvent(
-            type="action.started",
-            action_index=0,
-            message=f"starting {executor} exec (cwd={workdir})",
-        ),
-    )
-    if guardrail_message:
-        _append_chat_message(
-            run_id,
-            summary=guardrail_message,
-            sections=[ChatSection(title="Safety", body=guardrail_message)],
-        )
-    try:
-        proc = agent_executor.start(agent_prompt, resume_session_id=resume_session_id)
-    except FileNotFoundError:
-        _append_event(
-            run_id,
-            ExecutionEvent(type="action.stderr", action_index=0, message=f"{executor} binary not found"),
-        )
-        _append_event(
-            run_id,
-            ExecutionEvent(type="action.completed", action_index=0, message=f"{executor} exec failed"),
-        )
-        _append_event(run_id, ExecutionEvent(type="run.failed", message="Run failed"))
-        _set_run_status(run_id, "failed", "Run failed")
-        _sync_profile_memory_from_workdir(workdir_memory_path)
-        return
-
-    with ACTIVE_PROCS_LOCK:
-        ACTIVE_PROCS[run_id] = proc
-
-    assert proc.stdout is not None
-    line_queue: Queue[str | None] = Queue()
-
-    def _drain_stdout() -> None:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line_queue.put(line.rstrip("\r\n"))
-        line_queue.put(None)
-
-    reader = threading.Thread(target=_drain_stdout, daemon=True)
-    reader.start()
-
-    leak_markers = _runtime_context_leak_markers()
-    chat_extractor = CodexAssistantExtractor(prompt, leak_markers) if executor == "codex" else None
-    timed_out = False
-    cancelled = False
-    timeout_sec = _agent_timeout_sec(executor)
-    deadline = time.monotonic() + timeout_sec
-    linked_session_id = resume_session_id
-    while True:
-        try:
-            line = line_queue.get(timeout=0.2)
-        except Empty:
-            line = None
-
-        if line is not None:
-            message = line.rstrip()
-            if message:
-                if executor == "codex":
-                    parsed = parse_codex_json_event(message)
-                    if parsed is not None:
-                        event_type = str(parsed.get("type", "")).strip()
-                        if event_type == "thread.started":
-                            agent_session_id = str(parsed.get("thread_id", "")).strip()
-                            if agent_session_id and normalized_client_thread_id:
-                                RUN_STORE.set_agent_session_id(
-                                    executor=executor,
-                                    session_id=session_id,
-                                    client_thread_id=normalized_client_thread_id,
-                                    agent_session_id=agent_session_id,
-                                )
-                                linked_session_id = agent_session_id
-                                _append_log_message(
-                                    run_id,
-                                    f"{executor} session linked ({agent_session_id})",
-                                    action_index=0,
-                                )
-                        elif event_type == "item.completed":
-                            item = parsed.get("item")
-                            if isinstance(item, dict):
-                                item_type = str(item.get("type", "")).strip()
-                                item_text = str(item.get("text", "")).strip()
-                                if item_type == "agent_message" and item_text:
-                                    _append_assistant_payload(run_id, item_text)
-                        continue
-
-                    _append_log_message(run_id, message, action_index=0)
-                    assert chat_extractor is not None
-                    for structured in chat_extractor.consume(message):
-                        _append_assistant_payload(run_id, structured)
-                else:
-                    parsed = parse_claude_stream_event(message)
-                    if parsed is not None:
-                        agent_session_id = claude_session_id(parsed)
-                        if (
-                            agent_session_id
-                            and normalized_client_thread_id
-                            and agent_session_id != linked_session_id
-                        ):
-                            RUN_STORE.set_agent_session_id(
-                                executor=executor,
-                                session_id=session_id,
-                                client_thread_id=normalized_client_thread_id,
-                                agent_session_id=agent_session_id,
-                            )
-                            linked_session_id = agent_session_id
-                            _append_log_message(
-                                run_id,
-                                f"{executor} session linked ({agent_session_id})",
-                                action_index=0,
-                            )
-                        assistant_text = claude_assistant_text(parsed)
-                        if assistant_text:
-                            _append_assistant_payload(run_id, assistant_text)
-                        continue
-
-                    _append_log_message(run_id, message, action_index=0)
-        else:
-            if proc.poll() is not None:
-                break
-
-        if _is_cancelled(run_id):
-            cancelled = True
-            break
-        if time.monotonic() > deadline:
-            timed_out = True
-            break
-
-    if chat_extractor is not None:
-        for structured in chat_extractor.flush():
-            _append_assistant_payload(run_id, structured)
-
-    if cancelled or timed_out:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-    exit_code = proc.wait()
-    if not cancelled and _is_cancelled(run_id):
-        cancelled = True
-    with ACTIVE_PROCS_LOCK:
-        ACTIVE_PROCS.pop(run_id, None)
-
-    _append_event(
-        run_id,
-        ExecutionEvent(
-            type="action.completed",
-            action_index=0,
-            message=f"{executor} exec finished (exit={exit_code})",
-        ),
-    )
-
-    if cancelled:
-        summary = "Run cancelled by user"
-        _append_event(run_id, ExecutionEvent(type="run.cancelled", message=summary))
-        _set_run_status(run_id, "cancelled", summary)
-        _sync_profile_memory_from_workdir(workdir_memory_path)
-        return
-    if timed_out:
-        summary = f"Run timed out after {timeout_sec}s"
-        _append_event(run_id, ExecutionEvent(type="run.failed", message=summary))
-        _set_run_status(run_id, "failed", summary)
-        _sync_profile_memory_from_workdir(workdir_memory_path)
-        return
-
-    success = exit_code == 0
-    summary = "Run completed successfully" if success else "Run failed"
-    _append_event(
-        run_id,
-        ExecutionEvent(type="run.completed" if success else "run.failed", message=summary),
-    )
-    _set_run_status(run_id, "completed" if success else "failed", summary)
-    _sync_profile_memory_from_workdir(workdir_memory_path)
-
-def _execute_plan(run_id: str, plan: ActionPlan, executor: LocalExecutor) -> bool:
-    for idx, action in enumerate(plan.actions):
-        if _is_cancelled(run_id):
-            _append_event(
-                run_id,
-                ExecutionEvent(type="run.cancelled", message="Run cancelled by user"),
-            )
-            _set_run_status(run_id, "cancelled", "Run cancelled by user")
-            return False
-        _append_event(
-            run_id,
-            ExecutionEvent(
-                type="action.started",
-                action_index=idx,
-                message=f"starting {action.type}",
-            )
-        )
-        result = executor.execute(action)
-        if result.stdout:
-            _append_event(
-                run_id,
-                ExecutionEvent(
-                    type="action.stdout",
-                    action_index=idx,
-                    message=result.stdout.strip(),
-                )
-            )
-        if result.stderr:
-            _append_event(
-                run_id,
-                ExecutionEvent(
-                    type="action.stderr",
-                    action_index=idx,
-                    message=result.stderr.strip(),
-                )
-            )
-        done_message = result.details
-        if result.exit_code is not None:
-            done_message = f"{done_message} (exit={result.exit_code})"
-        _append_event(
-            run_id,
-            ExecutionEvent(
-                type="action.completed",
-                action_index=idx,
-                message=done_message,
-            )
-        )
-        if not result.success:
-            return False
-    return True
-
-
-def _store_run(run: RunRecord) -> None:
-    with RUNS_LOCK:
-        RUNS[run.run_id] = run
-    RUN_STORE.upsert_run(run)
-
-
-def _append_event(run_id: str, event: ExecutionEvent) -> None:
-    if not event.event_id:
-        event.event_id = str(uuid.uuid4())
-    if not event.created_at:
-        event.created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    if len(event.message) > MAX_EVENT_MESSAGE_CHARS:
-        event.message = event.message[:MAX_EVENT_MESSAGE_CHARS] + "\n...[truncated]"
-    with RUNS_LOCK:
-        run = RUNS.get(run_id)
-        if run is None:
-            return
-        run.events.append(event)
-        RUN_STORE.append_event(run_id, event)
-
-
-def _set_run_status(run_id: str, status: str, summary: str) -> None:
-    with RUNS_LOCK:
-        run = RUNS.get(run_id)
-        if run is None:
-            return
-        run.status = status
-        run.summary = summary
-        if status in {"completed", "failed", "rejected", "cancelled"}:
-            RUN_CANCELLED.discard(run_id)
-        RUN_STORE.update_run_status(run_id, status, summary)
-
-
 def _display_utterance_text(raw_text: str, attachments: list[ChatArtifact]) -> str:
     trimmed = raw_text.strip()
     if trimmed:
@@ -1325,25 +630,6 @@ def _attachment_reference_line(artifact: ChatArtifact) -> str | None:
         return f"![{title}]({reference})"
     return f"[{title}]({reference})"
 
-
-def _resolve_workdir(raw_path: str | None) -> Path:
-    if raw_path and raw_path.strip():
-        requested = Path(raw_path.strip()).expanduser()
-        if not requested.is_absolute():
-            requested = (DEFAULT_WORKDIR / requested).resolve()
-        else:
-            requested = requested.resolve()
-        if WORKDIR_ROOT is not None and not _is_relative_to(requested, WORKDIR_ROOT):
-            raise ValueError(f"working_directory must stay inside {WORKDIR_ROOT}")
-        requested.mkdir(parents=True, exist_ok=True)
-        return requested
-    return DEFAULT_WORKDIR
-
-
-def _upload_session_dir(session_id: str) -> Path:
-    return (UPLOADS_ROOT / _profile_key(session_id)).resolve()
-
-
 def _sanitize_upload_name(raw_name: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", raw_name.strip()).strip(".-")
     return cleaned or "attachment"
@@ -1390,39 +676,24 @@ def _artifact_type_for_upload(file_name: str, mime: str | None) -> Literal["imag
         return "code"
     return "file"
 
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
-def _is_path_allowed(path: Path) -> bool:
-    if FULL_ACCESS_MODE and ALLOW_ABSOLUTE_FILE_READS and not FILE_ROOTS:
-        return True
-    return any(_is_relative_to(path, root) for root in FILE_ROOTS)
-
-
 def _read_pairing_file() -> dict[str, object]:
-    if not PAIRING_FILE.exists():
+    if not ENV.pairing_file.exists():
         return {}
     try:
-        return json.loads(PAIRING_FILE.read_text(encoding="utf-8"))
+        return json.loads(ENV.pairing_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
 
 
 def _write_pairing_file(payload: dict[str, object]) -> None:
-    PAIRING_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PAIRING_FILE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    ENV.pairing_file.parent.mkdir(parents=True, exist_ok=True)
+    ENV.pairing_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def _rotate_pair_code(payload: dict[str, object]) -> None:
     payload["pair_code"] = secrets.token_urlsafe(10)
     payload["pair_code_expires_at"] = (
-        datetime.now(timezone.utc) + timedelta(minutes=PAIR_CODE_TTL_MIN)
+        datetime.now(timezone.utc) + timedelta(minutes=ENV.pair_code_ttl_min)
     ).isoformat().replace("+00:00", "Z")
     _write_pairing_file(payload)
 
@@ -1432,164 +703,7 @@ def _enforce_pair_rate_limit(client_id: str) -> None:
     with PAIR_ATTEMPTS_LOCK:
         attempts = PAIR_ATTEMPTS.get(client_id, [])
         attempts = [t for t in attempts if now - t <= 60.0]
-        if len(attempts) >= PAIR_ATTEMPT_LIMIT_PER_MIN:
+        if len(attempts) >= ENV.pair_attempt_limit_per_min:
             raise HTTPException(status_code=429, detail="too many pairing attempts, try again soon")
         attempts.append(now)
         PAIR_ATTEMPTS[client_id] = attempts
-
-
-def _profile_key(raw_value: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", raw_value.strip())[:120]
-    if not normalized:
-        return "default"
-    return normalized
-
-
-def _legacy_session_key(session_id: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "_", session_id.strip())[:120]
-    if not normalized:
-        return "default"
-    return normalized
-
-
-def _legacy_session_dir(session_id: str) -> Path:
-    return LEGACY_SESSION_STATE_ROOT / _legacy_session_key(session_id)
-
-
-def _profile_dir() -> Path:
-    return PROFILE_STATE_ROOT / _profile_key(PROFILE_ID)
-
-
-def _profile_agents_path() -> Path:
-    return _profile_dir() / "AGENTS.md"
-
-
-def _profile_memory_path() -> Path:
-    return _profile_dir() / "MEMORY.md"
-
-
-def _clip_context(value: str, max_chars: int) -> str:
-    text = value.strip()
-    if max_chars <= 0 or len(text) <= max_chars:
-        return text
-    clipped = text[:max_chars].rstrip()
-    return clipped + "\n...[truncated for context budget]"
-
-
-def _ensure_profile_files(session_id_hint: str | None = None) -> tuple[Path, Path]:
-    profile_path = _profile_dir()
-    agents_path = _profile_agents_path()
-    memory_path = _profile_memory_path()
-    with PROFILE_FILE_LOCK:
-        profile_path.mkdir(parents=True, exist_ok=True)
-        if not agents_path.exists():
-            seeded = ""
-            if session_id_hint:
-                legacy = _legacy_session_dir(session_id_hint) / "AGENTS.md"
-                if legacy.exists() and legacy.is_file():
-                    seeded = legacy.read_text(encoding="utf-8").strip()
-            agents_path.write_text((seeded or DEFAULT_PROFILE_AGENTS).strip() + "\n", encoding="utf-8")
-        if not memory_path.exists():
-            seeded = ""
-            if session_id_hint:
-                legacy = _legacy_session_dir(session_id_hint) / "MEMORY.md"
-                if legacy.exists() and legacy.is_file():
-                    seeded = legacy.read_text(encoding="utf-8").strip()
-            memory_path.write_text((seeded or DEFAULT_PROFILE_MEMORY).strip() + "\n", encoding="utf-8")
-    return agents_path, memory_path
-
-
-def _load_profile_context(session_id_hint: str | None = None) -> tuple[str, str]:
-    agents_path, memory_path = _ensure_profile_files(session_id_hint=session_id_hint)
-    agents = _clip_context(agents_path.read_text(encoding="utf-8"), PROFILE_AGENTS_MAX_CHARS)
-    memory = _clip_context(memory_path.read_text(encoding="utf-8"), PROFILE_MEMORY_MAX_CHARS)
-    return agents, memory
-
-
-def _stage_profile_files_in_workdir(workdir: Path, session_id_hint: str | None = None) -> Path:
-    agents_path, memory_path = _ensure_profile_files(session_id_hint=session_id_hint)
-    mobaile_dir = (workdir / ".mobaile").resolve()
-    mobaile_dir.mkdir(parents=True, exist_ok=True)
-    workdir_agents = mobaile_dir / "AGENTS.md"
-    workdir_memory = mobaile_dir / "MEMORY.md"
-    workdir_agents.write_text(agents_path.read_text(encoding="utf-8"), encoding="utf-8")
-    workdir_memory.write_text(memory_path.read_text(encoding="utf-8"), encoding="utf-8")
-    return workdir_memory
-
-
-def _sync_profile_memory_from_workdir(workdir_memory_path: Path) -> None:
-    candidates = [workdir_memory_path]
-    mobaile_dir = workdir_memory_path.parent
-    workdir = mobaile_dir.parent
-    candidates.extend(
-        [
-            mobaile_dir / "memory.md",
-            workdir / "MEMORY.md",
-            workdir / "memory.md",
-        ]
-    )
-
-    latest_text: str | None = None
-    latest_mtime = -1.0
-    for candidate in candidates:
-        if not candidate.exists() or not candidate.is_file():
-            continue
-        text = candidate.read_text(encoding="utf-8")
-        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-        if not normalized:
-            continue
-        mtime = candidate.stat().st_mtime
-        if mtime >= latest_mtime:
-            latest_mtime = mtime
-            latest_text = normalized
-    if not latest_text:
-        return
-
-    bounded = _clip_context(latest_text, PROFILE_MEMORY_MAX_CHARS)
-    _ensure_profile_files()
-    _profile_memory_path().write_text(bounded + "\n", encoding="utf-8")
-
-
-def _is_agent_executor(executor: str) -> bool:
-    return executor in {"codex", "claude"}
-
-
-def _build_runtime_agent_prompt(
-    user_prompt: str,
-    *,
-    executor: AgentExecutorName,
-    response_profile: ResponseProfile = "guided",
-    profile_agents: str = "",
-    profile_memory: str = "",
-    memory_file_hint: str = ".mobaile/MEMORY.md",
-) -> str:
-    return build_agent_prompt(
-        user_prompt,
-        response_profile=response_profile,
-        profile_agents=profile_agents,
-        profile_memory=profile_memory,
-        memory_file_hint=memory_file_hint,
-        use_context=CODEX_USE_CONTEXT,
-        runtime_context=_load_runtime_context(),
-        global_agent_home="~/.claude/*" if executor == "claude" else "~/.codex/*",
-    )
-
-def _evaluate_runtime_guardrails(user_prompt: str) -> tuple[str, str]:
-    return evaluate_agent_guardrails(
-        user_prompt,
-        guardrails_mode=CODEX_GUARDRAILS,
-        dangerous_confirm_token=CODEX_DANGEROUS_CONFIRM_TOKEN,
-    )
-
-
-def _is_cancelled(run_id: str) -> bool:
-    with RUNS_LOCK:
-        return run_id in RUN_CANCELLED
-
-
-def _load_runtime_context() -> str:
-    return load_runtime_context(CODEX_CONTEXT_FILE, Path(__file__).resolve().parent.parent)
-
-
-def _runtime_context_leak_markers() -> list[str]:
-    return context_leak_markers(_load_runtime_context())

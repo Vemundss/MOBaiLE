@@ -39,7 +39,7 @@ def test_runtime_agent_prompt_injects_context(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("VOICE_AGENT_CODEX_CONTEXT_FILE", str(context_file))
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
-    built = module._build_runtime_agent_prompt("create hello script", executor="codex")
+    built = module.ENV.build_runtime_agent_prompt("create hello script", executor="codex")
     assert "MOBaiLE runtime context" in built
     assert "You are in test context." in built
     assert "create hello script" in built
@@ -49,11 +49,11 @@ def test_profile_memory_seed_and_prompt_block(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("VOICE_AGENT_PROFILE_STATE_ROOT", str(tmp_path / "profiles"))
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
-    agents, memory = module._load_profile_context()
+    agents, memory = module.PROFILE_STORE.load_context()
     assert "MOBaiLE AGENTS" in agents
     assert "MOBaiLE MEMORY" in memory
 
-    built = module._build_runtime_agent_prompt(
+    built = module.ENV.build_runtime_agent_prompt(
         "check calendar today",
         executor="codex",
         profile_agents=agents,
@@ -83,7 +83,7 @@ def test_profile_memory_sync_accepts_memory_file_fallback(monkeypatch, tmp_path:
     now = time.time()
     os.utime(fallback, (now + 5, now + 5))
 
-    module._sync_profile_memory_from_workdir(primary)
+    module.PROFILE_STORE.sync_memory_from_workdir(primary)
 
     profile_memory = tmp_path / "profiles" / "user-fallback" / "MEMORY.md"
     assert profile_memory.exists()
@@ -96,7 +96,7 @@ def test_codex_output_filter_drops_runtime_noise(monkeypatch, tmp_path: Path):
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
     user_prompt = "create a python file"
-    leak_markers = module._runtime_context_leak_markers()
+    leak_markers = module.ENV.runtime_context_leak_markers()
 
     assert module.filter_codex_assistant_message("/bin/zsh -lc \"python3 hello.py\"", user_prompt, leak_markers) is None
     assert module.filter_codex_assistant_message("tokens used", user_prompt, leak_markers) is None
@@ -114,7 +114,7 @@ def test_codex_output_filter_drops_runtime_noise(monkeypatch, tmp_path: Path):
 def test_codex_assistant_extractor_emits_only_assistant_blocks(monkeypatch, tmp_path: Path):
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
-    extractor = module.CodexAssistantExtractor("hello", module._runtime_context_leak_markers())
+    extractor = module.CodexAssistantExtractor("hello", module.ENV.runtime_context_leak_markers())
     lines = [
         "OpenAI Codex v0.0",
         "user",
@@ -137,22 +137,22 @@ def test_codex_assistant_extractor_emits_only_assistant_blocks(monkeypatch, tmp_
 
 
 def test_parse_chat_envelope_payload_handles_wrapped_json(monkeypatch, tmp_path: Path):
-    module = importlib.import_module("app.main")
+    module = importlib.import_module("app.chat_envelope")
     module = importlib.reload(module)
     payload = '{"type":"assistant_response","version":"1.0","summary":"ok","sections":[],"agenda_items":[]}'
-    parsed = module._parse_chat_envelope_payload(payload)
+    parsed = module.parse_chat_envelope_payload(payload)
     assert parsed is not None
     assert parsed["type"] == "assistant_response"
     wrapped = json.dumps(payload)
-    parsed_wrapped = module._parse_chat_envelope_payload(wrapped)
+    parsed_wrapped = module.parse_chat_envelope_payload(wrapped)
     assert parsed_wrapped is not None
     assert parsed_wrapped["summary"] == "ok"
 
 
 def test_merge_assistant_lines_adds_structure(monkeypatch, tmp_path: Path):
-    module = importlib.import_module("app.main")
+    module = importlib.import_module("app.chat_envelope")
     module = importlib.reload(module)
-    merged = module._merge_assistant_lines(
+    merged = module.merge_assistant_lines(
         [
             "What I Did:",
             "Created /Users/test/hello.py",
@@ -165,9 +165,9 @@ def test_merge_assistant_lines_adds_structure(monkeypatch, tmp_path: Path):
 
 
 def test_coerce_assistant_text_to_envelope_extracts_artifacts(monkeypatch, tmp_path: Path):
-    module = importlib.import_module("app.main")
+    module = importlib.import_module("app.chat_envelope")
     module = importlib.reload(module)
-    envelope = module._coerce_assistant_text_to_envelope(
+    envelope = module.coerce_assistant_text_to_envelope(
         "## What I Did\nCreated /Users/test/hello.py\n\n## Result\n![plot](/Users/test/plot.png)"
     )
     assert envelope.type == "assistant_response"
@@ -442,6 +442,27 @@ def test_file_fetch_endpoint(monkeypatch, tmp_path: Path):
     assert resp.text == "hello-file"
 
 
+def test_file_fetch_full_access_without_explicit_roots_allows_absolute_paths(monkeypatch, tmp_path: Path):
+    file_path = tmp_path / "sample.txt"
+    file_path.write_text("hello-file", encoding="utf-8")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_SECURITY_MODE": "full-access",
+            "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS": "true",
+        },
+    )
+    resp = client.get(
+        "/v1/files",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"path": str(file_path)},
+    )
+    assert resp.status_code == 200
+    assert resp.text == "hello-file"
+
+
 def test_file_fetch_relative_path_uses_default_workdir(monkeypatch, tmp_path: Path):
     workdir = tmp_path / "workspace"
     workdir.mkdir(parents=True, exist_ok=True)
@@ -699,6 +720,11 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
     assert "codex" in payload["available_executors"]
     assert "claude" in payload["available_executors"]
     assert "local" not in payload["available_executors"]
+    executors = {item["id"]: item for item in payload["executors"]}
+    assert executors["codex"]["kind"] == "agent"
+    assert executors["codex"]["model"] == "gpt-5.1"
+    assert executors["claude"]["default"] is True
+    assert executors["local"]["internal_only"] is True
     assert payload["transcribe_provider"] == "mock"
     assert payload["transcribe_ready"] is True
 
@@ -803,6 +829,10 @@ def test_config_endpoint_keeps_local_as_internal_fallback_when_binaries_are_miss
     payload = resp.json()
     assert payload["default_executor"] == "local"
     assert payload["available_executors"] == []
+    executors = {item["id"]: item for item in payload["executors"]}
+    assert executors["local"]["default"] is True
+    assert executors["codex"]["available"] is False
+    assert executors["claude"]["available"] is False
 
 
 def test_capabilities_openai_probe_requires_key(monkeypatch, tmp_path: Path):

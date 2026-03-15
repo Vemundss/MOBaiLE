@@ -197,6 +197,30 @@ class PairExchangeResponse(BaseModel):
     security_mode: Literal["safe", "full-access"]
 
 
+class RuntimeExecutorDescriptor(BaseModel):
+    id: RunExecutorName
+    title: str
+    kind: Literal["agent", "internal"]
+    available: bool
+    default: bool = False
+    internal_only: bool = False
+    model: str | None = None
+
+
+class RuntimeConfigResponse(BaseModel):
+    security_mode: Literal["safe", "full-access"]
+    default_executor: RunExecutorName
+    available_executors: list[AgentExecutorName] = Field(default_factory=list)
+    executors: list[RuntimeExecutorDescriptor] = Field(default_factory=list)
+    transcribe_provider: str
+    transcribe_ready: bool
+    codex_model: str | None = None
+    claude_model: str | None = None
+    workdir_root: str | None = None
+    allow_absolute_file_reads: bool
+    file_roots: list[str] = Field(default_factory=list)
+
+
 class CapabilityProbe(BaseModel):
     id: str
     title: str

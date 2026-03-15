@@ -4,8 +4,23 @@
   <img src="ios/VoiceAgentApp/mobaile_logo.png" alt="MOBaiLE logo" width="180" />
 </p>
 
-MOBaiLE lets you talk to your computer from your iPhone.
-Think of it as a practical "remote teammate in your pocket": you speak or type a task, the backend runs it on your machine, and the app streams progress/results live.
+<p align="center"><strong>Your computer, in your pocket.</strong></p>
+
+<p align="center">Talk to your Mac or Linux box from your iPhone, let it do real work, and watch the run stream back live.</p>
+
+<p align="center">
+  <img src="docs/readme-hero.svg" alt="MOBaiLE flow from iPhone prompt to backend execution to live result stream" width="920" />
+</p>
+
+MOBaiLE is for the moment when opening your laptop feels like too much friction, but the task is still real.
+Ask from your phone, run on your own machine, use your own files/tools/network, and get progress plus a result back in the app.
+
+## Great First Prompts
+
+- `create a hello python script and run it`
+- `inspect this repo and tell me where onboarding feels rough`
+- `check my calendar today and summarize conflicts`
+- `fix the failing test and explain the patch`
 
 ## Quick Start
 
@@ -48,11 +63,12 @@ Install Tailscale on both devices, then follow the full on-the-go setup below.
 
 Need more detail? Jump to [`docs/USAGE.md`](docs/USAGE.md), [`backend/README.md`](backend/README.md), [`ios/README.md`](ios/README.md), or [`scripts/README.md`](scripts/README.md).
 
-## What this solves
+## Why It Feels Useful
 
-- Run real tasks on your own computer while away from your desk.
-- Keep a single control plane for auth, run history, and live event updates.
-- Choose a safer default mode (`safe`) or unlock full power on trusted hosts (`full-access`).
+- Turn a spare minute in line, on a train, or between meetings into a real work session on your own machine.
+- Use your real repo, files, credentials, and network instead of a toy remote environment.
+- Watch live progress and final results instead of sending work into a black box and hoping it finished.
+- Start with a safer default mode (`safe`), then unlock more power on machines you trust (`full-access`).
 
 ## Setup For On-The-Go Use (Outside Local Network)
 

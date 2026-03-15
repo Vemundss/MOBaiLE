@@ -835,6 +835,164 @@
         "title": "RunSummary",
         "type": "object"
       },
+      "RuntimeConfigResponse": {
+        "properties": {
+          "allow_absolute_file_reads": {
+            "title": "Allow Absolute File Reads",
+            "type": "boolean"
+          },
+          "available_executors": {
+            "items": {
+              "enum": [
+                "codex",
+                "claude"
+              ],
+              "type": "string"
+            },
+            "title": "Available Executors",
+            "type": "array"
+          },
+          "claude_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claude Model"
+          },
+          "codex_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Model"
+          },
+          "default_executor": {
+            "enum": [
+              "local",
+              "codex",
+              "claude"
+            ],
+            "title": "Default Executor",
+            "type": "string"
+          },
+          "executors": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeExecutorDescriptor"
+            },
+            "title": "Executors",
+            "type": "array"
+          },
+          "file_roots": {
+            "items": {
+              "type": "string"
+            },
+            "title": "File Roots",
+            "type": "array"
+          },
+          "security_mode": {
+            "enum": [
+              "safe",
+              "full-access"
+            ],
+            "title": "Security Mode",
+            "type": "string"
+          },
+          "transcribe_provider": {
+            "title": "Transcribe Provider",
+            "type": "string"
+          },
+          "transcribe_ready": {
+            "title": "Transcribe Ready",
+            "type": "boolean"
+          },
+          "workdir_root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workdir Root"
+          }
+        },
+        "required": [
+          "security_mode",
+          "default_executor",
+          "transcribe_provider",
+          "transcribe_ready",
+          "allow_absolute_file_reads"
+        ],
+        "title": "RuntimeConfigResponse",
+        "type": "object"
+      },
+      "RuntimeExecutorDescriptor": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "default": {
+            "default": false,
+            "title": "Default",
+            "type": "boolean"
+          },
+          "id": {
+            "enum": [
+              "local",
+              "codex",
+              "claude"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "internal_only": {
+            "default": false,
+            "title": "Internal Only",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "agent",
+              "internal"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "available"
+        ],
+        "title": "RuntimeExecutorDescriptor",
+        "type": "object"
+      },
       "UploadResponse": {
         "properties": {
           "artifact": {
@@ -1137,9 +1295,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Runtime Config V1 Config Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RuntimeConfigResponse"
                 }
               }
             },

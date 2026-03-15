@@ -184,12 +184,14 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_WORKDIR_ROOT=/path` optionally constrains all requested working directories to a root.
 - `VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false` blocks absolute `/v1/files` access in safe mode.
 - `VOICE_AGENT_FILE_ROOTS=/path1,/path2` restricts readable file roots for `/v1/files`.
+  - in `full-access` mode with absolute reads enabled and no explicit `VOICE_AGENT_FILE_ROOTS`, file browsing stays unrestricted
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
 
 Notes:
 - Context injection affects agent runs launched via MOBaiLE backend only.
 - Direct terminal usage (`codex ...` / `claude ...`) is unchanged unless you configure that separately.
 - Runtime config advertises agent executors (`codex`, `claude`) for normal UX; `local` is kept for internal smoke/dev flows.
+- `GET /v1/config` now includes a generic `executors[]` descriptor list so clients can render executor availability/default/model data without provider-specific fields.
 - Per-run request controls:
   - `response_mode=concise` is the current supported mobile chat mode.
   - `response_profile=guided|minimal` controls prompt shaping:

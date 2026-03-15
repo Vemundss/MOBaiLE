@@ -294,10 +294,31 @@ struct RunDiagnostics: Decodable {
     }
 }
 
+struct RuntimeExecutorDescriptor: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let kind: String
+    let available: Bool
+    let isDefault: Bool
+    let internalOnly: Bool
+    let model: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case kind
+        case available
+        case isDefault = "default"
+        case internalOnly = "internal_only"
+        case model
+    }
+}
+
 struct RuntimeConfig: Decodable {
     let securityMode: String
     let defaultExecutor: String?
     let availableExecutors: [String]?
+    let executors: [RuntimeExecutorDescriptor]?
     let transcribeProvider: String?
     let transcribeReady: Bool?
     let codexModel: String?
@@ -310,6 +331,7 @@ struct RuntimeConfig: Decodable {
         case securityMode = "security_mode"
         case defaultExecutor = "default_executor"
         case availableExecutors = "available_executors"
+        case executors
         case transcribeProvider = "transcribe_provider"
         case transcribeReady = "transcribe_ready"
         case codexModel = "codex_model"

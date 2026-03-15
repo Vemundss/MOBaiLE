@@ -93,8 +93,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var threads: [ChatThread] = []
     @Published var activeThreadID: UUID?
     @Published var backendSecurityMode: String = "unknown"
-    @Published var backendCodexModel: String = "default"
-    @Published var backendClaudeModel: String = "default"
+    @Published var backendExecutorDescriptors: [RuntimeExecutorDescriptor] = []
     @Published var backendDefaultExecutor: String = "codex"
     @Published var backendAvailableExecutors: [String] = ["codex"]
     @Published var backendWorkdirRoot: String = ""
@@ -1407,14 +1406,18 @@ final class VoiceAgentViewModel: ObservableObject {
         )
         backendSecurityMode = cfg.securityMode
         backendDefaultExecutor = normalizedExecutor(from: cfg.defaultExecutor) ?? "codex"
+        backendExecutorDescriptors = normalizedRuntimeExecutors(
+            cfg.executors,
+            config: cfg,
+            defaultExecutor: backendDefaultExecutor
+        )
         backendAvailableExecutors = normalizedAvailableExecutors(
             cfg.availableExecutors,
+            descriptors: backendExecutorDescriptors,
             defaultExecutor: backendDefaultExecutor
         )
         backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
         backendTranscribeReady = cfg.transcribeReady ?? false
-        backendCodexModel = displayModelName(cfg.codexModel)
-        backendClaudeModel = displayModelName(cfg.claudeModel)
         backendWorkdirRoot = cfg.workdirRoot ?? ""
         if !developerMode, executor == "local", backendDefaultExecutor != "local" {
             executor = backendDefaultExecutor
@@ -1490,6 +1493,18 @@ final class VoiceAgentViewModel: ObservableObject {
         return values
     }
 
+    var backendExecutorModelRows: [(id: String, title: String, model: String)] {
+        backendExecutorDescriptors
+            .filter { $0.kind == "agent" }
+            .map { descriptor in
+                (
+                    id: descriptor.id,
+                    title: descriptor.title,
+                    model: displayModelName(descriptor.model)
+                )
+            }
+    }
+
     var currentBackendModelLabel: String {
         modelLabel(for: effectiveExecutor)
     }
@@ -1544,14 +1559,14 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func modelLabel(for executor: String) -> String {
-        switch executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "claude":
-            return backendClaudeModel
-        case "local":
+        let normalized = executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "local" {
             return "n/a"
-        default:
-            return backendCodexModel
         }
+        if let descriptor = backendExecutorDescriptors.first(where: { $0.id == normalized }) {
+            return displayModelName(descriptor.model)
+        }
+        return "default"
     }
 
     private func isTerminalStatus(_ status: String) -> Bool {
@@ -1870,12 +1885,87 @@ final class VoiceAgentViewModel: ObservableObject {
         return nil
     }
 
-    private func normalizedAvailableExecutors(_ rawValues: [String]?, defaultExecutor: String) -> [String] {
+    private func normalizedAvailableExecutors(
+        _ rawValues: [String]?,
+        descriptors: [RuntimeExecutorDescriptor],
+        defaultExecutor: String
+    ) -> [String] {
         var values = (rawValues ?? []).compactMap(normalizedExecutor(from:))
+        if values.isEmpty {
+            values = descriptors
+                .filter { $0.available && !$0.internalOnly }
+                .compactMap { normalizedExecutor(from: $0.id) }
+        }
         if let preferred = normalizedExecutor(from: defaultExecutor), !values.contains(preferred) {
             values.append(preferred)
         }
         return Array(NSOrderedSet(array: values)) as? [String] ?? values
+    }
+
+    private func normalizedRuntimeExecutors(
+        _ rawDescriptors: [RuntimeExecutorDescriptor]?,
+        config: RuntimeConfig,
+        defaultExecutor: String
+    ) -> [RuntimeExecutorDescriptor] {
+        var descriptors = (rawDescriptors ?? []).compactMap { descriptor -> RuntimeExecutorDescriptor? in
+            guard let normalized = normalizedExecutor(from: descriptor.id) else { return nil }
+            return RuntimeExecutorDescriptor(
+                id: normalized,
+                title: descriptor.title,
+                kind: descriptor.kind,
+                available: descriptor.available,
+                isDefault: descriptor.isDefault,
+                internalOnly: descriptor.internalOnly,
+                model: descriptor.model
+            )
+        }
+
+        if descriptors.isEmpty {
+            descriptors = [
+                RuntimeExecutorDescriptor(
+                    id: "codex",
+                    title: "Codex",
+                    kind: "agent",
+                    available: (config.availableExecutors ?? []).contains("codex"),
+                    isDefault: defaultExecutor == "codex",
+                    internalOnly: false,
+                    model: config.codexModel
+                ),
+                RuntimeExecutorDescriptor(
+                    id: "claude",
+                    title: "Claude Code",
+                    kind: "agent",
+                    available: (config.availableExecutors ?? []).contains("claude"),
+                    isDefault: defaultExecutor == "claude",
+                    internalOnly: false,
+                    model: config.claudeModel
+                ),
+                RuntimeExecutorDescriptor(
+                    id: "local",
+                    title: "Local fallback",
+                    kind: "internal",
+                    available: defaultExecutor == "local",
+                    isDefault: defaultExecutor == "local",
+                    internalOnly: true,
+                    model: nil
+                ),
+            ]
+        }
+
+        if !descriptors.contains(where: { $0.id == "local" }) {
+            descriptors.append(
+                RuntimeExecutorDescriptor(
+                    id: "local",
+                    title: "Local fallback",
+                    kind: "internal",
+                    available: defaultExecutor == "local",
+                    isDefault: defaultExecutor == "local",
+                    internalOnly: true,
+                    model: nil
+                )
+            )
+        }
+        return descriptors
     }
 
     private func normalizedTranscribeProvider(from rawValue: String?) -> String {
@@ -1889,8 +1979,7 @@ final class VoiceAgentViewModel: ObservableObject {
         backendAvailableExecutors = ["codex"]
         backendTranscribeProvider = "unknown"
         backendTranscribeReady = false
-        backendCodexModel = "default"
-        backendClaudeModel = "default"
+        backendExecutorDescriptors = []
         backendWorkdirRoot = ""
     }
 

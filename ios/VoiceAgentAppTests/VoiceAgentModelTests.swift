@@ -105,6 +105,11 @@ final class VoiceAgentModelTests: XCTestCase {
           "security_mode":"safe",
           "default_executor":"claude",
           "available_executors":["codex","claude"],
+          "executors":[
+            {"id":"local","title":"Local fallback","kind":"internal","available":true,"default":false,"internal_only":true},
+            {"id":"codex","title":"Codex","kind":"agent","available":true,"default":false,"internal_only":false,"model":"gpt-5.1"},
+            {"id":"claude","title":"Claude Code","kind":"agent","available":true,"default":true,"internal_only":false,"model":"claude-sonnet-4-5"}
+          ],
           "transcribe_provider":"openai",
           "transcribe_ready":true,
           "codex_model":"gpt-5.1",
@@ -119,6 +124,8 @@ final class VoiceAgentModelTests: XCTestCase {
         let decoded = try JSONDecoder().decode(RuntimeConfig.self, from: data)
         XCTAssertEqual(decoded.defaultExecutor, "claude")
         XCTAssertEqual(decoded.availableExecutors, ["codex", "claude"])
+        XCTAssertEqual(decoded.executors?.count, 3)
+        XCTAssertEqual(decoded.executors?.first(where: { $0.id == "claude" })?.isDefault, true)
         XCTAssertEqual(decoded.transcribeProvider, "openai")
         XCTAssertEqual(decoded.transcribeReady, true)
         XCTAssertEqual(decoded.codexModel, "gpt-5.1")

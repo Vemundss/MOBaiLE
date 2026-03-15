@@ -6,6 +6,8 @@ from pathlib import Path
 
 from app.models.schemas import ActionPlan, ExecutionEvent, RunRecord
 
+LEGACY_CODEX_THREAD_MAP_COMPAT_REMOVE_AFTER = "2026-07-01"
+
 
 class RunStore:
     def __init__(self, db_path: Path) -> None:
@@ -94,6 +96,7 @@ class RunStore:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='codex_thread_map'"
             ).fetchone()
             if legacy_thread_map is not None:
+                # Remove after 2026-07-01 once installs have migrated to agent_session_map.
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO agent_session_map (
