@@ -1,10 +1,11 @@
-name: Deploy Privacy Policy
+name: Deploy Public Pages
 
 on:
   push:
     branches: [main]
     paths:
       - docs/privacy-policy.html
+      - docs/support.html
       - .github/workflows/deploy-privacy-policy.yml
   workflow_dispatch:
 
@@ -34,7 +35,9 @@ jobs:
         run: |
           mkdir -p _site
           cp docs/privacy-policy.html _site/privacy-policy.html
+          cp docs/support.html _site/support.html
           cp docs/privacy-policy.html _site/index.html
+          touch _site/.nojekyll
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

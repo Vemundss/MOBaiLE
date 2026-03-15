@@ -48,6 +48,7 @@ npm run backend:start
 ## First-Run Expectations
 
 - `backend/.env` is created if missing; if it already exists, the install script keeps it and only updates relevant MOBaiLE settings
+- `backend/.env.example` documents the expected config keys without shipping real secrets
 - `backend/pairing.json` is regenerated during install
 - `backend/pairing-qr.png` is generated when you run `bash ./scripts/pairing_qr.sh`
 - backend default executor automatically falls back to the internal `local` executor if no Codex/Claude CLI is available
@@ -70,6 +71,7 @@ Interactive API docs are available at:
 ## Where Token and Settings Live
 
 - Config file: `backend/.env`
+- Safe template: `backend/.env.example`
 - API token key: `VOICE_AGENT_API_TOKEN`
 - Pairing info: `backend/pairing.json`
 

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MOBaiLE Support</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #1b1f2a;
+      --muted: #4a5266;
+      --accent: #2357d6;
+      --border: #e3e8f3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: var(--text);
+      background: radial-gradient(circle at top left, #e9efff 0%, var(--bg) 48%, #f2f4f9 100%);
+      padding: 24px;
+    }
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 8px 22px rgba(27, 31, 42, 0.08);
+    }
+    h1 { margin-top: 0; line-height: 1.25; }
+    h2 { margin-top: 28px; margin-bottom: 8px; }
+    p, li { color: var(--muted); }
+    ul { padding-left: 20px; }
+    a { color: var(--accent); }
+    .updated {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #edf2ff;
+      color: #284078;
+      font-size: 13px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MOBaiLE Support</h1>
+    <div class="updated">Last updated: March 15, 2026</div>
+
+    <p>
+      MOBaiLE is an iPhone client for a paired backend running on your own computer. If setup or pairing fails,
+      the fastest way to debug it is usually to verify the backend health check, token, and reachable server URL.
+    </p>
+
+    <h2>Quick help</h2>
+    <ul>
+      <li>Project overview: <a href="https://github.com/Vemundss/MOBaiLE">github.com/Vemundss/MOBaiLE</a></li>
+      <li>iOS setup guide: <a href="https://github.com/Vemundss/MOBaiLE/blob/main/ios/README.md">ios/README.md</a></li>
+      <li>Backend setup guide: <a href="https://github.com/Vemundss/MOBaiLE/blob/main/backend/README.md">backend/README.md</a></li>
+      <li>Usage guide: <a href="https://github.com/Vemundss/MOBaiLE/blob/main/docs/USAGE.md">docs/USAGE.md</a></li>
+    </ul>
+
+    <h2>Before opening an issue</h2>
+    <ul>
+      <li>Confirm your backend responds at `/health`.</li>
+      <li>Confirm the app has the correct `Server URL` and `API Token`.</li>
+      <li>For remote use, prefer a Tailscale or HTTPS URL instead of `127.0.0.1`.</li>
+      <li>For voice fallback, confirm `OPENAI_API_KEY` is configured if backend transcription is expected.</li>
+    </ul>
+
+    <h2>Contact</h2>
+    <p>
+      For bugs, support requests, or privacy questions, open an issue at
+      <a href="https://github.com/Vemundss/MOBaiLE/issues">github.com/Vemundss/MOBaiLE/issues</a>.
+    </p>
+  </main>
+</body>
+</html>

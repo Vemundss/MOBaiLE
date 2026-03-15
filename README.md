@@ -337,19 +337,22 @@ Apple requires a public privacy policy URL for App Store submissions.
 
 Repo source of truth:
 - `docs/privacy-policy.html`
+- `docs/support.html`
 
-Optional GitHub Pages deploy workflow:
+GitHub Pages deploy workflow:
 - `.github/workflows/deploy-privacy-policy.yml`
 
-Current public fallback URL:
-- `https://gist.github.com/Vemundss/c2ae60485e23c0c8a93115c039b03044`
+Expected public URLs after Pages is enabled for this repo:
+- Privacy policy: `https://vemundss.github.io/MOBaiLE/privacy-policy.html`
+- Support: `https://vemundss.github.io/MOBaiLE/support.html`
 
-If you enable GitHub Pages for the repo:
+To activate them:
 
 1. Push `main` to GitHub.
 2. In GitHub repo settings, enable Pages and select `GitHub Actions` as source.
-3. Wait for the `Deploy Privacy Policy` workflow to complete.
-4. Prefer the GitHub Pages URL in App Store Connect and inside the app once it is live.
+3. Wait for the `Deploy Public Pages` workflow to complete.
+4. Use the GitHub Pages URLs in App Store Connect and inside the app once they are live.
+5. If you rename the repo or move it to another owner, update the URLs accordingly.
 
 ## License
 

@@ -7,7 +7,9 @@ backend/pairing.json
 backend/pairing-qr.png
 hello.py
 hello_unrestricted.py
-backend/data/*.db
+backend/data/*
+!backend/data/.gitkeep
+!backend/data/README.md
 .DS_Store
 backend/logs/
 *.xcuserdatad/
