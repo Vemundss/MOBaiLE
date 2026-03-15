@@ -3,12 +3,14 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */; };
 		098BA42266D1BCF0092DC04B /* VoiceTaskWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 302010F41747E9F19DB3B184 /* VoiceTaskWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0E54DEE594047A30FE6438E5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9252A15BA709EE17F97318A3 /* Assets.xcassets */; };
+		11B8EFA1F5CDDA6EC091FAE5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 22D0F899CCED18AF644D3443 /* PrivacyInfo.xcprivacy */; };
 		22AEDB5CC51E75B437988A88 /* VoiceTaskWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA945BA92E3B0DFAE3BCA72 /* VoiceTaskWidget.swift */; };
 		3D1DC632A5EF8251A764491E /* ChatRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968552A59D7CC89642B2EFFB /* ChatRenderers.swift */; };
 		5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D91AF3EDBB51ECC1F494AC /* Models.swift */; };
@@ -63,13 +65,15 @@
 		0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mobaile_logo.png; sourceTree = "<group>"; };
 		14543222250EAE3887C38275 /* ChatScaffoldViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatScaffoldViews.swift; sourceTree = "<group>"; };
 		1D63F53093311E4F4CEF7978 /* MediaAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaAttachments.swift; sourceTree = "<group>"; };
+		22D0F899CCED18AF644D3443 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		2F921FA3DE0D828EC5A1C6C6 /* ChatThreadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatThreadStore.swift; sourceTree = "<group>"; };
-		302010F41747E9F19DB3B184 /* VoiceTaskWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = VoiceTaskWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		302010F41747E9F19DB3B184 /* VoiceTaskWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = VoiceTaskWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		33D91AF3EDBB51ECC1F494AC /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentModelTests.swift; sourceTree = "<group>"; };
 		55BD337AE620AD07C1581C7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6F46E28C5030E56744250A3B /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
+		9252A15BA709EE17F97318A3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		968552A59D7CC89642B2EFFB /* ChatRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRenderers.swift; sourceTree = "<group>"; };
 		A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBaiLEShortcuts.swift; sourceTree = "<group>"; };
 		AAA945BA92E3B0DFAE3BCA72 /* VoiceTaskWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTaskWidget.swift; sourceTree = "<group>"; };
@@ -78,7 +82,7 @@
 		D76C6B8E01B639BDDA79423E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTranscriptionService.swift; sourceTree = "<group>"; };
-		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3E6198279CE9DE1A7E6A096 /* VoiceAgentAppTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceAgentAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -125,6 +129,7 @@
 			isa = PBXGroup;
 			children = (
 				087BA601BAADAF3708DE7220 /* APIClient.swift */,
+				9252A15BA709EE17F97318A3 /* Assets.xcassets */,
 				8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */,
 				968552A59D7CC89642B2EFFB /* ChatRenderers.swift */,
 				14543222250EAE3887C38275 /* ChatScaffoldViews.swift */,
@@ -136,6 +141,7 @@
 				0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */,
 				A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */,
 				33D91AF3EDBB51ECC1F494AC /* Models.swift */,
+				22D0F899CCED18AF644D3443 /* PrivacyInfo.xcprivacy */,
 				EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */,
 				BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */,
 				03AFE8DCC8EB158A6410CC44 /* VoiceAgentViewModel.swift */,
@@ -228,7 +234,6 @@
 			);
 			mainGroup = CC939A14EE448F747C906ACD;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -244,6 +249,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0E54DEE594047A30FE6438E5 /* Assets.xcassets in Resources */,
+				11B8EFA1F5CDDA6EC091FAE5 /* PrivacyInfo.xcprivacy in Resources */,
 				B243A2C4EE00ACD44CEE8302 /* mobaile_logo.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -308,6 +315,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentWidget/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -328,6 +336,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -381,6 +390,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -398,6 +408,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentWidget/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

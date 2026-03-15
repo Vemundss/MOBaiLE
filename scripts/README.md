@@ -46,7 +46,10 @@ npm run backend:start
 npm run doctor
 npm run pair:qr
 npm run ios:open
+npm run ios:version
 ```
+
+For iOS release automation, see [`docs/IOS_RELEASE_AUTOMATION.md`](../docs/IOS_RELEASE_AUTOMATION.md).
 
 ## Direct Script Commands
 

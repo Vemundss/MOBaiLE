@@ -17,18 +17,23 @@ targets:
     info:
       path: VoiceAgentApp/Info.plist
       properties:
-        CFBundleDisplayName: VoiceAgentApp
+        CFBundleDisplayName: MOBaiLE
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        NSMicrophoneUsageDescription: Voice Agent needs microphone access to record audio and send it to your backend.
-        NSSpeechRecognitionUsageDescription: Voice Agent uses Speech Recognition to turn your recordings into text before starting a run.
+        NSMicrophoneUsageDescription: MOBaiLE needs microphone access so you can dictate requests to your paired backend.
+        NSSpeechRecognitionUsageDescription: MOBaiLE uses Speech Recognition to turn your spoken request into text before sending it.
+        NSLocalNetworkUsageDescription: MOBaiLE can connect to your paired backend on your local network.
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        ITSAppUsesNonExemptEncryption: false
         CFBundleURLTypes:
-          - CFBundleURLName: com.vemundss.voiceagentapp
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes:
               - mobaile
     settings:
@@ -63,6 +68,8 @@ targets:
       path: VoiceAgentWidget/Info.plist
       properties:
         CFBundleDisplayName: MOBaiLE Widget
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:

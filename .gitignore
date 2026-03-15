@@ -14,5 +14,14 @@ backend/data/*
 backend/logs/
 *.xcuserdatad/
 *.xcworkspace/xcuserdata/
+.bundle/
+vendor/bundle/
+build/ios/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+fastlane/.env
+fastlane/.env.*
+!fastlane/.env.example
 
 backend/*.egg-info/

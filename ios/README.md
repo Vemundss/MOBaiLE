@@ -102,3 +102,5 @@ xcodebuild -project VoiceAgentApp.xcodeproj -scheme VoiceAgentApp -destination '
 ```
 
 If `iPhone 17` is not available on your Xcode version, replace it with any available iPhone simulator from `xcrun simctl list devices available`.
+
+For App Store release prep, see [`docs/APP_STORE_SUBMISSION.md`](../docs/APP_STORE_SUBMISSION.md).

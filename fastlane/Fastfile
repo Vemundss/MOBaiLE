@@ -1,0 +1,201 @@
+require "json"
+require "shellwords"
+
+default_platform(:ios)
+
+VERSION_SCRIPT = File.expand_path("../scripts/ios_release_version.rb", __dir__)
+IOS_PROJECT_PATH = File.expand_path("../ios/VoiceAgentApp.xcodeproj", __dir__)
+IOS_SCHEME = "VoiceAgentApp"
+
+def present?(value)
+  !value.nil? && !value.to_s.strip.empty?
+end
+
+def bool_option(value, default:)
+  return default if value.nil?
+
+  case value.to_s.strip.downcase
+  when "1", "true", "yes", "on"
+    true
+  when "0", "false", "no", "off"
+    false
+  else
+    UI.user_error!("Unsupported boolean value `#{value}`")
+  end
+end
+
+def shell_join(parts)
+  parts.map { |part| Shellwords.escape(part.to_s) }.join(" ")
+end
+
+def run_version_script(*args)
+  sh(shell_join(["ruby", VERSION_SCRIPT, *args]))
+end
+
+def current_release_version
+  JSON.parse(run_version_script("show", "--json"))
+end
+
+def update_release_version(version:, build:)
+  run_version_script("set", "--version", version, "--build", build)
+end
+
+def ensure_command!(command, install_hint)
+  return if system("command -v #{Shellwords.escape(command)} >/dev/null 2>&1")
+
+  UI.user_error!("Missing required command `#{command}`. #{install_hint}")
+end
+
+def release_build_number(current:, requested_version:, current_version:)
+  return 1 if requested_version != current_version
+
+  current.to_i + 1
+end
+
+def release_artifact_directory
+  File.expand_path("../build/ios", __dir__)
+end
+
+def default_simulator_name
+  simulator = `xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {gsub(/^ +| +$/, "", $1); print $1; exit}'`.strip
+  UI.user_error!("No available iPhone simulator found. Pass simulator:<name> explicitly.") unless present?(simulator)
+
+  simulator
+end
+
+def upload_auth_options
+  json_path = ENV["APP_STORE_CONNECT_API_KEY_JSON_PATH"]
+  if present?(json_path)
+    return { api_key_path: File.expand_path(json_path) }
+  end
+
+  key_id = ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"]
+  issuer_id = ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"]
+  key_path = ENV["APP_STORE_CONNECT_API_KEY_PATH"]
+  key_content = ENV["APP_STORE_CONNECT_API_KEY_CONTENT"]
+
+  return {} unless present?(key_id) && present?(issuer_id) && (present?(key_path) || present?(key_content))
+
+  {
+    api_key: app_store_connect_api_key(
+      key_id: key_id,
+      issuer_id: issuer_id,
+      key_filepath: present?(key_path) ? File.expand_path(key_path) : nil,
+      key_content: present?(key_content) ? key_content : nil,
+      duration: 1200
+    )
+  }
+end
+
+def maybe_csv(value)
+  return nil unless present?(value)
+
+  value.to_s.split(",").map(&:strip).reject(&:empty?)
+end
+
+def prepare_release(options)
+  ensure_command!("xcodegen", "Install it with `brew install xcodegen`.")
+
+  current = current_release_version
+  version = present?(options[:version]) ? options[:version].to_s.strip : current.fetch("marketing_version")
+  build = if present?(options[:build])
+    options[:build].to_i
+  else
+    release_build_number(
+      current: current.fetch("build_number"),
+      requested_version: version,
+      current_version: current.fetch("marketing_version")
+    )
+  end
+
+  UI.user_error!("Build number must be a positive integer") if build <= 0
+
+  update_release_version(version: version, build: build)
+  sh("npm run ios:generate")
+
+  unless bool_option(options[:skip_tests], default: false)
+    simulator = present?(options[:simulator]) ? options[:simulator].to_s : default_simulator_name
+    run_tests(
+      project: IOS_PROJECT_PATH,
+      scheme: IOS_SCHEME,
+      destination: "platform=iOS Simulator,name=#{simulator}"
+    )
+  end
+
+  {
+    marketing_version: version,
+    build_number: build
+  }
+end
+
+platform :ios do
+  before_all do
+    setup_ci if ENV["CI"]
+  end
+
+  desc "Show the iOS marketing version and build number from ios/project.yml"
+  lane :version do
+    release = current_release_version
+    UI.message("MARKETING_VERSION=#{release.fetch("marketing_version")}")
+    UI.message("CURRENT_PROJECT_VERSION=#{release.fetch("build_number")}")
+  end
+
+  desc "Update iOS version/build, regenerate the project, and run simulator tests"
+  lane :prepare do |options|
+    release = prepare_release(options)
+    UI.success("Prepared MOBaiLE #{release[:marketing_version]} (#{release[:build_number]})")
+  end
+
+  desc "Build and upload a TestFlight build"
+  lane :beta do |options|
+    release = prepare_release(options)
+    auth_options = upload_auth_options
+
+    build_app(
+      project: IOS_PROJECT_PATH,
+      scheme: IOS_SCHEME,
+      export_method: "app-store",
+      clean: true,
+      output_directory: release_artifact_directory,
+      output_name: "MOBaiLE-#{release[:marketing_version]}-#{release[:build_number]}.ipa",
+      xcargs: "-allowProvisioningUpdates"
+    )
+
+    upload_to_testflight(
+      skip_waiting_for_build_processing: bool_option(options[:skip_waiting], default: true),
+      distribute_external: bool_option(options[:external], default: false),
+      groups: maybe_csv(options[:groups]),
+      changelog: options[:changelog],
+      **auth_options
+    )
+
+    UI.success("Uploaded MOBaiLE #{release[:marketing_version]} (#{release[:build_number]}) to TestFlight")
+  end
+
+  desc "Build and upload an App Store Connect release build"
+  lane :release do |options|
+    release = prepare_release(options)
+    auth_options = upload_auth_options
+
+    build_app(
+      project: IOS_PROJECT_PATH,
+      scheme: IOS_SCHEME,
+      export_method: "app-store",
+      clean: true,
+      output_directory: release_artifact_directory,
+      output_name: "MOBaiLE-#{release[:marketing_version]}-#{release[:build_number]}.ipa",
+      xcargs: "-allowProvisioningUpdates"
+    )
+
+    upload_to_app_store(
+      force: true,
+      skip_metadata: bool_option(options[:skip_metadata], default: true),
+      skip_screenshots: bool_option(options[:skip_screenshots], default: true),
+      submit_for_review: bool_option(options[:submit_for_review], default: false),
+      automatic_release: bool_option(options[:automatic_release], default: false),
+      **auth_options
+    )
+
+    UI.success("Uploaded MOBaiLE #{release[:marketing_version]} (#{release[:build_number]}) to App Store Connect")
+  end
+end

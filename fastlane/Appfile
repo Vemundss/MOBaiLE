@@ -1,0 +1,5 @@
+app_identifier(ENV["IOS_APP_IDENTIFIER"] || "com.vemundss.voiceagentapp")
+
+apple_id(ENV["APPLE_ID"]) if ENV["APPLE_ID"]
+team_id(ENV["APPLE_DEVELOPER_TEAM_ID"]) if ENV["APPLE_DEVELOPER_TEAM_ID"]
+itc_team_id(ENV["APP_STORE_CONNECT_TEAM_ID"]) if ENV["APP_STORE_CONNECT_TEAM_ID"]

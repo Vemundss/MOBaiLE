@@ -57,7 +57,7 @@ final class VoiceAgentViewModel: ObservableObject {
         let path: String
     }
 
-    @Published var serverURL: String = "http://127.0.0.1:8000"
+    @Published var serverURL: String = ""
     @Published var apiToken: String = ""
     @Published var sessionID: String = "iphone-app"
     @Published var workingDirectory: String = "~"
