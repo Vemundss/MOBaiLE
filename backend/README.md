@@ -8,6 +8,7 @@ Your iPhone app talks to this backend to run tasks, stream progress, and return 
 - `scripts/install_backend.sh` uses this checkout and requires `python3`
 - if `uv` is missing, `scripts/install_backend.sh` installs it for you
 - `codex` and `claude` are optional; without them, only MOBaiLE's internal `local` smoke/dev fallback is available
+- for unattended remote control, provision the Codex autonomy stack so Codex gets Playwright, Peekaboo, and the managed skills pack
 - `OPENAI_API_KEY` is optional for text-only runs and normal iPhone voice use, but still required for backend `/v1/audio` transcription
 - `Tailscale` is recommended when your phone must reach the backend off-LAN
 
@@ -25,6 +26,14 @@ cd backend
 bash ./run_backend.sh
 ```
 
+Autonomous full-access setup on a trusted host:
+
+```bash
+bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
+cd backend
+bash ./run_backend.sh
+```
+
 For phone pairing over LAN/Tailscale, add `--expose-network` to the install command so the backend binds on `0.0.0.0`.
 If Tailscale is not installed, the script tries to use a LAN IP for pairing before falling back to `127.0.0.1`.
 
@@ -36,12 +45,19 @@ If you want a one-command setup that manages a copy in `~/MOBaiLE`:
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
 ```
 
+Autonomous managed install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode full-access --with-autonomy-stack
+```
+
 `bootstrap_server.sh` clones or updates `~/MOBaiLE` by default. Use it for a fresh machine, not when you specifically want to run from your current checkout.
 
 If you have Node/npm and prefer one command wrappers:
 
 ```bash
 npm run backend:install
+npm run backend:install:auto
 npm run backend:start
 ```
 
@@ -52,6 +68,7 @@ npm run backend:start
 - `backend/pairing.json` is regenerated during install
 - `backend/pairing-qr.png` is generated when you run `bash ./scripts/pairing_qr.sh`
 - backend default executor automatically falls back to the internal `local` executor if no Codex/Claude CLI is available
+- full-access install with autonomy stack also provisions Codex MCP config plus the managed skills pack when Codex is installed
 - the iPhone app now prefers Apple Speech Recognition first, so normal voice input on a real iPhone does not require `OPENAI_API_KEY`
 - backend `/v1/audio` still needs `OPENAI_API_KEY` for real speech-to-text; text prompts work without it
 
@@ -146,6 +163,8 @@ From repo root:
 ```bash
 bash ./scripts/doctor.sh
 bash ./scripts/warmup_capabilities.sh
+bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
+python3 ./scripts/provision_codex_autonomy.py --mode full-access
 bash ./scripts/pairing_qr.sh
 bash ./scripts/service_macos.sh status
 bash ./scripts/service_linux.sh status

@@ -21,7 +21,6 @@ struct ContentView: View {
     @State private var runtimeContextExpanded = false
     @State private var showMicrophonePrimer = false
     @State private var copiedWorkspacePath = false
-    private let privacyPolicyURL = URL(string: "https://vemundss.github.io/MOBaiLE/privacy-policy.html")
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -124,6 +123,7 @@ struct ContentView: View {
             .task {
                 await vm.bootstrapSessionIfNeeded()
                 await vm.consumePendingShortcutActionIfNeeded()
+                applyPreviewPresentationIfNeeded()
             }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
@@ -273,11 +273,22 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     if vm.conversation.isEmpty {
-                        BrandHeaderView(
-                            isConnected: vm.hasConfiguredConnection,
-                            statusText: headerStatusText
+                        ConversationEmptyStateView(
+                            isConfigured: vm.hasConfiguredConnection,
+                            statusText: headerStatusText,
+                            canRetryLastPrompt: vm.canRetryLastPrompt,
+                            onOpenSettings: {
+                                showConnectionSettings = true
+                            },
+                            onRetryLastPrompt: {
+                                Task { await vm.retryLastPrompt() }
+                            },
+                            onUsePrompt: { prompt in
+                                vm.promptText = prompt
+                                composerFocused = true
+                            }
                         )
-                            .padding(.top, 6)
+                        .padding(.top, 8)
                     }
 
                     ForEach(vm.conversation) { message in
@@ -291,24 +302,6 @@ struct ContentView: View {
                             }
                         }
                         .id(message.id)
-                    }
-
-                    if vm.conversation.isEmpty {
-                        ConversationWelcomeCard(
-                            isConfigured: vm.hasConfiguredConnection,
-                            canRetryLastPrompt: vm.canRetryLastPrompt,
-                            onOpenSettings: {
-                                showConnectionSettings = true
-                            },
-                            onRetryLastPrompt: {
-                                Task { await vm.retryLastPrompt() }
-                            },
-                            onUsePrompt: { prompt in
-                                vm.promptText = prompt
-                                composerFocused = true
-                            }
-                        )
-                        .padding(.top, 6)
                     }
 
                     if !vm.errorText.isEmpty && !shouldShowRecordingNotice {
@@ -449,9 +442,6 @@ struct ContentView: View {
                         LabeledContent("Backend Mode", value: vm.backendSecurityMode)
                         ForEach(vm.backendExecutorModelRows, id: \.id) { row in
                             LabeledContent("\(row.title) Model", value: row.model)
-                        }
-                        if let privacyPolicyURL {
-                            Link("Privacy Policy", destination: privacyPolicyURL)
                         }
                         Text(vm.developerMode
                             ? "Developer Mode exposes every reported agent executor plus the internal local fallback."
@@ -614,22 +604,18 @@ struct ContentView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            if !vm.isRecording && !vm.statusText.isEmpty && vm.statusText != "Idle" {
-                HStack {
-                    if !vm.runID.isEmpty {
-                        Text("Run \(shortRunID(vm.runID))")
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
+            if let unblock = vm.pendingHumanUnblockRequest, !vm.isLoading {
+                InlineNoticeCard(
+                    title: "Human input needed",
+                    message: unblock.instructions,
+                    tint: .orange,
+                    systemImage: "hand.raised.fill",
+                    actionTitle: "Prepare Reply",
+                    action: {
+                        vm.prepareHumanUnblockReply()
+                        composerFocused = true
                     }
-                    Spacer()
-                    if vm.isLoading {
-                        ProgressView()
-                            .controlSize(.mini)
-                    }
-                    Text(bottomRunStatusText)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
+                )
             }
 
             if let attachmentFailureNotice = vm.draftAttachmentFailureNotice, !vm.isLoading {
@@ -643,135 +629,182 @@ struct ContentView: View {
                 )
             }
 
-            if !vm.draftAttachments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
+            VStack(spacing: 10) {
+                if shouldShowComposerSummaryRow {
                     HStack(spacing: 8) {
-                        ForEach(vm.draftAttachments) { attachment in
-                            DraftAttachmentChip(
-                                attachment: attachment,
-                                transferState: vm.draftAttachmentTransferState(for: attachment),
-                                isBusy: vm.isLoading,
-                                onRemove: { vm.removeDraftAttachment(attachment) }
+                        if shouldShowComposerStatusSummary {
+                            Label(composerStatusSummaryText, systemImage: composerStatusSummaryIcon)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(composerStatusSummaryTint)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(composerStatusSummaryTint.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+
+                        if !vm.draftAttachments.isEmpty {
+                            Label(attachmentSummaryText, systemImage: "paperclip.circle.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.accentColor.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+
+                        Spacer(minLength: 0)
+
+                        if vm.isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        if !vm.runID.isEmpty && shouldShowComposerStatusSummary {
+                            Text("Run \(shortRunID(vm.runID))")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if !vm.draftAttachments.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(vm.draftAttachments) { attachment in
+                                DraftAttachmentChip(
+                                    attachment: attachment,
+                                    transferState: vm.draftAttachmentTransferState(for: attachment),
+                                    isBusy: vm.isLoading,
+                                    onRemove: { vm.removeDraftAttachment(attachment) }
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    Button {
+                        composerFocused = false
+                        showAttachmentOptions = true
+                    } label: {
+                        Image(systemName: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(vm.draftAttachments.isEmpty ? .secondary : Color.accentColor)
+                    .background(
+                        Circle()
+                            .fill(Color(.systemBackground))
+                    )
+                    .accessibilityLabel("Add attachment")
+                    .disabled(!vm.hasConfiguredConnection || vm.isLoading || vm.isRecording)
+
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $vm.promptText)
+                            .focused($composerFocused)
+                            .disabled(vm.isRecording)
+                            .scrollContentBackground(.hidden)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 8)
+                            .frame(height: composerHeight)
+                            .background(Color(.systemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(
+                                        composerFocused
+                                            ? Color.accentColor.opacity(0.28)
+                                            : Color(.separator).opacity(0.10),
+                                        lineWidth: 1
+                                    )
+                            )
+
+                        if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(composerPlaceholder)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 14)
+                                .padding(.top, 16)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.16), value: composerHeight)
+
+                    HStack(spacing: 6) {
+                        Button {
+                            composerFocused = false
+                            handleRecordingButtonTap()
+                        } label: {
+                            Image(systemName: vm.isRecording ? "stop.fill" : "mic.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(vm.isRecording ? .red : .blue)
+                        .background(
+                            Circle()
+                                .fill(Color(.systemBackground))
+                        )
+                        .contentShape(Circle())
+                        .accessibilityLabel(vm.isRecording ? "Stop recording and send" : "Start recording")
+                        .disabled(vm.isLoading || !vm.hasConfiguredConnection)
+
+                        if vm.canCancelActiveOperation {
+                            Button {
+                                composerFocused = false
+                                vm.cancelActiveOperation()
+                            } label: {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.white)
+                            .background(
+                                Circle()
+                                    .fill(Color.red)
+                            )
+                            .contentShape(Circle())
+                            .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
+                        } else {
+                            Button {
+                                composerFocused = false
+                                Task { await vm.sendPrompt() }
+                            } label: {
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.white)
+                            .background(
+                                Circle()
+                                    .fill(Color.accentColor)
+                            )
+                            .contentShape(Circle())
+                            .accessibilityLabel("Send prompt")
+                            .disabled(
+                                !vm.hasConfiguredConnection ||
+                                !vm.hasDraftContent ||
+                                vm.isRecording
                             )
                         }
                     }
-                    .padding(.horizontal, 2)
+                    .opacity(vm.hasConfiguredConnection ? 1 : 0.6)
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-
-            HStack(alignment: .bottom, spacing: 8) {
-                Button {
-                    composerFocused = false
-                    showAttachmentOptions = true
-                } label: {
-                    Image(systemName: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(vm.draftAttachments.isEmpty ? .secondary : Color.accentColor)
-                .background(
-                    Circle()
-                        .fill(Color(.tertiarySystemBackground))
-                )
-                .accessibilityLabel("Add attachment")
-                .disabled(!vm.hasConfiguredConnection || vm.isLoading || vm.isRecording)
-
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $vm.promptText)
-                        .focused($composerFocused)
-                        .disabled(vm.isRecording)
-                        .scrollContentBackground(.hidden)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 5)
-                        .frame(height: composerHeight)
-                        .background(Color(.tertiarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(
-                                    composerFocused ? Color.accentColor.opacity(0.28) : Color.clear,
-                                    lineWidth: 1
-                                )
-                        )
-
-                    if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(composerPlaceholder)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 12)
-                            .padding(.top, 14)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .animation(.easeInOut(duration: 0.16), value: composerHeight)
-
-                HStack(spacing: 6) {
-                    Button {
-                        composerFocused = false
-                        handleRecordingButtonTap()
-                    } label: {
-                        Image(systemName: vm.isRecording ? "stop.fill" : "mic.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(vm.isRecording ? .red : .blue)
-                    .background(
-                        Circle()
-                            .fill(Color(.tertiarySystemBackground))
-                    )
-                    .contentShape(Circle())
-                    .accessibilityLabel(vm.isRecording ? "Stop recording and send" : "Start recording")
-                    .disabled(vm.isLoading || !vm.hasConfiguredConnection)
-
-                    if vm.canCancelActiveOperation {
-                        Button {
-                            composerFocused = false
-                            vm.cancelActiveOperation()
-                        } label: {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.white)
-                        .background(
-                            Circle()
-                                .fill(Color.red)
-                        )
-                        .contentShape(Circle())
-                        .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
-                    } else {
-                        Button {
-                            composerFocused = false
-                            Task { await vm.sendPrompt() }
-                        } label: {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 14, weight: .bold))
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.white)
-                        .background(
-                            Circle()
-                                .fill(Color.accentColor)
-                        )
-                        .contentShape(Circle())
-                        .accessibilityLabel("Send prompt")
-                        .disabled(
-                            !vm.hasConfiguredConnection ||
-                            !vm.hasDraftContent ||
-                            vm.isRecording
-                        )
-                    }
-                }
-                .opacity(vm.hasConfiguredConnection ? 1 : 0.6)
-            }
-            .padding(8)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.16), lineWidth: 1)
+            )
         }
         .padding(.horizontal)
         .padding(.bottom, 5)
@@ -805,26 +838,79 @@ struct ContentView: View {
         return vm.statusText
     }
 
+    private var shouldShowComposerStatusSummary: Bool {
+        !vm.isRecording && !vm.statusText.isEmpty && vm.statusText != "Idle"
+    }
+
+    private var shouldShowComposerSummaryRow: Bool {
+        shouldShowComposerStatusSummary || !vm.draftAttachments.isEmpty
+    }
+
+    private var composerStatusSummaryText: String {
+        bottomRunStatusText
+    }
+
+    private var composerStatusSummaryIcon: String {
+        let lower = composerStatusSummaryText.lowercased()
+        if lower.contains("input") || lower.contains("blocked") {
+            return "hand.raised.fill"
+        }
+        if lower.contains("fail") || lower.contains("cancel") || lower.contains("timed out") {
+            return "exclamationmark.circle.fill"
+        }
+        if lower.contains("complete") {
+            return "checkmark.circle.fill"
+        }
+        if vm.isLoading || lower.contains("think") || lower.contains("plan") || lower.contains("execut") || lower.contains("summar") {
+            return "bolt.horizontal.circle.fill"
+        }
+        return "info.circle.fill"
+    }
+
+    private var composerStatusSummaryTint: Color {
+        let lower = composerStatusSummaryText.lowercased()
+        if lower.contains("input") || lower.contains("blocked") {
+            return .orange
+        }
+        if lower.contains("fail") || lower.contains("cancel") || lower.contains("timed out") {
+            return .red
+        }
+        if lower.contains("complete") {
+            return .green
+        }
+        if vm.isLoading || lower.contains("think") || lower.contains("plan") || lower.contains("execut") || lower.contains("summar") {
+            return .blue
+        }
+        return .secondary
+    }
+
+    private var attachmentSummaryText: String {
+        if vm.draftAttachments.count == 1 {
+            return "1 attachment"
+        }
+        return "\(vm.draftAttachments.count) attachments"
+    }
+
     private var composerHeight: CGFloat {
         let trimmed = vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !composerFocused && trimmed.isEmpty {
-            return 44
+            return 52
         }
         let lineCount = max(1, vm.promptText.split(separator: "\n", omittingEmptySubsequences: false).count)
-        return min(132, max(72, CGFloat(lineCount) * 22 + 24))
+        return min(148, max(80, CGFloat(lineCount) * 22 + 28))
     }
 
     private var composerPlaceholder: String {
         if !vm.hasConfiguredConnection {
-            return "Open Settings to connect your backend"
+            return "Connect backend first"
         }
         if vm.isRecording {
             return "Voice recording in progress"
         }
         if vm.draftAttachments.isEmpty {
-            return "Message MOBaiLE"
+            return "Ask MOBaiLE about this repo"
         }
-        return "Add a note or send the attachments"
+        return "Add context for these attachments"
     }
 
     private var headerStatusText: String {
@@ -856,11 +942,14 @@ struct ContentView: View {
     }
 
     private var showsExpandedRuntimeContext: Bool {
-        vm.conversation.isEmpty || runtimeContextExpanded
+        vm.hasConfiguredConnection && runtimeContextExpanded
     }
 
     private var runtimeStatusTint: Color {
         let lower = bottomRunStatusText.lowercased()
+        if lower.contains("input") || lower.contains("blocked") {
+            return .orange
+        }
         if lower.contains("fail") || lower.contains("cancel") || lower.contains("timed out") {
             return .red
         }
@@ -881,7 +970,10 @@ struct ContentView: View {
 
     private var runtimeInfoBar: some View {
         Group {
-            if showsExpandedRuntimeContext {
+            if !vm.hasConfiguredConnection {
+                setupRuntimeInfoBar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            } else if showsExpandedRuntimeContext {
                 expandedRuntimeInfoBar
                     .transition(.move(edge: .top).combined(with: .opacity))
             } else {
@@ -899,6 +991,23 @@ struct ContentView: View {
                 .frame(height: 0.5),
             alignment: .bottom
         )
+    }
+
+    private var setupRuntimeInfoBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Finish setup to start a run")
+                    .font(.subheadline.weight(.semibold))
+                Text("Add your backend URL and token once. After that, prompts, recording, and workspace tools are ready.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            runtimeWorkspaceButton
+        }
     }
 
     private var compactRuntimeInfoBar: some View {
@@ -1274,6 +1383,23 @@ struct ContentView: View {
         if trimmed == "/" { return "/" }
         let last = URL(fileURLWithPath: trimmed).lastPathComponent
         return last.isEmpty ? trimmed : last
+    }
+
+    private func applyPreviewPresentationIfNeeded() {
+        let raw = ProcessInfo.processInfo.environment["MOBAILE_PREVIEW_PRESENTATION"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch raw {
+        case "settings":
+            showConnectionSettings = true
+        case "threads":
+            showThreads = true
+        case "logs":
+            showLogs = true
+        default:
+            break
+        }
     }
 
     private var shouldShowRecordingNotice: Bool {

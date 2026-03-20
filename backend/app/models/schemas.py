@@ -65,6 +65,7 @@ class ExecutionEvent(BaseModel):
         "assistant.message",
         "run.completed",
         "run.failed",
+        "run.blocked",
         "run.cancelled",
     ]
     action_index: int | None = None
@@ -124,7 +125,7 @@ class RunRecord(BaseModel):
     executor: RunExecutorName = "local"
     utterance_text: str
     working_directory: str | None = None
-    status: Literal["running", "completed", "failed", "rejected", "cancelled"]
+    status: Literal["running", "completed", "failed", "rejected", "blocked", "cancelled"]
     plan: ActionPlan | None = None
     events: list[ExecutionEvent] = Field(default_factory=list)
     summary: str
@@ -137,7 +138,7 @@ class RunSummary(BaseModel):
     session_id: str
     executor: RunExecutorName = "local"
     utterance_text: str
-    status: Literal["running", "completed", "failed", "rejected", "cancelled"]
+    status: Literal["running", "completed", "failed", "rejected", "blocked", "cancelled"]
     summary: str
     updated_at: str | None = None
     working_directory: str | None = None

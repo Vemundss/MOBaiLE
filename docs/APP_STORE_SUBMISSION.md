@@ -25,12 +25,14 @@ This repo is now in better shape for App Store submission, but a few steps still
 ## App Store Connect Work You Still Need
 
 1. Create the app record with the final bundle identifier.
-2. Fill in the app name, subtitle, description, keywords, support URL, and marketing URL.
-3. Provide a stable privacy policy URL.
-4. Upload iPhone screenshots for the device classes App Store Connect asks for.
-5. Complete App Privacy answers based on what your production backend stores or transmits.
-6. Complete export compliance. With the current app target, `ITSAppUsesNonExemptEncryption` is set to `false`, but you still need to answer App Store Connect's questions.
-7. Upload the archive and submit the selected build to App Review.
+2. Publish reachable support, marketing, and privacy-policy URLs before you enter them in App Store Connect.
+3. Fill in the app name, subtitle, description, keywords, support URL, and marketing URL.
+4. Provide a stable privacy policy URL.
+5. Decide whether you are really shipping iPad support. If `TARGETED_DEVICE_FAMILY` stays `1,2`, prepare iPad screenshots and test on iPad.
+6. Upload iPhone screenshots for the device classes App Store Connect asks for.
+7. Complete App Privacy answers based on what your production backend stores or transmits, including prompts/chat history, voice input, imported photos/files, and backend-returned logs/results.
+8. Complete export compliance. With the current app target, `ITSAppUsesNonExemptEncryption` is set to `false`, but you still need to answer App Store Connect's questions.
+9. Upload the archive and submit the selected build to App Review.
 
 ## Review Notes You Should Prepare
 
@@ -67,5 +69,5 @@ Expected behavior:
 ## Before You Hit Submit
 
 - Replace the generated icon set with final production artwork if you have a higher-resolution source than `ios/VoiceAgentApp/mobaile_logo.png`.
-- Confirm your privacy policy and support URLs are not temporary placeholders.
+- Confirm your privacy policy and support URLs are publicly reachable and not temporary placeholders.
 - Test pairing and one complete run on a real iPhone using the exact build you plan to upload.

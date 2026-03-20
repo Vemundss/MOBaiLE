@@ -16,6 +16,8 @@ This flow can install `uv` for you and manages a repo clone in `~/MOBaiLE` by de
 bash ./scripts/bootstrap_server.sh --mode safe
 # or:
 bash ./scripts/bootstrap_server.sh --mode full-access
+# or for the autonomous Codex stack:
+bash ./scripts/bootstrap_server.sh --mode full-access --with-autonomy-stack
 ```
 
 Note:
@@ -28,6 +30,8 @@ Note:
 bash ./scripts/install_backend.sh --mode safe
 # or:
 bash ./scripts/install_backend.sh --mode full-access
+# or for the autonomous Codex stack:
+bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
 ```
 
 Notes:
@@ -35,6 +39,7 @@ Notes:
 - `install_backend.sh` defaults to local-only bind (`127.0.0.1`)
 - add `--expose-network` when you want phone pairing over LAN/Tailscale
 - if no Codex/Claude CLI is installed, MOBaiLE keeps the internal `local` executor available for smoke/dev flows
+- `--with-autonomy-stack` provisions Codex MCP servers and the managed skills pack for more autonomous remote control
 
 ## npm Command Wrappers (Optional)
 
@@ -42,6 +47,8 @@ From repo root:
 
 ```bash
 npm run setup:server
+npm run setup:server:auto
+npm run backend:install:auto
 npm run backend:start
 npm run doctor
 npm run pair:qr
@@ -117,6 +124,12 @@ Rotate backend API token (updates `backend/.env` and `backend/pairing.json`):
 
 ```bash
 bash ./scripts/rotate_api_token.sh
+```
+
+Provision or refresh the autonomous Codex stack:
+
+```bash
+python3 ./scripts/provision_codex_autonomy.py --mode full-access
 ```
 
 Switch backend security mode after install:

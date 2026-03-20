@@ -4,6 +4,33 @@ import Foundation
 import MediaPlayer
 import UIKit
 
+private enum PreviewScenario: String {
+    case configuredEmpty = "configured-empty"
+    case conversation = "conversation"
+    case recording = "recording"
+
+    static var current: PreviewScenario? {
+        let processInfo = ProcessInfo.processInfo
+
+        if let raw = processInfo.environment["MOBAILE_PREVIEW_SCENARIO"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           let scenario = PreviewScenario(rawValue: raw) {
+            return scenario
+        }
+
+        for argument in processInfo.arguments {
+            guard argument.hasPrefix("--mobaile-preview-scenario=") else { continue }
+            let raw = String(argument.dropFirst("--mobaile-preview-scenario=".count)).lowercased()
+            if let scenario = PreviewScenario(rawValue: raw) {
+                return scenario
+            }
+        }
+
+        return nil
+    }
+}
+
 @MainActor
 final class VoiceAgentViewModel: ObservableObject {
     struct PendingPairing: Identifiable, Equatable {
@@ -55,6 +82,14 @@ final class VoiceAgentViewModel: ObservableObject {
         let id: String
         let title: String
         let path: String
+    }
+
+    struct HumanUnblockRequest: Equatable {
+        let instructions: String
+
+        var suggestedReply: String {
+            "I completed the requested unblock step. Continue from the preserved state."
+        }
     }
 
     @Published var serverURL: String = ""
@@ -170,7 +205,253 @@ final class VoiceAgentViewModel: ObservableObject {
         )
         loadSettings()
         loadThreads()
+        if let previewScenario = PreviewScenario.current {
+            applyPreviewScenario(previewScenario)
+        }
         configureRemoteCommandsIfNeeded()
+    }
+
+    private func applyPreviewScenario(_ scenario: PreviewScenario) {
+        let workspace = "/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE"
+        let primaryThreadID = UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID()
+        let captureThreadID = UUID(uuidString: "22222222-2222-2222-2222-222222222222") ?? UUID()
+        let draftThreadID = UUID(uuidString: "33333333-3333-3333-3333-333333333333") ?? UUID()
+
+        let previewThreads = [
+            ChatThread(
+                id: primaryThreadID,
+                title: "Polish iPhone UI",
+                updatedAt: Date(),
+                conversation: [],
+                runID: "pvw-2048",
+                summaryText: "Tightened the empty state hierarchy and steadied the composer for App Store screenshots.",
+                transcriptText: "",
+                statusText: "Completed",
+                resolvedWorkingDirectory: workspace,
+                activeRunExecutor: "codex"
+            ),
+            ChatThread(
+                id: captureThreadID,
+                title: "Capture App Store previews",
+                updatedAt: Date().addingTimeInterval(-4200),
+                conversation: [],
+                runID: "pvw-1987",
+                summaryText: "Prepared 6.9-inch screenshot states and preview-ready copy.",
+                transcriptText: "",
+                statusText: "Completed",
+                resolvedWorkingDirectory: workspace,
+                activeRunExecutor: "codex"
+            ),
+            ChatThread(
+                id: draftThreadID,
+                title: "Workspace follow-up",
+                updatedAt: Date().addingTimeInterval(-8600),
+                conversation: [],
+                runID: "",
+                summaryText: "",
+                transcriptText: "",
+                statusText: "Draft",
+                resolvedWorkingDirectory: workspace,
+                activeRunExecutor: "codex",
+                draftText: "open the workspace browser and switch to ios/VoiceAgentApp",
+                draftAttachments: []
+            ),
+        ]
+
+        let previewExecutors = [
+            RuntimeExecutorDescriptor(
+                id: "codex",
+                title: "Codex",
+                kind: "agent",
+                available: true,
+                isDefault: true,
+                internalOnly: false,
+                model: "gpt-5.4"
+            ),
+            RuntimeExecutorDescriptor(
+                id: "claude",
+                title: "Claude",
+                kind: "agent",
+                available: true,
+                isDefault: false,
+                internalOnly: false,
+                model: "claude-sonnet-4.5"
+            ),
+        ]
+
+        serverURL = "https://demo.mobaile.app"
+        apiToken = "preview-token"
+        sessionID = "app-preview"
+        workingDirectory = workspace
+        resolvedWorkingDirectory = workspace
+        backendWorkdirRoot = workspace
+        backendSecurityMode = "workspace-write"
+        executor = "codex"
+        activeRunExecutor = "codex"
+        backendDefaultExecutor = "codex"
+        backendAvailableExecutors = previewExecutors.map(\.id)
+        backendExecutorDescriptors = previewExecutors
+        directoryBrowserPath = workspace
+        directoryBrowserEntries = []
+        directoryBrowserError = ""
+        directoryBrowserMissingPath = ""
+        directoryBrowserTruncated = false
+        showDirectoryBrowser = false
+        events = [
+            ExecutionEvent(type: "summary", actionIndex: 1, message: "Refined the empty state hierarchy and stabilized the composer.", eventID: "preview-summary", createdAt: nil),
+            ExecutionEvent(type: "tool", actionIndex: 2, message: "Captured 6.9-inch iPhone screenshots for App Store preview.", eventID: "preview-tool", createdAt: nil),
+        ]
+        errorText = ""
+        pendingPairing = nil
+        didBootstrapSession = true
+        draftAttachmentTransferStates = [:]
+
+        performThreadStateRestore {
+            threads = previewThreads
+            activeThreadID = primaryThreadID
+
+            switch scenario {
+            case .configuredEmpty:
+                conversation = []
+                promptText = ""
+                draftAttachments = []
+                runID = ""
+                summaryText = ""
+                transcriptText = ""
+                statusText = "Ready for prompts"
+                runPhaseText = "Idle"
+                runStartedAt = nil
+                runEndedAt = nil
+                isLoading = false
+                isRecording = false
+                recordingStartedAt = nil
+                didCompleteRun = false
+
+            case .conversation:
+                conversation = previewConversation()
+                promptText = ""
+                draftAttachments = []
+                runID = "pvw-2048"
+                summaryText = "Improved the empty state and composer hierarchy for App Store-ready iPhone screens."
+                transcriptText = ""
+                statusText = "Completed"
+                runPhaseText = "Completed"
+                runStartedAt = Date().addingTimeInterval(-160)
+                runEndedAt = Date().addingTimeInterval(-55)
+                isLoading = false
+                isRecording = false
+                recordingStartedAt = nil
+                didCompleteRun = true
+
+            case .recording:
+                conversation = previewConversation()
+                promptText = "Capture polished 6.9-inch screenshots once the main flow feels ready."
+                draftAttachments = previewDraftAttachments()
+                runID = ""
+                summaryText = ""
+                transcriptText = ""
+                statusText = "Recording..."
+                runPhaseText = "Recording"
+                runStartedAt = nil
+                runEndedAt = nil
+                isLoading = false
+                isRecording = true
+                recordingStartedAt = Date().addingTimeInterval(-38)
+                autoSendAfterSilenceEnabled = true
+                didCompleteRun = false
+            }
+        }
+    }
+
+    private func previewConversation() -> [ConversationMessage] {
+        [
+            ConversationMessage(
+                role: "user",
+                text: "Review the current iPhone UI and get it ready for App Store screenshots."
+            ),
+            ConversationMessage(
+                role: "assistant",
+                text: """
+{
+  "type": "assistant_response",
+  "version": "1.0",
+  "summary": "Completed the polish pass.",
+  "sections": [
+    {
+      "title": "What changed",
+      "body": "Reduced setup noise before the first run. Kept live context compact until needed. Unified the composer and attachment state into one surface."
+    }
+  ],
+  "agenda_items": [],
+  "artifacts": []
+}
+"""
+            ),
+            ConversationMessage(
+                role: "user",
+                text: "Which screens should we capture for the App Store set?"
+            ),
+            ConversationMessage(
+                role: "assistant",
+                text: """
+{
+  "type": "assistant_response",
+  "version": "1.0",
+  "summary": "Capture these three in order.",
+  "sections": [
+    {
+      "title": "Next step",
+      "body": "Capture the configured empty state, the active conversation, and the recording flow. That tells the product story in three screens."
+    }
+  ],
+  "agenda_items": [],
+  "artifacts": []
+}
+"""
+            ),
+        ]
+    }
+
+    private func previewDraftAttachments() -> [DraftAttachment] {
+        [
+            makePreviewAttachment(
+                fileName: "AppStoreShots.md",
+                contents: """
+                1. Capture the configured empty state.
+                2. Capture an active thread with rich output.
+                3. Capture the recording flow with attachments.
+                """
+            ),
+            makePreviewAttachment(
+                fileName: "ComposerPolish.swift",
+                contents: """
+                struct ComposerBar: View {
+                    var body: some View { EmptyView() }
+                }
+                """
+            ),
+        ]
+    }
+
+    private func makePreviewAttachment(fileName: String, contents: String) -> DraftAttachment {
+        let fileURL = draftAttachmentDirectory.appendingPathComponent("preview-\(fileName)")
+        if !FileManager.default.fileExists(atPath: fileURL.path),
+           let data = contents.data(using: .utf8) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+
+        let mimeType = inferAttachmentMimeType(fileName: fileName, fallback: "text/plain")
+        let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value
+            ?? Int64(contents.utf8.count)
+
+        return DraftAttachment(
+            id: UUID(),
+            localFileURL: fileURL,
+            fileName: fileName,
+            mimeType: mimeType,
+            kind: inferAttachmentKind(fileName: fileName, mimeType: mimeType),
+            sizeBytes: size
+        )
     }
 
     func sendPrompt() async {
@@ -213,7 +494,7 @@ final class VoiceAgentViewModel: ObservableObject {
             isRecording = true
             recordingStartedAt = Date()
             statusText = "Recording..."
-            syncNowPlayingRecordingState()
+            updateRemoteCommandState()
             emitRecordingStartedFeedback()
             Task { [speechTranscriber] in
                 await speechTranscriber.warmupAuthorization()
@@ -292,7 +573,7 @@ final class VoiceAgentViewModel: ObservableObject {
         didCompleteRun = false
         isRecording = false
         recordingStartedAt = nil
-        syncNowPlayingRecordingState()
+        updateRemoteCommandState()
         statusText = "Preparing voice input..."
         errorText = ""
         summaryText = ""
@@ -487,39 +768,50 @@ final class VoiceAgentViewModel: ObservableObject {
         }
         let timeoutSec = normalizedRunTimeoutSeconds
         let streamTask = Task {
-            try await streamRunUntilDone(runID: runID, timeoutSec: timeoutSec)
+            try? await streamRunUntilDone(runID: runID, timeoutSec: timeoutSec)
         }
-        do {
-            // Keep polling as a watchdog so terminal state is reflected even if SSE stalls.
-            try await pollRunUntilDone(runID: runID, timeoutSec: timeoutSec)
-            streamTask.cancel()
-        } catch {
-            streamTask.cancel()
-            throw error
-        }
+        defer { streamTask.cancel() }
+
+        // Keep polling as a watchdog so terminal state is reflected even if SSE stalls.
+        try await pollRunUntilDone(runID: runID, timeoutSec: timeoutSec)
     }
 
     private func pollRunUntilDone(runID: String, timeoutSec: TimeInterval) async throws {
-        let pollCount = max(1, Int(timeoutSec / 0.5))
-        for _ in 0..<pollCount {
-            let run = try await client.fetchRun(
-                serverURL: normalizedServerURL,
-                token: apiToken,
-                runID: runID
-            )
-            statusText = "Run status: \(run.status)"
-            summaryText = run.summary
-            resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
-            if run.status == "running", runPhaseText == "Planning" || runPhaseText == "Idle" {
-                runPhaseText = "Executing"
+        let deadline = Date().addingTimeInterval(timeoutSec)
+        while Date() < deadline {
+            if didCompleteRun {
+                return
             }
-            ingestEvents(run.events)
+            do {
+                let run = try await client.fetchRun(
+                    serverURL: normalizedServerURL,
+                    token: apiToken,
+                    runID: runID
+                )
+                statusText = "Run status: \(run.status)"
+                summaryText = run.summary
+                resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
+                if run.status == "running", runPhaseText == "Planning" || runPhaseText == "Idle" {
+                    runPhaseText = "Executing"
+                }
+                ingestEvents(run.events)
 
-            if isTerminalStatus(run.status) {
-                applyTerminalRunStateIfNeeded(run)
+                if isTerminalStatus(run.status) {
+                    applyTerminalRunStateIfNeeded(run)
+                    return
+                }
+            } catch {
+                if didCompleteRun {
+                    return
+                }
+            }
+            if didCompleteRun {
                 return
             }
             try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        if didCompleteRun {
+            return
         }
         isLoading = false
         errorText = "Timed out waiting for run completion."
@@ -544,7 +836,7 @@ final class VoiceAgentViewModel: ObservableObject {
                     userInfo: [NSLocalizedDescriptionKey: "Run timed out while streaming events."]
                 )
             }
-            if event.type == "run.completed" || event.type == "run.failed" || event.type == "run.cancelled" {
+            if event.type == "run.completed" || event.type == "run.failed" || event.type == "run.blocked" || event.type == "run.cancelled" {
                 let run = try await client.fetchRun(
                     serverURL: normalizedServerURL,
                     token: apiToken,
@@ -777,6 +1069,19 @@ final class VoiceAgentViewModel: ObservableObject {
             !lastSubmittedUserMessage.attachments.isEmpty
     }
 
+    var pendingHumanUnblockRequest: HumanUnblockRequest? {
+        for message in conversation.reversed() {
+            if message.role == "user" {
+                return nil
+            }
+            if message.role == "assistant",
+               let request = humanUnblockRequest(from: message.text) {
+                return request
+            }
+        }
+        return nil
+    }
+
     var isUploadingAttachments: Bool {
         activeAttachmentUploadCancellation != nil
     }
@@ -792,6 +1097,12 @@ final class VoiceAgentViewModel: ObservableObject {
             stagedAttachments: [],
             existingAttachments: lastSubmittedUserMessage.attachments
         )
+    }
+
+    func prepareHumanUnblockReply() {
+        let suggested = pendingHumanUnblockRequest?.suggestedReply
+            ?? "I completed the requested unblock step. Continue from the preserved state."
+        promptText = suggested
     }
 
     private func uploadDraftAttachmentsIfNeeded(_ attachments: [DraftAttachment]) async throws -> [UploadResponse] {
@@ -1023,10 +1334,6 @@ final class VoiceAgentViewModel: ObservableObject {
     private func configureRemoteCommandsIfNeeded() {
         guard !didConfigureRemoteCommands else { return }
         let commandCenter = MPRemoteCommandCenter.shared()
-        commandCenter.togglePlayPauseCommand.isEnabled = true
-        commandCenter.playCommand.isEnabled = true
-        commandCenter.pauseCommand.isEnabled = true
-
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             Task { @MainActor in
@@ -1054,20 +1361,23 @@ final class VoiceAgentViewModel: ObservableObject {
         }
 
         didConfigureRemoteCommands = true
-        syncNowPlayingRecordingState()
+        updateRemoteCommandState()
     }
 
-    private func syncNowPlayingRecordingState() {
+    private func updateRemoteCommandState() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+        let canStartRecording = airPodsClickToRecordEnabled
+        commandCenter.togglePlayPauseCommand.isEnabled = canStartRecording
+        commandCenter.playCommand.isEnabled = canStartRecording
+        commandCenter.pauseCommand.isEnabled = canStartRecording && isRecording
+
         if isRecording {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = [
                 MPMediaItemPropertyTitle: "MOBaiLE Recording",
                 MPNowPlayingInfoPropertyPlaybackRate: 1
             ]
         } else {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-                MPMediaItemPropertyTitle: "MOBaiLE",
-                MPNowPlayingInfoPropertyPlaybackRate: 0
-            ]
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         }
     }
 
@@ -1129,6 +1439,7 @@ final class VoiceAgentViewModel: ObservableObject {
         defaults.set(audioCuesEnabled, forKey: DefaultsKey.audioCuesEnabled)
         defaults.set(autoSendAfterSilenceEnabled, forKey: DefaultsKey.autoSendAfterSilenceEnabled)
         defaults.set(autoSendAfterSilenceSeconds, forKey: DefaultsKey.autoSendAfterSilenceSeconds)
+        updateRemoteCommandState()
     }
 
     func bootstrapSessionIfNeeded() async {
@@ -1253,16 +1564,11 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func confirmPendingPairing(trustHost: Bool) {
         guard let pending = pendingPairing else { return }
-        pendingPairing = nil
 
         if trustHost {
             setTrustedPairHost(pending.serverHost, trusted: true)
         }
 
-        serverURL = pending.serverURL
-        if let session = pending.sessionID, !session.isEmpty {
-            sessionID = session
-        }
         if let oneTimeCode = pending.pairCode {
             Task {
                 await exchangePairCode(
@@ -1274,6 +1580,11 @@ final class VoiceAgentViewModel: ObservableObject {
             return
         }
         if let token = pending.legacyToken {
+            pendingPairing = nil
+            serverURL = pending.serverURL
+            if let session = pending.sessionID, !session.isEmpty {
+                sessionID = session
+            }
             apiToken = token
             persistSettings()
             statusText = "Paired successfully (legacy token)"
@@ -1570,7 +1881,7 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func isTerminalStatus(_ status: String) -> Bool {
-        status == "completed" || status == "failed" || status == "rejected" || status == "cancelled"
+        status == "completed" || status == "failed" || status == "rejected" || status == "blocked" || status == "cancelled"
     }
 
     private func applyTerminalRunStateIfNeeded(_ run: RunRecord) {
@@ -1626,6 +1937,11 @@ final class VoiceAgentViewModel: ObservableObject {
             if runEndedAt == nil {
                 runEndedAt = Date()
             }
+        case "run.blocked":
+            runPhaseText = "Needs Input"
+            if runEndedAt == nil {
+                runEndedAt = Date()
+            }
         case "run.failed", "run.rejected":
             runPhaseText = "Failed"
             if runEndedAt == nil {
@@ -1666,6 +1982,8 @@ final class VoiceAgentViewModel: ObservableObject {
             return message
         case "run.failed":
             return message
+        case "run.blocked":
+            return nil
         case "run.cancelled":
             return message
         default:
@@ -1856,11 +2174,13 @@ final class VoiceAgentViewModel: ObservableObject {
             )
             self.apiToken = response.apiToken
             self.sessionID = response.sessionId
+            self.serverURL = serverURL
             self.backendSecurityMode = response.securityMode
             _ = try? await self.refreshRuntimeConfiguration()
             self.persistSettings()
             self.errorText = ""
             self.statusText = "Paired successfully (\(response.securityMode))"
+            self.pendingPairing = nil
             self.persistActiveThreadSnapshot()
         } catch {
             self.errorText = error.localizedDescription
@@ -2162,7 +2482,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
     private func isTerminalStatusText(_ value: String) -> Bool {
         let lower = value.lowercased()
-        return lower.contains("completed") || lower.contains("failed") || lower.contains("cancelled") || lower.contains("rejected")
+        return lower.contains("completed") || lower.contains("failed") || lower.contains("cancelled") || lower.contains("rejected") || lower.contains("blocked")
     }
 
     private func phaseText(forStatusText value: String) -> String {
@@ -2179,6 +2499,8 @@ final class VoiceAgentViewModel: ObservableObject {
         switch status.lowercased() {
         case "completed":
             return "Completed"
+        case "blocked":
+            return "Needs Input"
         case "failed", "rejected":
             return "Failed"
         case "cancelled":
@@ -2223,6 +2545,18 @@ final class VoiceAgentViewModel: ObservableObject {
             return parsed
         }
         return nil
+    }
+
+    private func humanUnblockRequest(from rawText: String) -> HumanUnblockRequest? {
+        guard let envelope = parseEnvelope(rawText) else { return nil }
+        guard let section = envelope.sections.first(where: {
+            $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "human unblock"
+        }) else {
+            return nil
+        }
+        let instructions = section.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instructions.isEmpty else { return nil }
+        return HumanUnblockRequest(instructions: instructions)
     }
 
     private func maybeAutoFixWorkingDirectory(from error: Error) {

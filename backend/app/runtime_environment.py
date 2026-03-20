@@ -27,6 +27,13 @@ AGENT_HOME_HINTS: dict[AgentExecutorName, str] = {
 }
 
 
+def _resolve_path_value(raw_value: str, *, base_dir: Path) -> Path:
+    path = Path(raw_value).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (base_dir / path).resolve()
+
+
 def load_env_defaults(env_path: Path) -> None:
     if not env_path.exists():
         return
@@ -67,10 +74,14 @@ class RuntimeEnvironment:
     path_access_roots: tuple[Path, ...]
     codex_binary: str
     claude_binary: str
+    codex_home: Path
+    codex_enable_web_search: bool
     codex_model_override: str
     claude_model_override: str
     codex_timeout_sec: int
     claude_timeout_sec: int
+    playwright_output_dir: Path
+    playwright_user_data_dir: Path
     use_agent_context: bool
     runtime_context_file: str
     runtime_context: str
@@ -142,10 +153,35 @@ class RuntimeEnvironment:
 
         codex_binary = os.getenv("VOICE_AGENT_CODEX_BINARY", "codex").strip() or "codex"
         claude_binary = os.getenv("VOICE_AGENT_CLAUDE_BINARY", "claude").strip() or "claude"
+        codex_home = _resolve_path_value(
+            os.getenv(
+                "VOICE_AGENT_CODEX_HOME",
+                os.getenv("CODEX_HOME", str(Path.home() / ".codex")),
+            ).strip()
+            or str(Path.home() / ".codex"),
+            base_dir=backend_root,
+        )
+        codex_enable_web_search = os.getenv("VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH", "true").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
         codex_timeout_sec = int(os.getenv("VOICE_AGENT_CODEX_TIMEOUT_SEC", "900"))
         codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
         claude_model_override = os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
         claude_timeout_sec = int(os.getenv("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", str(codex_timeout_sec)))
+        playwright_output_dir = _resolve_path_value(
+            os.getenv("VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR", "data/playwright").strip() or "data/playwright",
+            base_dir=backend_root,
+        )
+        playwright_user_data_dir = _resolve_path_value(
+            os.getenv("VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR", "data/playwright-profile").strip()
+            or "data/playwright-profile",
+            base_dir=backend_root,
+        )
+        playwright_output_dir.mkdir(parents=True, exist_ok=True)
+        playwright_user_data_dir.mkdir(parents=True, exist_ok=True)
 
         use_agent_context = os.getenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true").strip().lower() not in {
             "0",
@@ -222,10 +258,14 @@ class RuntimeEnvironment:
             path_access_roots=tuple(path_access_roots),
             codex_binary=codex_binary,
             claude_binary=claude_binary,
+            codex_home=codex_home,
+            codex_enable_web_search=codex_enable_web_search,
             codex_model_override=codex_model_override,
             claude_model_override=claude_model_override,
             codex_timeout_sec=codex_timeout_sec,
             claude_timeout_sec=claude_timeout_sec,
+            playwright_output_dir=playwright_output_dir,
+            playwright_user_data_dir=playwright_user_data_dir,
             use_agent_context=use_agent_context,
             runtime_context_file=runtime_context_file,
             runtime_context=runtime_context,

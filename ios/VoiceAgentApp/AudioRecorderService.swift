@@ -79,14 +79,18 @@ final class AudioRecorderService: NSObject {
     }
 
     func stop() -> URL? {
+        let fileURL = currentFileURL
         stopSilenceMonitoring()
         recorder?.stop()
+        recorder = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         silenceConfig = nil
         onSilenceDetected = nil
         recordingStartAt = nil
         silenceStartAt = nil
         hasDeliveredSilenceEvent = false
-        return currentFileURL
+        currentFileURL = nil
+        return fileURL
     }
 
     private func requestPermission() async throws -> Bool {

@@ -1,60 +1,6 @@
 import Foundation
 import SwiftUI
 
-struct BrandHeaderView: View {
-    let isConnected: Bool
-    let statusText: String
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.95, green: 0.97, blue: 1.0),
-                            Color(red: 0.91, green: 0.95, blue: 1.0),
-                            Color(red: 0.96, green: 0.98, blue: 1.0)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(0.55))
-                .blur(radius: 18)
-                .offset(x: 60, y: -34)
-
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 12) {
-                    MobaileLogoMark()
-                        .frame(width: 52, height: 52)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("MOBaiLE")
-                            .font(.title2.weight(.black))
-                        Text("voice-first coding from your pocket")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                Text("Talk to the repo, stream execution progress, and keep the thread context close at hand.")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.primary.opacity(0.78))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(16)
-
-            ConnectionBadge(isConnected: isConnected, statusText: statusText)
-                .padding(12)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.72), lineWidth: 1)
-        )
-    }
-}
-
 private struct MobaileLogoMark: View {
     var body: some View {
         ZStack {
@@ -127,10 +73,13 @@ private struct ConnectionBadge: View {
 private struct StarterPrompt {
     let label: String
     let prompt: String
+    let systemImage: String
+    let detail: String
 }
 
-struct ConversationWelcomeCard: View {
+struct ConversationEmptyStateView: View {
     let isConfigured: Bool
+    let statusText: String
     let canRetryLastPrompt: Bool
     let onOpenSettings: () -> Void
     let onRetryLastPrompt: () -> Void
@@ -139,49 +88,117 @@ struct ConversationWelcomeCard: View {
     private let starterPrompts = [
         StarterPrompt(
             label: "Summarize Repo",
-            prompt: "summarize this repo and point out the most important modules"
+            prompt: "summarize this repo and point out the most important modules",
+            systemImage: "square.stack.3d.up",
+            detail: "Get a quick map of the codebase and where to start."
         ),
         StarterPrompt(
             label: "Run Smoke Test",
-            prompt: "run the recommended smoke test for this project and summarize the result"
+            prompt: "run the recommended smoke test for this project and summarize the result",
+            systemImage: "checkmark.seal",
+            detail: "Validate the current baseline before changing anything."
         ),
         StarterPrompt(
             label: "Review Latest UI",
-            prompt: "review the current UI and suggest the highest-impact improvements"
+            prompt: "review the current UI and suggest the highest-impact improvements",
+            systemImage: "wand.and.stars",
+            detail: "Tighten the current screen before you ask for implementation."
         )
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(
-                isConfigured ? "Ready for a new task" : "Finish setup before you start",
-                systemImage: isConfigured ? "sparkles" : "server.rack"
-            )
-            .font(.headline)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 12) {
+                MobaileLogoMark()
+                    .frame(width: 48, height: 48)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("MOBaiLE")
+                        .font(.title3.weight(.semibold))
+                    Text(isConfigured ? "Threaded repo assistant" : "Voice and workspace agent")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                ConnectionBadge(isConnected: isConfigured, statusText: statusText)
+                    .frame(maxWidth: 150, alignment: .trailing)
+            }
 
             Text(
                 isConfigured
-                    ? "Type or record a prompt and MOBaiLE will stream the run back into this thread."
-                    : "Add a server URL and API token in Settings so sending and voice recording are available."
+                    ? "Talk to the repo, record a voice task, and keep every run anchored to the same workspace thread."
+                    : "Connect your backend once, then send prompts, record voice tasks, and watch live run updates from here."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    isConfigured ? "Start with a focused task" : "Finish setup first",
+                    systemImage: isConfigured ? "sparkles" : "server.rack"
+                )
+                .font(.headline)
+
+                Text(
+                    isConfigured
+                        ? "Choose a starter prompt or write your own below. Keep the first ask narrow and concrete."
+                        : "Add a server URL and API token in Settings. That unlocks sending, recording, and live run updates."
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
             if isConfigured {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Try a quick start")
+                    Text("Starter prompts")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Array(starterPrompts.enumerated()), id: \.offset) { _, prompt in
-                                Button(prompt.label) {
-                                    onUsePrompt(prompt.prompt)
+                    VStack(spacing: 10) {
+                        ForEach(starterPrompts, id: \.label) { prompt in
+                            Button {
+                                onUsePrompt(prompt.prompt)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: prompt.systemImage)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Color.accentColor)
+                                        .frame(width: 32, height: 32)
+                                        .background(Color.accentColor.opacity(0.12))
+                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(prompt.label)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Text(prompt.detail)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+
+                                    Spacer(minLength: 0)
+
+                                    Image(systemName: "arrow.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
                                 }
-                                .buttonStyle(.bordered)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(Color(.systemBackground))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
+                                )
                             }
+                            .buttonStyle(.plain)
                         }
                     }
 
@@ -195,24 +212,76 @@ struct ConversationWelcomeCard: View {
                     }
                 }
             } else {
-                Button {
-                    onOpenSettings()
-                } label: {
-                    Label("Open Settings", systemImage: "slider.horizontal.3")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("What you unlock")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        EmptyStateFeatureRow(
+                            systemImage: "mic.fill",
+                            title: "Voice-first tasks",
+                            detail: "Record a prompt hands-free and send it straight into the thread."
+                        )
+                        EmptyStateFeatureRow(
+                            systemImage: "sparkles.rectangle.stack",
+                            title: "Live run updates",
+                            detail: "Watch planning, execution, and results stream back in one place."
+                        )
+                        EmptyStateFeatureRow(
+                            systemImage: "folder.badge.gearshape",
+                            title: "Workspace control",
+                            detail: "Pick the repo folder and keep future runs anchored to it."
+                        )
+                    }
+
+                    Button {
+                        onOpenSettings()
+                    } label: {
+                        Label("Open Settings", systemImage: "slider.horizontal.3")
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color(.separator).opacity(0.20), lineWidth: 1)
         )
+    }
+}
+
+private struct EmptyStateFeatureRow: View {
+    let systemImage: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28, height: 28)
+                .background(Color.accentColor.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
     }
 }
 

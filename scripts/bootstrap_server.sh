@@ -5,15 +5,17 @@ REPO_URL_DEFAULT="https://github.com/vemundss/MOBaiLE.git"
 INSTALL_DIR_DEFAULT="${HOME}/MOBaiLE"
 BRANCH_DEFAULT=""
 MODE_DEFAULT="safe"
+AUTONOMY_STACK_DEFAULT="auto"
 
 REPO_URL="${REPO_URL_DEFAULT}"
 INSTALL_DIR="${INSTALL_DIR_DEFAULT}"
 BRANCH="${BRANCH_DEFAULT}"
 MODE="${MODE_DEFAULT}"
+AUTONOMY_STACK="${AUTONOMY_STACK_DEFAULT}"
 
 usage() {
   cat <<EOF
-Usage: bash ./scripts/bootstrap_server.sh [--repo-url <url>] [--dir <path>] [--branch <name>] [--mode safe|full-access]
+Usage: bash ./scripts/bootstrap_server.sh [--repo-url <url>] [--dir <path>] [--branch <name>] [--mode safe|full-access] [--with-autonomy-stack|--skip-autonomy-stack]
 
 Bootstraps MOBaiLE backend on a server/host machine:
 1) clone/update repository
@@ -38,13 +40,21 @@ while [[ $# -gt 0 ]]; do
       BRANCH="$2"
       shift 2
       ;;
-    --mode)
-      MODE="$2"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
+      --mode)
+        MODE="$2"
+        shift 2
+        ;;
+      --with-autonomy-stack)
+        AUTONOMY_STACK="true"
+        shift
+        ;;
+      --skip-autonomy-stack)
+        AUTONOMY_STACK="false"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -108,7 +118,13 @@ main() {
   clone_or_update_repo
 
   cd "${INSTALL_DIR}"
-  bash ./scripts/install_backend.sh --mode "${MODE}" --expose-network
+  local install_cmd=(bash ./scripts/install_backend.sh --mode "${MODE}" --expose-network)
+  if [[ "${AUTONOMY_STACK}" == "true" ]]; then
+    install_cmd+=(--with-autonomy-stack)
+  elif [[ "${AUTONOMY_STACK}" == "false" ]]; then
+    install_cmd+=(--skip-autonomy-stack)
+  fi
+  "${install_cmd[@]}"
 
   if [[ "$(uname -s)" == "Darwin" ]]; then
     bash ./scripts/service_macos.sh install

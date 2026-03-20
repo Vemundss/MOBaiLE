@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import time
+import threading
 from io import BytesIO
 from pathlib import Path
 
@@ -62,6 +63,7 @@ def test_profile_memory_seed_and_prompt_block(monkeypatch, tmp_path: Path):
     assert "Persistent AGENTS profile" in built
     assert "Persistent MEMORY" in built
     assert "~/.codex" in built
+    assert "Prefer the least-fragile control surface" in built
     assert "Ask before installing packages user-wide or system-wide." in built
     assert "check calendar today" in built
 
@@ -304,6 +306,26 @@ def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
     chat_events = [e for e in payload["events"] if e["type"] == "chat.message"]
     assert len(chat_events) >= 1
     assert "\"assistant_response\"" in chat_events[0]["message"]
+
+
+def test_calendar_today_returns_structured_unsupported_response_on_linux(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path, provider="mock")
+    module = importlib.import_module("app.main")
+    monkeypatch.setattr(
+        module.os,
+        "uname",
+        lambda: type("Uname", (), {"sysname": "Linux"})(),
+    )
+
+    resp = client.get(
+        "/v1/tools/calendar/today",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 503
+    payload = resp.json()
+    assert payload["supported"] is False
+    assert payload["count"] == 0
+    assert "macOS" in payload["detail"]
 
 
 def test_local_utterance_flow(monkeypatch, tmp_path: Path):
@@ -602,7 +624,10 @@ def test_upload_endpoint_stores_file_inside_allowed_roots(monkeypatch, tmp_path:
         monkeypatch,
         tmp_path,
         provider="mock",
-        extra_env={"VOICE_AGENT_DEFAULT_WORKDIR": str(workdir)},
+        extra_env={
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workdir),
+            "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS": "false",
+        },
     )
     resp = client.post(
         "/v1/uploads",
@@ -627,6 +652,58 @@ def test_upload_endpoint_stores_file_inside_allowed_roots(monkeypatch, tmp_path:
     )
     assert file_resp.status_code == 200
     assert file_resp.content == b"hello from phone"
+
+
+def test_pair_exchange_is_single_use_under_concurrency(monkeypatch, tmp_path: Path):
+    pairing_file = tmp_path / "pairing.json"
+    pairing_file.write_text(
+        (
+            "{"
+            '"server_url":"http://127.0.0.1:8000",'
+            '"api_token":"abc-token",'
+            '"session_id":"iphone-app",'
+            '"pair_code":"pair-1234",'
+            '"pair_code_expires_at":"2999-01-01T00:00:00Z"'
+            "}"
+        ),
+        encoding="utf-8",
+    )
+    client, _ = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        api_token="abc-token",
+        extra_env={"VOICE_AGENT_PAIRING_FILE": str(pairing_file)},
+    )
+    module = importlib.import_module("app.main")
+    original_rotate = module._rotate_pair_code
+
+    def slow_rotate(payload):
+        time.sleep(0.1)
+        return original_rotate(payload)
+
+    monkeypatch.setattr(module, "_rotate_pair_code", slow_rotate)
+
+    responses: list = []
+    start = threading.Event()
+
+    def redeem_pair_code() -> None:
+        start.wait()
+        responses.append(
+            client.post("/v1/pair/exchange", json={"pair_code": "pair-1234", "session_id": "ios1"})
+        )
+
+    threads = [threading.Thread(target=redeem_pair_code) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.set()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(resp.status_code for resp in responses) == [200, 401]
+    assert any(resp.status_code == 200 and resp.json()["api_token"] == "abc-token" for resp in responses)
+    updated = pairing_file.read_text(encoding="utf-8")
+    assert '"pair_code":"pair-1234"' not in updated.replace(" ", "")
 
 
 def test_upload_endpoint_rejects_large_file(monkeypatch, tmp_path: Path):
@@ -799,7 +876,16 @@ def test_capabilities_endpoint_returns_report(monkeypatch, tmp_path: Path):
     capability_ids = {item["id"] for item in payload["capabilities"]}
     assert "codex_cli" in capability_ids
     assert "uv_cli" in capability_ids
+    assert "npx_cli" in capability_ids
     assert "transcribe_provider" in capability_ids
+    assert "codex_web_search" in capability_ids
+    assert "codex_mcp_playwright" in capability_ids
+    assert "codex_mcp_peekaboo" in capability_ids
+    assert "codex_skill_playwright" in capability_ids
+    assert "codex_skill_peekaboo" in capability_ids
+    assert "codex_skill_remote_operator" in capability_ids
+    assert "playwright_persistence" in capability_ids
+    assert "peekaboo_permissions" in capability_ids
     assert "calendar_adapter" in capability_ids
     assert "mail_adapter" in capability_ids
     report_path = tmp_path / "capabilities.json"
@@ -951,6 +1037,72 @@ def test_cancel_codex_run(monkeypatch, tmp_path: Path):
         time.sleep(0.05)
     assert final == "cancelled"
     assert "cancelled" in payload["summary"].lower()
+
+
+def test_codex_human_unblock_transitions_to_blocked(monkeypatch, tmp_path: Path):
+    envelope = json.dumps(
+        {
+            "type": "assistant_response",
+            "version": "1.0",
+            "summary": "Human unblock required",
+            "sections": [
+                {
+                    "title": "Human Unblock",
+                    "body": "Complete the CAPTCHA in the current browser session, then send a resume reply from the phone.",
+                }
+            ],
+            "agenda_items": [],
+            "artifacts": [],
+        }
+    )
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo '{\"type\":\"thread.started\",\"thread_id\":\"thread-blocked\"}'\n"
+        f"echo '{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":{json.dumps(envelope)}}}}}'\n"
+        "sleep 30\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_CODEX_BINARY": "codex",
+            "VOICE_AGENT_CODEX_TIMEOUT_SEC": "60",
+        },
+    )
+
+    create_resp = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "blocked1",
+            "thread_id": "chat-blocked",
+            "utterance_text": "open the site and continue",
+            "executor": "codex",
+        },
+    )
+    assert create_resp.status_code == 200
+    run_id = create_resp.json()["run_id"]
+
+    payload = None
+    for _ in range(80):
+        run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+        assert run_resp.status_code == 200
+        payload = run_resp.json()
+        if payload["status"] != "running":
+            break
+        time.sleep(0.05)
+
+    assert payload is not None
+    assert payload["status"] == "blocked"
+    assert "captcha" in payload["summary"].lower()
+    event_types = [event["type"] for event in payload["events"]]
+    assert "run.blocked" in event_types
 
 
 def test_codex_run_timeout(monkeypatch, tmp_path: Path):

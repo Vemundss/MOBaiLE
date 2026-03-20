@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import platform
 import shutil
@@ -13,11 +14,24 @@ from typing import Callable
 from app.models.schemas import AgendaItem, CapabilitiesResponse, CapabilityProbe
 
 
+def _binary_available(binary: str) -> bool:
+    trimmed = binary.strip()
+    if not trimmed:
+        return False
+    if "/" in trimmed or trimmed.startswith("."):
+        return Path(trimmed).expanduser().exists()
+    return shutil.which(trimmed) is not None
+
+
 def collect_capabilities(
     *,
     security_mode: str,
     codex_binary: str,
     claude_binary: str,
+    codex_home: Path,
+    codex_enable_web_search: bool,
+    playwright_output_dir: Path,
+    playwright_user_data_dir: Path,
     transcribe_provider: str,
     report_path: Path | None = None,
     deep: bool = False,
@@ -30,7 +44,21 @@ def collect_capabilities(
     capabilities.append(_probe_binary("codex_cli", "Codex CLI", codex_binary))
     capabilities.append(_probe_binary("claude_cli", "Claude Code CLI", claude_binary))
     capabilities.append(_probe_binary("uv_cli", "uv package manager", "uv"))
+    capabilities.append(_probe_binary("npx_cli", "npx runtime", "npx"))
     capabilities.append(_probe_transcriber(transcribe_provider))
+    capabilities.append(_probe_codex_search(codex_enable_web_search))
+    capabilities.append(_probe_codex_mcp_server(codex_binary, codex_home, "playwright"))
+    capabilities.append(_probe_codex_mcp_server(codex_binary, codex_home, "peekaboo"))
+    capabilities.append(_probe_codex_skill(codex_home, "playwright"))
+    capabilities.append(_probe_codex_skill(codex_home, "peekaboo"))
+    capabilities.append(_probe_codex_skill(codex_home, "remote-operator"))
+    capabilities.append(
+        _probe_playwright_persistence(
+            output_dir=playwright_output_dir,
+            user_data_dir=playwright_user_data_dir,
+        )
+    )
+    capabilities.append(_probe_peekaboo_permissions(deep=deep))
     capabilities.append(
         _probe_calendar_adapter(
             deep=deep,
@@ -119,6 +147,260 @@ def _probe_transcriber(provider: str) -> CapabilityProbe:
         status="degraded",
         code="unknown_provider",
         message=f"Provider '{normalized}' is not recognized by capability probe.",
+        details=details,
+    )
+
+
+def _probe_codex_search(enabled: bool) -> CapabilityProbe:
+    return CapabilityProbe(
+        id="codex_web_search",
+        title="Codex live web search",
+        status="ready" if enabled else "degraded",
+        code="ok" if enabled else "disabled",
+        message="Codex runs include live web search." if enabled else "Codex live web search is disabled.",
+        details={"enabled": enabled},
+    )
+
+
+def _probe_codex_mcp_server(codex_binary: str, codex_home: Path, server_name: str) -> CapabilityProbe:
+    title = f"Codex MCP: {server_name}"
+    if not _binary_available(codex_binary):
+        return CapabilityProbe(
+            id=f"codex_mcp_{server_name}",
+            title=title,
+            status="blocked",
+            code="missing_dependency",
+            message="Codex CLI is not available, so MCP server configuration cannot be checked.",
+            details={"codex_binary": codex_binary, "codex_home": str(codex_home)},
+        )
+
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(codex_home)
+    try:
+        proc = subprocess.run(
+            [codex_binary, "mcp", "get", server_name, "--json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+        )
+    except Exception as exc:
+        return CapabilityProbe(
+            id=f"codex_mcp_{server_name}",
+            title=title,
+            status="blocked",
+            code="probe_failed",
+            message=f"Failed to inspect Codex MCP server '{server_name}': {exc}",
+            details={"codex_binary": codex_binary, "codex_home": str(codex_home)},
+        )
+
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return CapabilityProbe(
+            id=f"codex_mcp_{server_name}",
+            title=title,
+            status="blocked",
+            code="missing_configuration",
+            message=f"Codex MCP server '{server_name}' is not configured.",
+            details={"codex_binary": codex_binary, "codex_home": str(codex_home)},
+        )
+
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return CapabilityProbe(
+            id=f"codex_mcp_{server_name}",
+            title=title,
+            status="degraded",
+            code="invalid_configuration",
+            message=f"Codex MCP server '{server_name}' returned invalid JSON.",
+            details={"codex_binary": codex_binary, "codex_home": str(codex_home)},
+        )
+
+    enabled = bool(payload.get("enabled", False))
+    transport = payload.get("transport") or {}
+    command = str(transport.get("command", ""))
+    args = [str(item) for item in transport.get("args") or []]
+    details: dict[str, object] = {
+        "codex_home": str(codex_home),
+        "command": command,
+        "args": args,
+    }
+    if not enabled:
+        return CapabilityProbe(
+            id=f"codex_mcp_{server_name}",
+            title=title,
+            status="blocked",
+            code="disabled",
+            message=f"Codex MCP server '{server_name}' is configured but disabled.",
+            details=details,
+        )
+
+    if server_name == "playwright":
+        has_persistence = (
+            "--user-data-dir" in args
+            and "--output-dir" in args
+            and "--save-session" in args
+        )
+        details["persistent_browser_state"] = has_persistence
+        if has_persistence:
+            return CapabilityProbe(
+                id="codex_mcp_playwright",
+                title=title,
+                status="ready",
+                code="ok",
+                message="Codex Playwright MCP is configured with persistent browser state.",
+                details=details,
+            )
+        return CapabilityProbe(
+            id="codex_mcp_playwright",
+            title=title,
+            status="degraded",
+            code="session_persistence_missing",
+            message="Codex Playwright MCP is configured, but browser session persistence is missing.",
+            details=details,
+        )
+
+    return CapabilityProbe(
+        id=f"codex_mcp_{server_name}",
+        title=title,
+        status="ready",
+        code="ok",
+        message=f"Codex MCP server '{server_name}' is configured.",
+        details=details,
+    )
+
+
+def _probe_codex_skill(codex_home: Path, skill_name: str) -> CapabilityProbe:
+    skill_path = codex_home / "skills" / skill_name / "SKILL.md"
+    if skill_path.exists():
+        return CapabilityProbe(
+            id=f"codex_skill_{skill_name.replace('-', '_')}",
+            title=f"Codex skill: {skill_name}",
+            status="ready",
+            code="ok",
+            message=f"Codex skill '{skill_name}' is installed.",
+            details={"path": str(skill_path)},
+        )
+    return CapabilityProbe(
+        id=f"codex_skill_{skill_name.replace('-', '_')}",
+        title=f"Codex skill: {skill_name}",
+        status="blocked",
+        code="missing_skill",
+        message=f"Codex skill '{skill_name}' is not installed.",
+        details={"path": str(skill_path)},
+    )
+
+
+def _probe_playwright_persistence(*, output_dir: Path, user_data_dir: Path) -> CapabilityProbe:
+    details = {
+        "output_dir": str(output_dir),
+        "user_data_dir": str(user_data_dir),
+    }
+    output_ready = output_dir.exists() and os.access(output_dir, os.W_OK)
+    user_data_ready = user_data_dir.exists() and os.access(user_data_dir, os.W_OK)
+    if output_ready and user_data_ready:
+        return CapabilityProbe(
+            id="playwright_persistence",
+            title="Playwright persistent state",
+            status="ready",
+            code="ok",
+            message="Persistent Playwright output and browser profile directories are writable.",
+            details=details,
+        )
+    return CapabilityProbe(
+        id="playwright_persistence",
+        title="Playwright persistent state",
+        status="blocked",
+        code="path_unavailable",
+        message="Persistent Playwright output or browser profile directory is not writable.",
+        details=details,
+    )
+
+
+def _probe_peekaboo_permissions(*, deep: bool) -> CapabilityProbe:
+    title = "Peekaboo permissions (macOS)"
+    if platform.system() != "Darwin":
+        return CapabilityProbe(
+            id="peekaboo_permissions",
+            title=title,
+            status="unsupported",
+            code="unsupported_platform",
+            message="Peekaboo desktop permission probe supports macOS only.",
+            unattended_safe=False,
+        )
+    if shutil.which("npx") is None:
+        return CapabilityProbe(
+            id="peekaboo_permissions",
+            title=title,
+            status="blocked",
+            code="missing_dependency",
+            message="npx is not available, so Peekaboo permission status cannot be checked.",
+            unattended_safe=False,
+        )
+
+    try:
+        proc = subprocess.run(
+            ["npx", "-y", "@steipete/peekaboo", "permissions", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=20 if deep else 12,
+        )
+    except Exception as exc:
+        return CapabilityProbe(
+            id="peekaboo_permissions",
+            title=title,
+            status="blocked",
+            code="probe_failed",
+            message=f"Peekaboo permission probe failed: {exc}",
+            unattended_safe=False,
+        )
+
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return CapabilityProbe(
+            id="peekaboo_permissions",
+            title=title,
+            status="blocked",
+            code="probe_failed",
+            message=proc.stderr.strip() or "Peekaboo permission probe failed.",
+            unattended_safe=False,
+        )
+
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return CapabilityProbe(
+            id="peekaboo_permissions",
+            title=title,
+            status="blocked",
+            code="invalid_probe_output",
+            message="Peekaboo permission probe returned invalid JSON.",
+            unattended_safe=False,
+        )
+
+    details = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
+    permissions = details.get("permissions", []) if isinstance(details.get("permissions"), list) else []
+    missing = [
+        str(item.get("name", "unknown"))
+        for item in permissions
+        if item.get("isRequired") and not item.get("isGranted")
+    ]
+    if missing:
+        return CapabilityProbe(
+            id="peekaboo_permissions",
+            title=title,
+            status="blocked",
+            code="permission_required",
+            message=f"Missing required macOS permissions for unattended desktop control: {', '.join(missing)}.",
+            unattended_safe=False,
+            details=details,
+        )
+    return CapabilityProbe(
+        id="peekaboo_permissions",
+        title=title,
+        status="ready",
+        code="ok",
+        message="Peekaboo reports required macOS permissions are granted.",
+        unattended_safe=False,
         details=details,
     )
 

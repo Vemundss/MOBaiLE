@@ -45,6 +45,14 @@ If you prefer a no-clone / managed install in `~/MOBaiLE`, use the bootstrap flo
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
 ```
 
+For a more autonomous server-side agent on a trusted private host:
+
+```bash
+bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
+# or:
+npm run setup:server:auto
+```
+
 `bootstrap_server.sh` installs into `~/MOBaiLE` by default, so use `install_backend.sh` when you want to work from this checkout.
 If no Codex/Claude CLI is installed, MOBaiLE keeps the internal `local` executor available for smoke/dev text requests.
 
@@ -61,7 +69,7 @@ Use `xcodegen generate` only after editing `ios/project.yml` or if the checked-i
 
 Install Tailscale on both devices, then follow the full on-the-go setup below.
 
-Need more detail? Jump to [`docs/USAGE.md`](docs/USAGE.md), [`backend/README.md`](backend/README.md), [`ios/README.md`](ios/README.md), or [`scripts/README.md`](scripts/README.md).
+Need more detail? Jump to [`docs/USAGE.md`](docs/USAGE.md), [`docs/AUTONOMY_STACK.md`](docs/AUTONOMY_STACK.md), [`backend/README.md`](backend/README.md), [`ios/README.md`](ios/README.md), or [`scripts/README.md`](scripts/README.md).
 
 ## Why It Feels Useful
 

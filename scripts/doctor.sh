@@ -18,6 +18,26 @@ fail() {
   echo "[FAIL] $1"
 }
 
+read_env_value() {
+  local key="$1"
+  local fallback="${2:-}"
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    printf "%s" "${fallback}"
+    return
+  fi
+  local raw
+  raw="$(awk -v k="${key}" -F= '$1==k {print substr($0, index($0, "=")+1)}' "${ENV_FILE}" | tail -n1)"
+  raw="${raw%\"}"
+  raw="${raw#\"}"
+  raw="${raw%\'}"
+  raw="${raw#\'}"
+  if [[ -z "${raw}" ]]; then
+    printf "%s" "${fallback}"
+    return
+  fi
+  printf "%s" "${raw}"
+}
+
 check_cmd() {
   local cmd="$1"
   if command -v "${cmd}" >/dev/null 2>&1; then
@@ -53,6 +73,11 @@ main() {
   else
     warn "claude not found (executor=claude will fail until installed/logged in)"
   fi
+  if command -v npx >/dev/null 2>&1; then
+    ok "found command: npx"
+  else
+    warn "npx not found (Peekaboo/Playwright MCP servers will not launch until Node.js/npm is installed)"
+  fi
 
   if [[ -f "${BACKEND_DIR}/pyproject.toml" ]]; then
     ok "backend project file exists"
@@ -81,8 +106,68 @@ main() {
     else
       warn "VOICE_AGENT_SECURITY_MODE not set (defaults to safe)"
     fi
+    local codex_home
+    codex_home="$(read_env_value "VOICE_AGENT_CODEX_HOME" "~/.codex")"
+    ok "VOICE_AGENT_CODEX_HOME=${codex_home}"
   else
     warn "backend .env missing. Run scripts/install_backend.sh"
+  fi
+
+  local codex_home
+  codex_home="$(read_env_value "VOICE_AGENT_CODEX_HOME" "~/.codex")"
+  codex_home="${codex_home/#\~/${HOME}}"
+  if [[ "${has_codex}" -eq 1 ]]; then
+    if CODEX_HOME="${codex_home}" codex mcp get playwright --json >/dev/null 2>&1; then
+      ok "Codex MCP configured: playwright"
+    else
+      warn "Codex MCP missing: playwright (run python3 ./scripts/provision_codex_autonomy.py)"
+    fi
+    if CODEX_HOME="${codex_home}" codex mcp get peekaboo --json >/dev/null 2>&1; then
+      ok "Codex MCP configured: peekaboo"
+    else
+      warn "Codex MCP missing: peekaboo (run python3 ./scripts/provision_codex_autonomy.py)"
+    fi
+    if [[ -f "${codex_home}/skills/playwright/SKILL.md" ]]; then
+      ok "Codex skill installed: playwright"
+    else
+      warn "Codex skill missing: playwright"
+    fi
+    if [[ -f "${codex_home}/skills/peekaboo/SKILL.md" ]]; then
+      ok "Codex skill installed: peekaboo"
+    else
+      warn "Codex skill missing: peekaboo"
+    fi
+    if [[ -f "${codex_home}/skills/remote-operator/SKILL.md" ]]; then
+      ok "Codex skill installed: remote-operator"
+    else
+      warn "Codex skill missing: remote-operator"
+    fi
+  fi
+
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v npx >/dev/null 2>&1; then
+    local permissions_json
+    permissions_json="$(npx -y @steipete/peekaboo permissions --json 2>/dev/null || true)"
+    if [[ -n "${permissions_json}" ]]; then
+      if PERMISSIONS_JSON="${permissions_json}" python3 - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["PERMISSIONS_JSON"])
+permissions = payload.get("data", {}).get("permissions", [])
+missing = [item.get("name", "unknown") for item in permissions if item.get("isRequired") and not item.get("isGranted")]
+if missing:
+    print(", ".join(missing))
+    sys.exit(1)
+PY
+      then
+        ok "Peekaboo reports required macOS permissions are granted"
+      else
+        warn "Peekaboo is missing required macOS permissions"
+      fi
+    else
+      warn "could not read Peekaboo permission status"
+    fi
   fi
 
   if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then

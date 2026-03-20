@@ -511,6 +511,7 @@
               "assistant.message",
               "run.completed",
               "run.failed",
+              "run.blocked",
               "run.cancelled"
             ],
             "title": "Type",
@@ -717,6 +718,7 @@
               "completed",
               "failed",
               "rejected",
+              "blocked",
               "cancelled"
             ],
             "title": "Status",
@@ -789,6 +791,7 @@
               "completed",
               "failed",
               "rejected",
+              "blocked",
               "cancelled"
             ],
             "title": "Status",

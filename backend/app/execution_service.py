@@ -12,6 +12,7 @@ from typing import Callable
 from app.claude_text import claude_assistant_text
 from app.claude_text import claude_session_id
 from app.claude_text import parse_claude_stream_event
+from app.chat_envelope import find_human_unblock_section
 from app.codex_text import CodexAssistantExtractor
 from app.codex_text import parse_codex_json_event
 from app.executors.claude_executor import ClaudeExecutor
@@ -190,6 +191,7 @@ class ExecutionService:
         chat_extractor = CodexAssistantExtractor(prompt, leak_markers) if executor == "codex" else None
         timed_out = False
         cancelled = False
+        blocked = False
         timeout_sec = self._agent_timeout_sec(executor)
         deadline = time.monotonic() + timeout_sec
         linked_session_id = resume_session_id
@@ -206,7 +208,7 @@ class ExecutionService:
                     if executor == "codex":
                         parsed = parse_codex_json_event(message)
                         if parsed is not None:
-                            linked_session_id = self._handle_codex_event(
+                            linked_session_id, blocked = self._handle_codex_event(
                                 run_id,
                                 executor,
                                 session_id,
@@ -214,16 +216,22 @@ class ExecutionService:
                                 linked_session_id,
                                 parsed,
                             )
+                            if blocked:
+                                break
                             continue
 
                         self.run_state.append_log_message(run_id, message, action_index=0)
                         assert chat_extractor is not None
                         for structured in chat_extractor.consume(message):
-                            self.run_state.append_assistant_payload(run_id, structured)
+                            if self._append_assistant_payload(run_id, structured):
+                                blocked = True
+                                break
+                        if blocked:
+                            break
                     else:
                         parsed = parse_claude_stream_event(message)
                         if parsed is not None:
-                            linked_session_id = self._handle_claude_event(
+                            linked_session_id, blocked = self._handle_claude_event(
                                 run_id,
                                 executor,
                                 session_id,
@@ -231,6 +239,8 @@ class ExecutionService:
                                 linked_session_id,
                                 parsed,
                             )
+                            if blocked:
+                                break
                             continue
 
                         self.run_state.append_log_message(run_id, message, action_index=0)
@@ -241,15 +251,20 @@ class ExecutionService:
             if self.run_state.is_cancelled(run_id):
                 cancelled = True
                 break
+            run = self.run_state.get_run(run_id)
+            if run is not None and run.status == "blocked":
+                blocked = True
+                break
             if time.monotonic() > deadline:
                 timed_out = True
                 break
 
         if chat_extractor is not None:
             for structured in chat_extractor.flush():
-                self.run_state.append_assistant_payload(run_id, structured)
+                if self._append_assistant_payload(run_id, structured):
+                    blocked = True
 
-        if cancelled or timed_out:
+        if cancelled or timed_out or blocked:
             if proc.poll() is None:
                 proc.terminate()
                 try:
@@ -263,19 +278,34 @@ class ExecutionService:
         with self._active_procs_lock:
             self._active_procs.pop(run_id, None)
 
-        self.run_state.append_event(
-            run_id,
-            ExecutionEvent(
-                type="action.completed",
-                action_index=0,
-                message=f"{executor} exec finished (exit={exit_code})",
-            ),
-        )
+        if not blocked:
+            self.run_state.append_event(
+                run_id,
+                ExecutionEvent(
+                    type="action.completed",
+                    action_index=0,
+                    message=f"{executor} exec finished (exit={exit_code})",
+                ),
+            )
 
         if cancelled:
             summary = "Run cancelled by user"
             self.run_state.append_event(run_id, ExecutionEvent(type="run.cancelled", message=summary))
             self.run_state.set_run_status(run_id, "cancelled", summary)
+            self.profile_store.sync_memory_from_workdir(workdir_memory_path)
+            return
+        if blocked:
+            current = self.run_state.get_run(run_id)
+            summary = current.summary if current is not None else "Human unblock required"
+            self.run_state.append_event(
+                run_id,
+                ExecutionEvent(
+                    type="action.completed",
+                    action_index=0,
+                    message=f"{executor} exec blocked awaiting user input",
+                ),
+            )
+            self.run_state.set_run_status(run_id, "blocked", summary)
             self.profile_store.sync_memory_from_workdir(workdir_memory_path)
             return
         if timed_out:
@@ -296,7 +326,12 @@ class ExecutionService:
 
     def _make_agent_executor(self, executor: AgentExecutorName, workdir: Path) -> CodexExecutor | ClaudeExecutor:
         if executor == "codex":
-            return CodexExecutor(workdir)
+            return CodexExecutor(
+                workdir,
+                binary=self.environment.codex_binary,
+                codex_home=self.environment.codex_home,
+                enable_web_search=self.environment.codex_enable_web_search,
+            )
         if executor == "claude":
             return ClaudeExecutor(workdir)
         raise ValueError(f"unsupported agent executor '{executor}'")
@@ -349,7 +384,7 @@ class ExecutionService:
         client_thread_id: str | None,
         linked_session_id: str | None,
         payload: dict[str, object],
-    ) -> str | None:
+    ) -> tuple[str | None, bool]:
         event_type = str(payload.get("type", "")).strip()
         if event_type == "thread.started":
             agent_session_id = str(payload.get("thread_id", "")).strip()
@@ -365,15 +400,15 @@ class ExecutionService:
                     f"{executor} session linked ({agent_session_id})",
                     action_index=0,
                 )
-                return agent_session_id
+                return agent_session_id, False
         elif event_type == "item.completed":
             item = payload.get("item")
             if isinstance(item, dict):
                 item_type = str(item.get("type", "")).strip()
                 item_text = str(item.get("text", "")).strip()
                 if item_type == "agent_message" and item_text:
-                    self.run_state.append_assistant_payload(run_id, item_text)
-        return linked_session_id
+                    return linked_session_id, self._append_assistant_payload(run_id, item_text)
+        return linked_session_id, False
 
     def _handle_claude_event(
         self,
@@ -383,7 +418,7 @@ class ExecutionService:
         client_thread_id: str | None,
         linked_session_id: str | None,
         payload: dict[str, object],
-    ) -> str | None:
+    ) -> tuple[str | None, bool]:
         agent_session_id = claude_session_id(payload)
         if agent_session_id and client_thread_id and agent_session_id != linked_session_id:
             self.run_state.run_store.set_agent_session_id(
@@ -400,5 +435,22 @@ class ExecutionService:
             )
         assistant_text = claude_assistant_text(payload)
         if assistant_text:
-            self.run_state.append_assistant_payload(run_id, assistant_text)
-        return linked_session_id
+            return linked_session_id, self._append_assistant_payload(run_id, assistant_text)
+        return linked_session_id, False
+
+    def _append_assistant_payload(self, run_id: str, raw_text: str) -> bool:
+        envelope = self.run_state.append_assistant_payload(run_id, raw_text)
+        unblock = find_human_unblock_section(envelope)
+        if unblock is None:
+            return False
+        run = self.run_state.get_run(run_id)
+        if run is not None and run.status == "blocked":
+            return True
+        details = unblock.body.strip() or "Human unblock required"
+        summary = details.splitlines()[0].strip() or "Human unblock required"
+        self.run_state.append_event(
+            run_id,
+            ExecutionEvent(type="run.blocked", message=details),
+        )
+        self.run_state.set_run_status(run_id, "blocked", summary)
+        return True

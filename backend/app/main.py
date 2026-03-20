@@ -78,6 +78,7 @@ EXECUTION_SERVICE = ExecutionService(
 )
 PAIR_ATTEMPTS_LOCK = threading.Lock()
 PAIR_ATTEMPTS: dict[str, list[float]] = {}
+PAIR_EXCHANGE_LOCK = threading.Lock()
 
 
 @app.get("/health")
@@ -111,30 +112,31 @@ async def require_api_token(request: Request, call_next):
 @app.post("/v1/pair/exchange", response_model=PairExchangeResponse)
 def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchangeResponse:
     _enforce_pair_rate_limit(request.client.host if request.client else "unknown")
-    pairing = _read_pairing_file()
-    expected = str(pairing.get("pair_code", "")).strip()
-    expires_at = str(pairing.get("pair_code_expires_at", "")).strip()
-    if not expected or not expires_at:
-        raise HTTPException(status_code=503, detail="pairing code is not configured")
-    if not secrets.compare_digest(payload.pair_code.strip(), expected):
-        raise HTTPException(status_code=401, detail="invalid pairing code")
-    try:
-        expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise HTTPException(status_code=503, detail="pairing code configuration is invalid") from exc
-    if datetime.now(tz=expires.tzinfo) > expires:
-        raise HTTPException(status_code=401, detail="pairing code expired")
+    with PAIR_EXCHANGE_LOCK:
+        pairing = _read_pairing_file()
+        expected = str(pairing.get("pair_code", "")).strip()
+        expires_at = str(pairing.get("pair_code_expires_at", "")).strip()
+        if not expected or not expires_at:
+            raise HTTPException(status_code=503, detail="pairing code is not configured")
+        if not secrets.compare_digest(payload.pair_code.strip(), expected):
+            raise HTTPException(status_code=401, detail="invalid pairing code")
+        try:
+            expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail="pairing code configuration is invalid") from exc
+        if datetime.now(tz=expires.tzinfo) > expires:
+            raise HTTPException(status_code=401, detail="pairing code expired")
 
-    _rotate_pair_code(pairing)
-    api_token = str(pairing.get("api_token", "")).strip() or ENV.api_token
-    if not api_token:
-        raise HTTPException(status_code=503, detail="server auth token is not configured")
-    session_id = payload.session_id or str(pairing.get("session_id", "iphone-app")).strip() or "iphone-app"
-    return PairExchangeResponse(
-        api_token=api_token,
-        session_id=session_id,
-        security_mode=ENV.security_mode,  # type: ignore[arg-type]
-    )
+        _rotate_pair_code(pairing)
+        api_token = str(pairing.get("api_token", "")).strip() or ENV.api_token
+        if not api_token:
+            raise HTTPException(status_code=503, detail="server auth token is not configured")
+        session_id = payload.session_id or str(pairing.get("session_id", "iphone-app")).strip() or "iphone-app"
+        return PairExchangeResponse(
+            api_token=api_token,
+            session_id=session_id,
+            security_mode=ENV.security_mode,  # type: ignore[arg-type]
+        )
 
 
 @app.post("/v1/utterances", response_model=UtteranceResponse)
@@ -376,6 +378,10 @@ def get_capabilities(
         security_mode=ENV.security_mode,
         codex_binary=ENV.codex_binary,
         claude_binary=ENV.claude_binary,
+        codex_home=ENV.codex_home,
+        codex_enable_web_search=ENV.codex_enable_web_search,
+        playwright_output_dir=ENV.playwright_output_dir,
+        playwright_user_data_dir=ENV.playwright_user_data_dir,
         transcribe_provider=TRANSCRIBER.provider,
         report_path=ENV.capabilities_report_path,
         deep=deep,
@@ -386,9 +392,22 @@ def get_capabilities(
 
 @app.get("/v1/tools/calendar/today")
 def get_calendar_today() -> dict[str, object]:
-    events = _fetch_today_calendar_events()
     today = datetime.now().strftime("%A, %B %d, %Y")
+    try:
+        events = _fetch_today_calendar_events()
+    except RuntimeError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "supported": False,
+                "date": today,
+                "count": 0,
+                "events": [],
+                "detail": str(exc),
+            },
+        )
     return {
+        "supported": True,
         "date": today,
         "count": len(events),
         "events": [event.model_dump() for event in events],
@@ -413,7 +432,10 @@ def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
     target = Path(path.strip()).expanduser()
     if target.is_absolute():
         target = target.resolve()
-        if not ENV.allow_absolute_file_reads:
+        # Uploaded artifacts are returned as absolute paths by design, so keep those readable
+        # even in safe mode without reopening arbitrary absolute file access.
+        upload_artifact = ENV._is_relative_to(target, ENV.uploads_root)
+        if not ENV.allow_absolute_file_reads and not upload_artifact:
             raise HTTPException(status_code=403, detail="absolute file paths are disabled in safe mode")
     else:
         target = (ENV.default_workdir / target).resolve()

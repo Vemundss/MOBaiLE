@@ -1,12 +1,14 @@
 {
   "name": "mobaile",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0",
   "description": "MOBaiLE onboarding and utility command wrappers",
   "scripts": {
     "setup:server": "bash ./scripts/bootstrap_server.sh --mode safe",
     "setup:server:full": "bash ./scripts/bootstrap_server.sh --mode full-access",
+    "setup:server:auto": "bash ./scripts/bootstrap_server.sh --mode full-access --with-autonomy-stack",
     "backend:install": "bash ./scripts/install_backend.sh --mode safe",
+    "backend:install:auto": "bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack",
     "backend:start": "cd backend && bash ./run_backend.sh",
     "doctor": "bash ./scripts/doctor.sh",
     "pair:qr": "bash ./scripts/pairing_qr.sh",

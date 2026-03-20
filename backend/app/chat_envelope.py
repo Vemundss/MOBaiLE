@@ -170,3 +170,10 @@ def coerce_assistant_text_to_envelope(raw_text: str) -> ChatEnvelope:
         sections=sections,
         artifacts=artifacts,
     )
+
+
+def find_human_unblock_section(envelope: ChatEnvelope) -> ChatSection | None:
+    for section in envelope.sections:
+        if section.title.strip().lower() == "human unblock":
+            return section
+    return None

@@ -61,6 +61,13 @@ def build_agent_prompt(
             f"- Do not store MOBaiLE persistence in `{global_agent_home}`.\n"
             "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
         )
+    autonomy_block = (
+        "Remote-control guidance:\n"
+        "- Prefer the least-fragile control surface: local CLI/API first, browser automation second, desktop UI automation third.\n"
+        "- Reuse persistent browser or app sessions when available to avoid repeated logins and anti-bot friction.\n"
+        "- If blocked by CAPTCHAs, 2FA, OS permissions, or secrets you do not have, preserve state and ask for the exact unblock step instead of retrying blindly.\n"
+        "- When a human unblock is required, include a `## Human Unblock` section with the precise action and what the user should send back after completing it.\n\n"
+    )
     hygiene_block = (
         "Execution hygiene:\n"
         "- Keep generated files/images inside the current working directory.\n"
@@ -79,6 +86,7 @@ def build_agent_prompt(
         "You are running through MOBaiLE.\n\n"
         f"{runtime_block}"
         f"{session_block}"
+        f"{autonomy_block}"
         f"{hygiene_block}"
         "User request:\n"
         f"{user_prompt}"

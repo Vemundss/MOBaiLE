@@ -9,6 +9,7 @@ PAIRING_FILE="${BACKEND_DIR}/pairing.json"
 SECURITY_MODE="safe"
 PAIR_CODE_TTL_MIN="30"
 EXPOSE_NETWORK="false"
+PROVISION_AUTONOMY_STACK="auto"
 
 require_cmd() {
   local cmd="$1"
@@ -123,6 +124,10 @@ write_env_file() {
   local codex_unrestricted="false"
   local allow_abs_reads="false"
   local host_value="127.0.0.1"
+  local codex_home_value="~/.codex"
+  local codex_search_value="true"
+  local playwright_output_value="data/playwright"
+  local playwright_profile_value="data/playwright-profile"
   if [[ "${EXPOSE_NETWORK}" == "true" ]]; then
     host_value="0.0.0.0"
   fi
@@ -145,6 +150,10 @@ write_env_file() {
         seen_codex=0
         seen_reads=0
         seen_host=0
+        seen_codex_home=0
+        seen_codex_search=0
+        seen_playwright_output=0
+        seen_playwright_profile=0
       }
       /^VOICE_AGENT_HOST=/ {
         print "VOICE_AGENT_HOST=" host
@@ -166,14 +175,43 @@ write_env_file() {
         seen_reads=1
         next
       }
+      /^VOICE_AGENT_CODEX_HOME=/ {
+        seen_codex_home=1
+        print
+        next
+      }
+      /^VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=/ {
+        seen_codex_search=1
+        print
+        next
+      }
+      /^VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=/ {
+        seen_playwright_output=1
+        print
+        next
+      }
+      /^VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=/ {
+        seen_playwright_profile=1
+        print
+        next
+      }
       { print }
       END {
         if (!seen_host) print "VOICE_AGENT_HOST=" host
         if (!seen_mode) print "VOICE_AGENT_SECURITY_MODE=" mode
         if (!seen_codex) print "VOICE_AGENT_CODEX_UNRESTRICTED=" codex
         if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
+        if (!seen_codex_home) print "VOICE_AGENT_CODEX_HOME=" codex_home
+        if (!seen_codex_search) print "VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=" codex_search
+        if (!seen_playwright_output) print "VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=" playwright_output
+        if (!seen_playwright_profile) print "VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=" playwright_profile
       }
-      ' "${ENV_FILE}" > "${tmp_env}"
+      ' \
+      -v codex_home="${codex_home_value}" \
+      -v codex_search="${codex_search_value}" \
+      -v playwright_output="${playwright_output_value}" \
+      -v playwright_profile="${playwright_profile_value}" \
+      "${ENV_FILE}" > "${tmp_env}"
     mv "${tmp_env}" "${ENV_FILE}"
     return
   fi
@@ -185,7 +223,9 @@ VOICE_AGENT_PORT=8000
 VOICE_AGENT_SECURITY_MODE=${SECURITY_MODE}
 VOICE_AGENT_DEFAULT_EXECUTOR=codex
 VOICE_AGENT_CODEX_BINARY=codex
+VOICE_AGENT_CODEX_HOME=${codex_home_value}
 VOICE_AGENT_CODEX_UNRESTRICTED=${codex_unrestricted}
+VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=${codex_search_value}
 VOICE_AGENT_CODEX_GUARDRAILS=warn
 VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]
 VOICE_AGENT_CODEX_USE_CONTEXT=true
@@ -195,6 +235,8 @@ VOICE_AGENT_CLAUDE_BINARY=claude
 # VOICE_AGENT_CLAUDE_MODEL=sonnet
 # VOICE_AGENT_CLAUDE_PERMISSION_MODE=acceptEdits
 VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=${allow_abs_reads}
+VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=${playwright_output_value}
+VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=${playwright_profile_value}
 VOICE_AGENT_PAIR_CODE_TTL_MIN=${PAIR_CODE_TTL_MIN}
 # Optional model override:
 # VOICE_AGENT_CODEX_MODEL=gpt-5.1
@@ -228,8 +270,16 @@ main() {
         EXPOSE_NETWORK="true"
         shift
         ;;
+      --with-autonomy-stack)
+        PROVISION_AUTONOMY_STACK="true"
+        shift
+        ;;
+      --skip-autonomy-stack)
+        PROVISION_AUTONOMY_STACK="false"
+        shift
+        ;;
       -h|--help)
-        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--expose-network]"
+        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
         exit 0
         ;;
       *)
@@ -260,6 +310,19 @@ main() {
     cd "${BACKEND_DIR}"
     uv sync
   )
+
+  if [[ "${PROVISION_AUTONOMY_STACK}" == "auto" ]]; then
+    if [[ "${SECURITY_MODE}" == "full-access" ]]; then
+      PROVISION_AUTONOMY_STACK="true"
+    else
+      PROVISION_AUTONOMY_STACK="false"
+    fi
+  fi
+
+  if [[ "${PROVISION_AUTONOMY_STACK}" == "true" ]]; then
+    echo "Provisioning Codex autonomy stack..."
+    python3 "${REPO_ROOT}/scripts/provision_codex_autonomy.py" --mode "${SECURITY_MODE}" || true
+  fi
 
   if [[ -f "${ENV_FILE}" ]]; then
     token="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' "${ENV_FILE}")"
@@ -305,6 +368,12 @@ EOF
   echo
   echo "Runtime security mode:"
   echo "  ${SECURITY_MODE}"
+  echo "Autonomy stack:"
+  if [[ "${PROVISION_AUTONOMY_STACK}" == "true" ]]; then
+    echo "  enabled (Codex MCP + skills provisioning attempted)"
+  else
+    echo "  disabled"
+  fi
   echo "Bind host:"
   if [[ "${EXPOSE_NETWORK}" == "true" ]]; then
     echo "  0.0.0.0 (network-exposed)"
@@ -334,6 +403,9 @@ EOF
   echo "Generate pairing QR deep link (recommended):"
   echo "  bash ./scripts/pairing_qr.sh"
   echo "  # then scan with iPhone Camera and open in MOBaiLE"
+  echo
+  echo "Re-provision the autonomous Codex stack later:"
+  echo "  python3 ./scripts/provision_codex_autonomy.py --mode ${SECURITY_MODE}"
   if [[ "${EXPOSE_NETWORK}" == "true" && "${server_url}" == "http://127.0.0.1:8000" ]]; then
     echo
     echo "Warning: could not detect a LAN/Tailscale IP, so pairing URL still points to 127.0.0.1." >&2

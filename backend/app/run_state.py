@@ -74,19 +74,21 @@ class RunState:
             ExecutionEvent(type="chat.message", message=envelope.model_dump_json()),
         )
 
-    def append_assistant_payload(self, run_id: str, raw_text: str) -> None:
+    def append_assistant_payload(self, run_id: str, raw_text: str) -> ChatEnvelope:
         payload = parse_chat_envelope_payload(raw_text)
         if payload is not None:
+            envelope = ChatEnvelope.model_validate(payload)
             self.append_event(
                 run_id,
                 ExecutionEvent(type="chat.message", message=json.dumps(payload)),
             )
-            return
+            return envelope
         envelope = coerce_assistant_text_to_envelope(raw_text)
         self.append_event(
             run_id,
             ExecutionEvent(type="chat.message", message=envelope.model_dump_json()),
         )
+        return envelope
 
     def append_log_message(self, run_id: str, message: str, *, action_index: int | None = 0) -> None:
         text = message.strip()
@@ -104,7 +106,7 @@ class RunState:
                 return
             run.status = status
             run.summary = summary
-            if status in {"completed", "failed", "rejected", "cancelled"}:
+            if status in {"completed", "failed", "rejected", "blocked", "cancelled"}:
                 self._cancelled.discard(run_id)
             self.run_store.update_run_status(run_id, status, summary)
 
@@ -117,7 +119,7 @@ class RunState:
             run = self._runs.get(run_id)
             if not run:
                 raise KeyError("missing")
-            if run.status in {"completed", "failed", "rejected", "cancelled"}:
+            if run.status in {"completed", "failed", "rejected", "blocked", "cancelled"}:
                 raise ValueError(run.status)
             self._cancelled.add(run_id)
             return run
@@ -180,7 +182,7 @@ class RunState:
                 payload = json.dumps(event.model_dump())
                 yield f"event: {event.type}\ndata: {payload}\n\n"
 
-            done = status in {"completed", "failed", "rejected", "cancelled"}
+            done = status in {"completed", "failed", "rejected", "blocked", "cancelled"}
             if done and not pending_events:
                 break
 

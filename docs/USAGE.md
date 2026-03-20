@@ -20,6 +20,12 @@ Fresh host/server bootstrap (single command after clone):
 bash ./scripts/bootstrap_server.sh --mode safe
 ```
 
+Autonomous trusted-host setup:
+
+```bash
+bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
+```
+
 `install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
 Safe mode defaults:
 - restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
@@ -168,7 +174,9 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_SECURITY_MODE=safe|full-access` controls security defaults.
 - `VOICE_AGENT_DEFAULT_EXECUTOR=codex|claude|local` selects the app/backend default executor.
   - if the selected agent CLI is unavailable, backend falls back to another available agent executor and finally to the internal `local` fallback
+- `VOICE_AGENT_CODEX_HOME=~/.codex` selects the Codex home used for auth, MCP config, and skills.
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (recommended only for private trusted hosts).
+- `VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=true` enables Codex live web search for backend-launched runs.
 - `VOICE_AGENT_CODEX_GUARDRAILS=warn` adds prompt-level destructive-op detection (`off|warn|enforce`).
 - `VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]` explicit token to bypass guardrail warnings.
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
@@ -183,6 +191,8 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for `local`, `codex`, and `claude` runs.
 - `VOICE_AGENT_WORKDIR_ROOT=/path` optionally constrains all requested working directories to a root.
 - `VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false` blocks absolute `/v1/files` access in safe mode.
+- `VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=data/playwright` stores Playwright artifacts and persisted session output.
+- `VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=data/playwright-profile` stores the persistent Playwright browser profile.
 - `VOICE_AGENT_FILE_ROOTS=/path1,/path2` restricts readable file roots for `/v1/files`.
   - in `full-access` mode with absolute reads enabled and no explicit `VOICE_AGENT_FILE_ROOTS`, file browsing stays unrestricted
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
@@ -191,6 +201,7 @@ Notes:
 - Context injection affects agent runs launched via MOBaiLE backend only.
 - Direct terminal usage (`codex ...` / `claude ...`) is unchanged unless you configure that separately.
 - Runtime config advertises agent executors (`codex`, `claude`) for normal UX; `local` is kept for internal smoke/dev flows.
+- `/v1/capabilities` now reports autonomy readiness for Codex MCP, managed skills, Peekaboo permissions, and Playwright persistence paths.
 - `GET /v1/config` now includes a generic `executors[]` descriptor list so clients can render executor availability/default/model data without provider-specific fields.
 - Per-run request controls:
   - `response_mode=concise` is the current supported mobile chat mode.
@@ -237,6 +248,12 @@ Probe runtime capabilities (deep check, may trigger app permission prompts on ma
 ```bash
 curl -s -H "Authorization: Bearer ${TOKEN}" \
   "http://127.0.0.1:8000/v1/capabilities?deep=true&launch_apps=true"
+```
+
+Provision Codex for autonomous remote control:
+
+```bash
+python3 ./scripts/provision_codex_autonomy.py --mode full-access
 ```
 
 List an existing directory (read-only):
