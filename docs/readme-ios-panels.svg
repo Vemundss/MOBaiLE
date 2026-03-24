@@ -1,0 +1,109 @@
+<svg width="1280" height="820" viewBox="0 0 1280 820" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="80" y1="60" x2="1180" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FBFF"/>
+      <stop offset="1" stop-color="#EEF4FF"/>
+    </linearGradient>
+    <linearGradient id="blueBubble" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#3A84FF"/>
+      <stop offset="1" stop-color="#2468E8"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="1280" height="820" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feOffset dy="12"/>
+      <feGaussianBlur stdDeviation="18"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0784314 0 0 0 0 0.133333 0 0 0 0 0.235294 0 0 0 0.10 0"/>
+      <feBlend in2="SourceGraphic" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="820" rx="36" fill="url(#bg)"/>
+  <circle cx="154" cy="132" r="86" fill="#E6EFFF"/>
+  <circle cx="1120" cy="180" r="112" fill="#EAF5FF"/>
+  <circle cx="1090" cy="680" r="120" fill="#F2F7FF"/>
+
+  <text x="640" y="88" text-anchor="middle" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="34" font-weight="700">MOBaiLE app surfaces</text>
+  <text x="640" y="122" text-anchor="middle" fill="#5B6475" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18">Configured start, active thread, and voice capture inside one iPhone workflow.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="76" y="170" width="320" height="560" rx="42" fill="white"/>
+    <rect x="204" y="193" width="64" height="18" rx="9" fill="#0F172A"/>
+    <text x="236" y="240" text-anchor="middle" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="19" font-weight="700">Configured start</text>
+    <rect x="104" y="268" width="264" height="360" rx="28" fill="#F3F6FC" stroke="#D8E1EF"/>
+    <rect x="126" y="292" width="44" height="44" rx="14" fill="#E5EEFF"/>
+    <circle cx="148" cy="314" r="12" fill="#FFFFFF"/>
+    <circle cx="142" cy="310" r="2.5" fill="#2F6FE8"/>
+    <circle cx="154" cy="310" r="2.5" fill="#2F6FE8"/>
+    <rect x="139" y="319" width="18" height="4" rx="2" fill="#2F6FE8"/>
+    <text x="184" y="309" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20" font-weight="700">MOBaiLE</text>
+    <text x="184" y="332" fill="#6B7280" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14">Threaded repo assistant</text>
+    <rect x="262" y="291" width="84" height="34" rx="17" fill="#FFFFFF"/>
+    <text x="304" y="313" text-anchor="middle" fill="#21A365" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700">Connected</text>
+    <text x="126" y="374" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="700">Start with a focused task</text>
+    <text x="126" y="398" fill="#6B7280" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Three starter actions keep the first run narrow and concrete.</text>
+    <rect x="126" y="430" width="220" height="68" rx="18" fill="#FFFFFF"/>
+    <rect x="140" y="447" width="28" height="28" rx="10" fill="#E6F0FF"/>
+    <text x="183" y="456" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="700">Summarize Repo</text>
+    <text x="183" y="477" fill="#6B7280" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">Get a quick map of the codebase.</text>
+    <rect x="126" y="512" width="220" height="68" rx="18" fill="#FFFFFF"/>
+    <rect x="140" y="529" width="28" height="28" rx="10" fill="#E6F0FF"/>
+    <text x="183" y="538" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15" font-weight="700">Run Smoke Test</text>
+    <text x="183" y="559" fill="#6B7280" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">Validate the current baseline.</text>
+    <rect x="102" y="650" width="268" height="56" rx="22" fill="#F3F6FC"/>
+    <rect x="122" y="667" width="138" height="24" rx="12" fill="#FFFFFF"/>
+    <text x="191" y="684" text-anchor="middle" fill="#8B95A7" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">Ask MOBaiLE about this repo</text>
+    <circle cx="334" cy="678" r="18" fill="#3A84FF"/>
+    <path d="M334 670L334 686M326 678H342" stroke="white" stroke-width="2.4" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="480" y="170" width="320" height="560" rx="42" fill="white"/>
+    <rect x="608" y="193" width="64" height="18" rx="9" fill="#0F172A"/>
+    <text x="640" y="240" text-anchor="middle" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="19" font-weight="700">Active thread</text>
+    <rect x="512" y="282" width="182" height="66" rx="22" fill="url(#blueBubble)"/>
+    <text x="530" y="308" fill="white" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="700">You</text>
+    <text x="530" y="331" fill="white" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15">Review the iPhone UI</text>
+    <rect x="512" y="366" width="232" height="132" rx="22" fill="#F3F4F8"/>
+    <text x="530" y="393" fill="#374151" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="700">MOBaiLE</text>
+    <text x="530" y="420" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="16">Completed the polish pass.</text>
+    <rect x="530" y="435" width="196" height="48" rx="14" fill="#FFFFFF"/>
+    <text x="546" y="457" fill="#6B7280" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="700">What changed</text>
+    <text x="546" y="475" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">Less setup noise, steadier composer,</text>
+    <text x="546" y="492" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">clearer starter actions.</text>
+    <rect x="548" y="520" width="212" height="56" rx="22" fill="url(#blueBubble)"/>
+    <text x="566" y="545" fill="white" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15">Which screens next?</text>
+    <rect x="512" y="594" width="236" height="104" rx="22" fill="#F3F4F8"/>
+    <text x="530" y="621" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="16">Capture these three in order.</text>
+    <rect x="530" y="636" width="200" height="46" rx="14" fill="#EAF3FF"/>
+    <text x="546" y="657" fill="#2F6FE8" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="700">Next step</text>
+    <text x="546" y="674" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">Configured start, active thread,</text>
+    <text x="546" y="691" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">and voice capture.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="884" y="170" width="320" height="560" rx="42" fill="white"/>
+    <rect x="1012" y="193" width="64" height="18" rx="9" fill="#0F172A"/>
+    <text x="1044" y="240" text-anchor="middle" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="19" font-weight="700">Voice capture</text>
+    <rect x="916" y="292" width="178" height="60" rx="22" fill="url(#blueBubble)"/>
+    <text x="934" y="319" fill="white" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15">Review the iPhone UI</text>
+    <rect x="916" y="376" width="220" height="110" rx="22" fill="#F3F4F8"/>
+    <text x="934" y="403" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="16">Completed the polish pass.</text>
+    <rect x="934" y="419" width="184" height="47" rx="14" fill="#FFFFFF"/>
+    <text x="950" y="441" fill="#6B7280" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="700">What changed</text>
+    <text x="950" y="458" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">Compact live context and</text>
+    <text x="950" y="475" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">a single composer surface.</text>
+    <rect x="900" y="530" width="288" height="58" rx="20" fill="#F7F8FC"/>
+    <circle cx="924" cy="559" r="6" fill="#EF4444"/>
+    <text x="940" y="554" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="700">Recording voice prompt</text>
+    <text x="940" y="575" fill="#8B95A7" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">Auto-sends after 1.2s of silence</text>
+    <rect x="1110" y="543" width="62" height="22" rx="11" fill="#EAF3FF"/>
+    <text x="1141" y="558" text-anchor="middle" fill="#2F6FE8" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="11" font-weight="700">Auto-send</text>
+    <rect x="900" y="604" width="288" height="54" rx="18" fill="#F3F6FC"/>
+    <text x="922" y="626" fill="#2F6FE8" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="700">2 attachments</text>
+    <rect x="920" y="631" width="106" height="16" rx="8" fill="#FFFFFF"/>
+    <rect x="1038" y="631" width="118" height="16" rx="8" fill="#FFFFFF"/>
+    <rect x="910" y="670" width="268" height="44" rx="20" fill="#FFFFFF"/>
+    <text x="936" y="697" fill="#111827" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14">Capture 6.9-inch previews</text>
+    <circle cx="1140" cy="692" r="18" fill="#EF4444"/>
+    <rect x="1134" y="686" width="12" height="12" rx="2" fill="white"/>
+  </g>
+</svg>
