@@ -39,7 +39,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
         MARKETING_VERSION: 1.0
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: G9VZ6PWF3Z
@@ -81,7 +81,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.widget
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
         MARKETING_VERSION: 1.0
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: G9VZ6PWF3Z

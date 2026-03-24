@@ -319,7 +319,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentWidget/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -340,7 +340,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = "VoiceAgentApp/Info-Debug.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -394,7 +394,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -412,7 +412,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = G9VZ6PWF3Z;
 				INFOPLIST_FILE = VoiceAgentWidget/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

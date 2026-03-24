@@ -39,6 +39,14 @@ Update iOS version/build, regenerate the project, and run simulator tests
 
 Build and upload a TestFlight build
 
+### ios screenshots
+
+```sh
+[bundle exec] fastlane ios screenshots
+```
+
+Capture App Store screenshots using built-in preview scenarios
+
 ### ios release
 
 ```sh

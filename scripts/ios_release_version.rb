@@ -30,12 +30,20 @@ def write_project(version: nil, build: nil)
   content = read_project
 
   if version
-    content, replacements = content.gsubn(/^(\s*MARKETING_VERSION:\s*).+$/, "\\1#{version}")
+    replacements = 0
+    content = content.gsub(/^(\s*MARKETING_VERSION:\s*).+$/) do
+      replacements += 1
+      "#{Regexp.last_match(1)}#{version}"
+    end
     raise "Expected to update MARKETING_VERSION in ios/project.yml" if replacements.zero?
   end
 
   if build
-    content, replacements = content.gsubn(/^(\s*CURRENT_PROJECT_VERSION:\s*).+$/, "\\1#{build}")
+    replacements = 0
+    content = content.gsub(/^(\s*CURRENT_PROJECT_VERSION:\s*).+$/) do
+      replacements += 1
+      "#{Regexp.last_match(1)}#{build}"
+    end
     raise "Expected to update CURRENT_PROJECT_VERSION in ios/project.yml" if replacements.zero?
   end
 

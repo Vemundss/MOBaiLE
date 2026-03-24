@@ -1,0 +1,22 @@
+MOBaiLE is an iPhone client for a paired backend that runs on the user's own machine. The app does not execute code on-device.
+
+Review setup:
+1. Open the app.
+2. Go to Settings.
+3. Enter Server URL: <ADD_REVIEW_BACKEND_URL>
+4. Enter API Token: <ADD_REVIEW_API_TOKEN>
+5. Keep Session ID as iphone-app.
+6. Return to the main screen.
+
+Suggested test prompt:
+"create a hello world python script and run it"
+
+Expected behavior:
+- the app sends the request to the paired backend
+- progress appears in the conversation
+- a final summary is returned in the same thread
+
+Notes:
+- use an HTTPS or otherwise reviewer-reachable backend
+- keep the review backend online during the review window
+- public support and privacy pages are already published
