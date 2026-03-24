@@ -1,0 +1,3 @@
+First App Store release of MOBaiLE.
+
+Pair your iPhone with your own backend, send prompts by text or voice, and follow live run progress from anywhere.

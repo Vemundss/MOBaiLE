@@ -1,0 +1,12 @@
+MOBaiLE lets you talk to your own machine from your iPhone.
+
+Pair the app with a backend running on your Mac or Linux box, then send a text or voice request, keep it anchored to a working directory, and watch planning, execution, and results stream back live in one thread.
+
+What you can do:
+- Inspect a repo when you are away from the keyboard
+- Run a smoke test and get the summary back in one place
+- Dictate a task from your phone and send it hands-free
+- Keep conversation history, run logs, and artifacts together
+- Switch workspaces and keep future tasks pointed at the right folder
+
+MOBaiLE is a client for a backend you configure and control. The app does not execute code on-device. It sends your prompts, audio, attachments, and related metadata to the backend you pair with.

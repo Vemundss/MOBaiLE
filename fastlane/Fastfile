@@ -56,6 +56,10 @@ def release_artifact_directory
   File.expand_path("../build/ios", __dir__)
 end
 
+def screenshot_script_path
+  File.expand_path("../scripts/capture_app_store_screenshots.sh", __dir__)
+end
+
 def default_simulator_name
   simulator = `xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {gsub(/^ +| +$/, "", $1); print $1; exit}'`.strip
   UI.user_error!("No available iPhone simulator found. Pass simulator:<name> explicitly.") unless present?(simulator)
@@ -172,6 +176,12 @@ platform :ios do
     UI.success("Uploaded MOBaiLE #{release[:marketing_version]} (#{release[:build_number]}) to TestFlight")
   end
 
+  desc "Capture App Store screenshots using built-in preview scenarios"
+  lane :screenshots do
+    sh(shell_join(["bash", screenshot_script_path]))
+    UI.success("Captured App Store screenshots into fastlane/screenshots/en-US")
+  end
+
   desc "Build and upload an App Store Connect release build"
   lane :release do |options|
     release = prepare_release(options)
@@ -189,8 +199,8 @@ platform :ios do
 
     upload_to_app_store(
       force: true,
-      skip_metadata: bool_option(options[:skip_metadata], default: true),
-      skip_screenshots: bool_option(options[:skip_screenshots], default: true),
+      skip_metadata: bool_option(options[:skip_metadata], default: false),
+      skip_screenshots: bool_option(options[:skip_screenshots], default: false),
       submit_for_review: bool_option(options[:submit_for_review], default: false),
       automatic_release: bool_option(options[:automatic_release], default: false),
       **auth_options

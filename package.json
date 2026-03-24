@@ -17,6 +17,7 @@
     "ios:version": "ruby ./scripts/ios_release_version.rb show",
     "ios:release:setup": "bundle install",
     "ios:release:prepare": "bundle exec fastlane ios prepare",
+    "ios:release:screenshots": "bash ./scripts/capture_app_store_screenshots.sh",
     "ios:release:testflight": "bundle exec fastlane ios beta",
     "ios:release:appstore": "bundle exec fastlane ios release",
     "contracts:sync": "cd backend && uv run python ../scripts/sync_contracts.py",

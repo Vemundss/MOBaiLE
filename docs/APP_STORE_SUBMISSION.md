@@ -5,7 +5,7 @@ This repo is now in better shape for App Store submission, but a few steps still
 ## Repo-Level Checks Already Landed
 
 - `MOBaiLE` is now the shipped display name in the iOS target.
-- Broad ATS has been removed in favor of local-network access only.
+- Broad ATS has been removed in favor of local-network ATS allowances only.
 - A privacy manifest is included for the app's `UserDefaults` access.
 - A real `AppIcon` asset catalog is present and wired into the build.
 - The app and widget now use build settings for version metadata.
@@ -31,8 +31,8 @@ This repo is now in better shape for App Store submission, but a few steps still
    Support: `https://vemundss.github.io/MOBaiLE/support.html`
 3. Fill in the app name, subtitle, description, keywords, support URL, and marketing URL.
 4. Provide a stable privacy policy URL.
-5. Decide whether you are really shipping iPad support. If `TARGETED_DEVICE_FAMILY` stays `1,2`, prepare iPad screenshots and test on iPad.
-6. Upload iPhone screenshots for the device classes App Store Connect asks for.
+5. The app now ships as iPhone-only by default. If you re-enable iPad support later, add iPad screenshots and do a separate iPad QA pass first.
+6. Upload the generated iPhone screenshots from `fastlane/screenshots/en-US`.
 7. Complete App Privacy answers based on what your production backend stores or transmits, including prompts/chat history, voice input, imported photos/files, and backend-returned logs/results.
 8. Complete export compliance. With the current app target, `ITSAppUsesNonExemptEncryption` is set to `false`, but you still need to answer App Store Connect's questions.
 9. Upload the archive and submit the selected build to App Review.

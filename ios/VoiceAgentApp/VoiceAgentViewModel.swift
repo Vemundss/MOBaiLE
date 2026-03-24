@@ -220,11 +220,11 @@ final class VoiceAgentViewModel: ObservableObject {
         let previewThreads = [
             ChatThread(
                 id: primaryThreadID,
-                title: "Polish iPhone UI",
+                title: "Run smoke test",
                 updatedAt: Date(),
                 conversation: [],
                 runID: "pvw-2048",
-                summaryText: "Tightened the empty state hierarchy and steadied the composer for App Store screenshots.",
+                summaryText: "Summarized the current repo status and the next release step from the phone.",
                 transcriptText: "",
                 statusText: "Completed",
                 resolvedWorkingDirectory: workspace,
@@ -232,11 +232,11 @@ final class VoiceAgentViewModel: ObservableObject {
             ),
             ChatThread(
                 id: captureThreadID,
-                title: "Capture App Store previews",
+                title: "Review repo changes",
                 updatedAt: Date().addingTimeInterval(-4200),
                 conversation: [],
                 runID: "pvw-1987",
-                summaryText: "Prepared 6.9-inch screenshot states and preview-ready copy.",
+                summaryText: "Compared the latest workspace changes and kept the release context in one thread.",
                 transcriptText: "",
                 statusText: "Completed",
                 resolvedWorkingDirectory: workspace,
@@ -244,7 +244,7 @@ final class VoiceAgentViewModel: ObservableObject {
             ),
             ChatThread(
                 id: draftThreadID,
-                title: "Workspace follow-up",
+                title: "Dictate the next task",
                 updatedAt: Date().addingTimeInterval(-8600),
                 conversation: [],
                 runID: "",
@@ -255,6 +255,30 @@ final class VoiceAgentViewModel: ObservableObject {
                 activeRunExecutor: "codex",
                 draftText: "open the workspace browser and switch to ios/VoiceAgentApp",
                 draftAttachments: []
+            ),
+            ChatThread(
+                id: UUID(uuidString: "44444444-4444-4444-4444-444444444444") ?? UUID(),
+                title: "Summarize backend logs",
+                updatedAt: Date().addingTimeInterval(-12400),
+                conversation: [],
+                runID: "pvw-1820",
+                summaryText: "Collected the recent backend output and condensed it into a quick status summary.",
+                transcriptText: "",
+                statusText: "Completed",
+                resolvedWorkingDirectory: workspace,
+                activeRunExecutor: "codex"
+            ),
+            ChatThread(
+                id: UUID(uuidString: "55555555-5555-5555-5555-555555555555") ?? UUID(),
+                title: "Voice follow-up",
+                updatedAt: Date().addingTimeInterval(-18800),
+                conversation: [],
+                runID: "pvw-1742",
+                summaryText: "Captured a hands-free task and kept the repo thread ready for the next run.",
+                transcriptText: "",
+                statusText: "Completed",
+                resolvedWorkingDirectory: workspace,
+                activeRunExecutor: "codex"
             ),
         ]
 
@@ -298,8 +322,8 @@ final class VoiceAgentViewModel: ObservableObject {
         directoryBrowserTruncated = false
         showDirectoryBrowser = false
         events = [
-            ExecutionEvent(type: "summary", actionIndex: 1, message: "Refined the empty state hierarchy and stabilized the composer.", eventID: "preview-summary", createdAt: nil),
-            ExecutionEvent(type: "tool", actionIndex: 2, message: "Captured 6.9-inch iPhone screenshots for App Store preview.", eventID: "preview-tool", createdAt: nil),
+            ExecutionEvent(type: "summary", actionIndex: 1, message: "Ran the repo smoke test and packaged the summary for the current workspace.", eventID: "preview-summary", createdAt: nil),
+            ExecutionEvent(type: "tool", actionIndex: 2, message: "Prepared the screenshot set and release notes for the next step.", eventID: "preview-tool", createdAt: nil),
         ]
         errorText = ""
         pendingPairing = nil
@@ -332,7 +356,7 @@ final class VoiceAgentViewModel: ObservableObject {
                 promptText = ""
                 draftAttachments = []
                 runID = "pvw-2048"
-                summaryText = "Improved the empty state and composer hierarchy for App Store-ready iPhone screens."
+                summaryText = "Ran the repo smoke test and captured the next release step from the same workspace thread."
                 transcriptText = ""
                 statusText = "Completed"
                 runPhaseText = "Completed"
@@ -345,7 +369,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
             case .recording:
                 conversation = previewConversation()
-                promptText = "Capture polished 6.9-inch screenshots once the main flow feels ready."
+                promptText = "Run the smoke test again and tell me what changed since the last pass."
                 draftAttachments = previewDraftAttachments()
                 runID = ""
                 summaryText = ""
@@ -367,7 +391,7 @@ final class VoiceAgentViewModel: ObservableObject {
         [
             ConversationMessage(
                 role: "user",
-                text: "Review the current iPhone UI and get it ready for App Store screenshots."
+                text: "Run the smoke test for this repo and summarize the result."
             ),
             ConversationMessage(
                 role: "assistant",
@@ -375,11 +399,11 @@ final class VoiceAgentViewModel: ObservableObject {
 {
   "type": "assistant_response",
   "version": "1.0",
-  "summary": "Completed the polish pass.",
+  "summary": "Smoke test finished.",
   "sections": [
     {
-      "title": "What changed",
-      "body": "Reduced setup noise before the first run. Kept live context compact until needed. Unified the composer and attachment state into one surface."
+      "title": "Result",
+      "body": "Backend tests passed, pairing is stable, and the current workspace thread is ready for the release archive."
     }
   ],
   "agenda_items": [],
@@ -389,7 +413,7 @@ final class VoiceAgentViewModel: ObservableObject {
             ),
             ConversationMessage(
                 role: "user",
-                text: "Which screens should we capture for the App Store set?"
+                text: "What should I tackle next?"
             ),
             ConversationMessage(
                 role: "assistant",
@@ -397,11 +421,11 @@ final class VoiceAgentViewModel: ObservableObject {
 {
   "type": "assistant_response",
   "version": "1.0",
-  "summary": "Capture these three in order.",
+  "summary": "Recommended next step.",
   "sections": [
     {
       "title": "Next step",
-      "body": "Capture the configured empty state, the active conversation, and the recording flow. That tells the product story in three screens."
+      "body": "Keep this workspace thread, capture the App Store assets, and then archive the release build."
     }
   ],
   "agenda_items": [],
@@ -415,19 +439,20 @@ final class VoiceAgentViewModel: ObservableObject {
     private func previewDraftAttachments() -> [DraftAttachment] {
         [
             makePreviewAttachment(
-                fileName: "AppStoreShots.md",
+                fileName: "ReleaseNotes.md",
                 contents: """
-                1. Capture the configured empty state.
-                2. Capture an active thread with rich output.
-                3. Capture the recording flow with attachments.
+                1. Capture the App Store screenshots.
+                2. Archive the release build.
+                3. Submit the reviewer backend notes.
                 """
             ),
             makePreviewAttachment(
-                fileName: "ComposerPolish.swift",
+                fileName: "SmokeTest.sh",
                 contents: """
-                struct ComposerBar: View {
-                    var body: some View { EmptyView() }
-                }
+                #!/usr/bin/env bash
+                set -euo pipefail
+                echo "Run backend smoke test"
+                echo "Summarize the result"
                 """
             ),
         ]
