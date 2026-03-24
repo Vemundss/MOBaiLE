@@ -16,7 +16,7 @@
   ·
   <a href="backend/README.md"><strong>Backend</strong></a>
   ·
-  <a href="ios/README.md"><strong>iOS</strong></a>
+  <a href="ios/README.md"><strong>iPhone App</strong></a>
   ·
   <a href="scripts/README.md"><strong>Scripts</strong></a>
   ·
@@ -48,9 +48,33 @@ MOBaiLE is built for the moment when opening your laptop feels like too much fri
   </tr>
 </table>
 
-<p align="center">
-  <img src="docs/readme-ios-panels.svg" alt="Three MOBaiLE iPhone surfaces: configured start, active thread, and voice capture" width="980" />
-</p>
+<table>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <img src="docs/readme-screens/configured-empty.png" alt="Configured start screen with starter prompts and workspace context" width="230" />
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img src="docs/readme-screens/conversation.png" alt="Active thread showing a user prompt, assistant response, and completed status" width="230" />
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img src="docs/readme-screens/recording.png" alt="Voice capture screen with recording state and attachment chips" width="230" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <strong>Configured start</strong><br />
+      Starter prompts and workspace context without extra setup noise.
+    </td>
+    <td align="center" valign="top">
+      <strong>Active thread</strong><br />
+      A working conversation with status, results, and the next ask in one place.
+    </td>
+    <td align="center" valign="top">
+      <strong>Voice capture</strong><br />
+      Record a task, keep attachments inline, and send without leaving the thread.
+    </td>
+  </tr>
+</table>
 
 ## Great First Prompts
 
