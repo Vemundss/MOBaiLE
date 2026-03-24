@@ -54,10 +54,22 @@ fi
 PAYLOAD_JSON="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 p = Path(os.environ["PAIRING_PATH"])
 data = json.loads(p.read_text(encoding="utf-8"))
+expires_at = str(data.get("pair_code_expires_at", "")).strip()
+if expires_at:
+    try:
+        parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is not None and parsed <= datetime.now(timezone.utc):
+        raise SystemExit(
+            f"pair_code in pairing.json expired at {expires_at}; "
+            "run scripts/rotate_api_token.sh or scripts/install_backend.sh again"
+        )
 print(
     json.dumps(
         {

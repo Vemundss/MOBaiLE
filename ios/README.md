@@ -75,6 +75,10 @@ If you are using a real iPhone, `127.0.0.1` will not work. Use a LAN or Tailscal
   - set your own team for both app targets and use unique bundle identifiers if needed
 - App on real iPhone cannot reach backend:
   - do not use `127.0.0.1`; use LAN/Tailscale URL and make sure backend was installed with `--expose-network`
+- Real iPhone shows `App Transport Security requires the use of a secure connection`:
+  - Debug builds now allow plain `http://` backend URLs; rebuild/reinstall the app if your current device build predates that change
+  - Release-style builds still require `https://` or a local Bonjour host such as `*.local`
+  - if pairing fails immediately, rotate the pairing file first: `bash ./scripts/rotate_api_token.sh`
 - Pairing link opens but app does not connect:
   - verify backend is running and token/session in pairing file are current
 - Audio fails but text works:

@@ -17,6 +17,8 @@ backend/logs/
 .bundle/
 vendor/bundle/
 build/ios/
+build/archives/
+artifacts/app-store-screenshots/
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/test_output/

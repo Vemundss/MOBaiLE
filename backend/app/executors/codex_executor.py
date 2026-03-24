@@ -30,18 +30,7 @@ class CodexExecutor:
             self.enable_web_search = enable_web_search
 
     def start(self, prompt: str, *, resume_session_id: str | None = None) -> subprocess.Popen[str]:
-        # Non-interactive invocation for Codex CLI.
-        cmd = [self.binary, "exec"]
-        if resume_session_id:
-            cmd.extend(["resume", resume_session_id])
-        cmd.extend(["--json", "--skip-git-repo-check"])
-        if self.unrestricted:
-            cmd.append("--dangerously-bypass-approvals-and-sandbox")
-        if self.enable_web_search:
-            cmd.append("--search")
-        if self.model:
-            cmd.extend(["--model", self.model])
-        cmd.append(prompt)
+        cmd = self._build_command(prompt, resume_session_id=resume_session_id)
         env = os.environ.copy()
         if self.codex_home is not None:
             env["CODEX_HOME"] = str(self.codex_home)
@@ -53,3 +42,20 @@ class CodexExecutor:
             text=True,
             env=env,
         )
+
+    def _build_command(self, prompt: str, *, resume_session_id: str | None = None) -> list[str]:
+        # `--search` is a top-level Codex flag in current CLI builds, so it must
+        # appear before the `exec` subcommand rather than after it.
+        cmd = [self.binary]
+        if self.enable_web_search:
+            cmd.append("--search")
+        cmd.append("exec")
+        if resume_session_id:
+            cmd.extend(["resume", resume_session_id])
+        cmd.extend(["--json", "--skip-git-repo-check"])
+        if self.unrestricted:
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        if self.model:
+            cmd.extend(["--model", self.model])
+        cmd.append(prompt)
+        return cmd
