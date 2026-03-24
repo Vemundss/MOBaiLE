@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MOBaiLE</title>
+  <meta
+    name="description"
+    content="MOBaiLE is an iPhone client for a paired backend on your own machine. It provides public support and privacy pages for App Store distribution."
+  />
+  <style>
+    :root {
+      --bg: #f3f0e8;
+      --sand: #e8dfcf;
+      --paper: rgba(255, 251, 245, 0.88);
+      --text: #1d1b18;
+      --muted: #5f574d;
+      --line: rgba(29, 27, 24, 0.12);
+      --accent: #0f5c4d;
+      --accent-strong: #083b31;
+      --sun: #d57b2a;
+      --shadow: 0 20px 60px rgba(47, 37, 21, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(213, 123, 42, 0.22), transparent 34%),
+        radial-gradient(circle at top right, rgba(15, 92, 77, 0.18), transparent 28%),
+        linear-gradient(180deg, #faf6ef 0%, var(--bg) 48%, #efe7da 100%);
+      padding: 24px;
+    }
+
+    .shell {
+      max-width: 1080px;
+      margin: 0 auto;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+    }
+
+    .hero {
+      position: relative;
+      padding: 64px 32px 48px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(15, 92, 77, 0.08);
+      color: var(--accent-strong);
+      font-size: 14px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 20px 0 16px;
+      max-width: 760px;
+      font-size: clamp(48px, 8vw, 90px);
+      line-height: 0.95;
+      letter-spacing: -0.05em;
+    }
+
+    .lede {
+      max-width: 700px;
+      margin: 0;
+      font-size: clamp(18px, 2.5vw, 24px);
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 28px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-decoration: none;
+      transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button.primary {
+      background: var(--accent);
+      color: #f8f6f1;
+    }
+
+    .button.secondary {
+      border-color: var(--line);
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      padding: 24px 32px 40px;
+    }
+
+    .card {
+      min-height: 100%;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .card a {
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    .strip {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 18px;
+      padding: 0 32px 32px;
+    }
+
+    .panel {
+      padding: 26px;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(255, 250, 244, 0.92), rgba(245, 238, 228, 0.92));
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      line-height: 1.05;
+    }
+
+    .panel p, .panel li {
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    ul {
+      margin: 14px 0 0;
+      padding-left: 20px;
+    }
+
+    footer {
+      padding: 24px 32px 32px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    footer a {
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    @media (max-width: 860px) {
+      .grid,
+      .strip {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding: 42px 22px 30px;
+      }
+
+      .grid,
+      .strip,
+      footer {
+        padding-left: 22px;
+        padding-right: 22px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="eyebrow">MOBaiLE • Public Info</div>
+      <h1>Your computer, in your pocket.</h1>
+      <p class="lede">
+        MOBaiLE is an iPhone client for a paired backend running on your own machine. This site hosts the public
+        privacy and support pages used for App Store distribution and links to the open source repository.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="privacy-policy.html">Privacy Policy</a>
+        <a class="button secondary" href="support.html">Support</a>
+        <a class="button secondary" href="https://github.com/Vemundss/MOBaiLE">Source Code</a>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>What It Is</h2>
+        <p>
+          Send a prompt from your phone, run the work on your own Mac or Linux box, and watch progress stream back
+          live in the app.
+        </p>
+      </article>
+      <article class="card">
+        <h2>Privacy Surface</h2>
+        <p>
+          The app stores local settings on-device and sends prompts, audio, attachments, and run metadata to the
+          backend you pair with. Full details are in the <a href="privacy-policy.html">privacy policy</a>.
+        </p>
+      </article>
+      <article class="card">
+        <h2>Open Source</h2>
+        <p>
+          The repository, setup scripts, backend, and iOS client are published at
+          <a href="https://github.com/Vemundss/MOBaiLE">github.com/Vemundss/MOBaiLE</a>.
+        </p>
+      </article>
+    </section>
+
+    <section class="strip">
+      <article class="panel">
+        <h2>For App Review and Distribution</h2>
+        <p>
+          These public pages exist so the app has stable support and privacy-policy URLs. They should stay reachable,
+          accurate, and in sync with what the shipped app actually does.
+        </p>
+        <ul>
+          <li>Support URL: this site’s <a href="support.html">support page</a></li>
+          <li>Privacy Policy URL: this site’s <a href="privacy-policy.html">privacy page</a></li>
+          <li>Repository URL: <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a></li>
+        </ul>
+      </article>
+      <article class="panel">
+        <h2>Maintainer Notes</h2>
+        <p>
+          If repository ownership or naming changes, update the App Store URLs, the iOS app metadata, and the GitHub
+          Pages configuration together.
+        </p>
+        <ul>
+          <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/CONTRIBUTING.md">Contributing Guide</a></li>
+          <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/SECURITY.md">Security Policy</a></li>
+          <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/CODE_OF_CONDUCT.md">Code of Conduct</a></li>
+        </ul>
+      </article>
+    </section>
+
+    <footer>
+      Public site for MOBaiLE. Last updated: March 24, 2026.
+      <a href="privacy-policy.html">Privacy</a> ·
+      <a href="support.html">Support</a> ·
+      <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a>
+    </footer>
+  </main>
+</body>
+</html>

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - docs/index.html
       - docs/privacy-policy.html
       - docs/support.html
       - .github/workflows/deploy-privacy-policy.yml
@@ -34,9 +35,9 @@ jobs:
       - name: Prepare static files
         run: |
           mkdir -p _site
+          cp docs/index.html _site/index.html
           cp docs/privacy-policy.html _site/privacy-policy.html
           cp docs/support.html _site/support.html
-          cp docs/privacy-policy.html _site/index.html
           touch _site/.nojekyll
 
       - name: Upload Pages artifact

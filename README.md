@@ -338,12 +338,16 @@ npm run ios:open
 - Scripts reference: [`scripts/README.md`](scripts/README.md)
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Current status: [`STATUS.md`](STATUS.md)
+- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
 
 ## Publishing and Privacy Policy
 
 Apple requires a public privacy policy URL for App Store submissions.
 
 Repo source of truth:
+- `docs/index.html`
 - `docs/privacy-policy.html`
 - `docs/support.html`
 
@@ -351,6 +355,7 @@ GitHub Pages deploy workflow:
 - `.github/workflows/deploy-privacy-policy.yml`
 
 Expected public URLs after Pages is enabled for this repo:
+- Site: `https://vemundss.github.io/MOBaiLE/`
 - Privacy policy: `https://vemundss.github.io/MOBaiLE/privacy-policy.html`
 - Support: `https://vemundss.github.io/MOBaiLE/support.html`
 
