@@ -25,7 +25,10 @@ This repo is now in better shape for App Store submission, but a few steps still
 ## App Store Connect Work You Still Need
 
 1. Create the app record with the final bundle identifier.
-2. Publish reachable support, marketing, and privacy-policy URLs before you enter them in App Store Connect.
+2. Use the live public site URLs in App Store Connect:
+   Site: `https://vemundss.github.io/MOBaiLE/`
+   Privacy policy: `https://vemundss.github.io/MOBaiLE/privacy-policy.html`
+   Support: `https://vemundss.github.io/MOBaiLE/support.html`
 3. Fill in the app name, subtitle, description, keywords, support URL, and marketing URL.
 4. Provide a stable privacy policy URL.
 5. Decide whether you are really shipping iPad support. If `TARGETED_DEVICE_FAMILY` stays `1,2`, prepare iPad screenshots and test on iPad.

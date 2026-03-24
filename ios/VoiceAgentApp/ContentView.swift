@@ -5,6 +5,8 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
+    private let privacyPolicyURL = URL(string: "https://vemundss.github.io/MOBaiLE/privacy-policy.html")!
+    private let supportURL = URL(string: "https://vemundss.github.io/MOBaiLE/support.html")!
     @StateObject private var vm = VoiceAgentViewModel()
     @State private var showConnectionSettings = false
     @State private var showLogs = false
@@ -449,6 +451,14 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Support") {
+                    Link("Privacy Policy", destination: privacyPolicyURL)
+                    Link("Support", destination: supportURL)
+                    Text("These links are the public pages used for App Store distribution.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")
