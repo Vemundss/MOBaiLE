@@ -1,5 +1,23 @@
 import Foundation
 
+struct HumanUnblockRequest: Codable, Equatable {
+    let instructions: String
+    let suggestedReply: String
+
+    enum CodingKeys: String, CodingKey {
+        case instructions
+        case suggestedReply = "suggested_reply"
+    }
+
+    init(
+        instructions: String,
+        suggestedReply: String = "I completed the requested unblock step. Continue from the preserved state."
+    ) {
+        self.instructions = instructions
+        self.suggestedReply = suggestedReply
+    }
+}
+
 struct ConversationMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: String
@@ -46,6 +64,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
     var summaryText: String
     var transcriptText: String
     var statusText: String
+    var pendingHumanUnblock: HumanUnblockRequest?
     var resolvedWorkingDirectory: String
     var activeRunExecutor: String
     var draftText: String
@@ -60,6 +79,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         case summaryText
         case transcriptText
         case statusText
+        case pendingHumanUnblock
         case resolvedWorkingDirectory
         case activeRunExecutor
         case draftText
@@ -75,6 +95,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         summaryText: String,
         transcriptText: String,
         statusText: String,
+        pendingHumanUnblock: HumanUnblockRequest? = nil,
         resolvedWorkingDirectory: String,
         activeRunExecutor: String,
         draftText: String = "",
@@ -88,6 +109,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         self.summaryText = summaryText
         self.transcriptText = transcriptText
         self.statusText = statusText
+        self.pendingHumanUnblock = pendingHumanUnblock
         self.resolvedWorkingDirectory = resolvedWorkingDirectory
         self.activeRunExecutor = activeRunExecutor
         self.draftText = draftText
@@ -104,6 +126,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         summaryText = try container.decodeIfPresent(String.self, forKey: .summaryText) ?? ""
         transcriptText = try container.decodeIfPresent(String.self, forKey: .transcriptText) ?? ""
         statusText = try container.decodeIfPresent(String.self, forKey: .statusText) ?? "Idle"
+        pendingHumanUnblock = try container.decodeIfPresent(HumanUnblockRequest.self, forKey: .pendingHumanUnblock)
         resolvedWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .resolvedWorkingDirectory) ?? ""
         activeRunExecutor = try container.decodeIfPresent(String.self, forKey: .activeRunExecutor) ?? "codex"
         draftText = try container.decodeIfPresent(String.self, forKey: .draftText) ?? ""
@@ -120,6 +143,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         try container.encode(summaryText, forKey: .summaryText)
         try container.encode(transcriptText, forKey: .transcriptText)
         try container.encode(statusText, forKey: .statusText)
+        try container.encodeIfPresent(pendingHumanUnblock, forKey: .pendingHumanUnblock)
         try container.encode(resolvedWorkingDirectory, forKey: .resolvedWorkingDirectory)
         try container.encode(activeRunExecutor, forKey: .activeRunExecutor)
         try container.encode(draftText, forKey: .draftText)
@@ -210,14 +234,32 @@ struct CancelRunResponse: Decodable {
 }
 
 struct ExecutionEvent: Decodable, Identifiable {
-    var id: String { eventID ?? "\(type)-\(actionIndex ?? -1)-\(message)" }
+    var id: String { eventID ?? (seq.map { "seq-\($0)" }) ?? "\(type)-\(actionIndex ?? -1)-\(message)" }
+    let seq: Int?
     let type: String
     let actionIndex: Int?
     let message: String
     let eventID: String?
     let createdAt: String?
 
+    init(
+        seq: Int? = nil,
+        type: String,
+        actionIndex: Int? = nil,
+        message: String,
+        eventID: String? = nil,
+        createdAt: String? = nil
+    ) {
+        self.seq = seq
+        self.type = type
+        self.actionIndex = actionIndex
+        self.message = message
+        self.eventID = eventID
+        self.createdAt = createdAt
+    }
+
     enum CodingKeys: String, CodingKey {
+        case seq
         case type
         case actionIndex = "action_index"
         case message
@@ -233,6 +275,7 @@ struct RunRecord: Decodable {
     let utteranceText: String
     let workingDirectory: String?
     let status: String
+    let pendingHumanUnblock: HumanUnblockRequest?
     let summary: String
     let events: [ExecutionEvent]
     let createdAt: String?
@@ -245,6 +288,7 @@ struct RunRecord: Decodable {
         case utteranceText = "utterance_text"
         case workingDirectory = "working_directory"
         case status
+        case pendingHumanUnblock = "pending_human_unblock"
         case summary
         case events
         case createdAt = "created_at"
@@ -368,6 +412,48 @@ struct SessionContext: Decodable {
     }
 }
 
+struct SlashCommandDescriptor: Decodable, Equatable {
+    let id: String
+    let title: String
+    let description: String
+    let usage: String
+    let group: String?
+    let aliases: [String]
+    let symbol: String
+    let argumentKind: String
+    let argumentOptions: [String]
+    let argumentPlaceholder: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case description
+        case usage
+        case group
+        case aliases
+        case symbol
+        case argumentKind = "argument_kind"
+        case argumentOptions = "argument_options"
+        case argumentPlaceholder = "argument_placeholder"
+    }
+}
+
+struct SlashCommandExecutionRequest: Encodable {
+    let arguments: String?
+}
+
+struct SlashCommandExecutionResponse: Decodable {
+    let commandId: String
+    let message: String
+    let sessionContext: SessionContext?
+
+    enum CodingKeys: String, CodingKey {
+        case commandId = "command_id"
+        case message
+        case sessionContext = "session_context"
+    }
+}
+
 struct DirectoryEntry: Decodable, Identifiable {
     var id: String { path }
     let name: String
@@ -463,173 +549,211 @@ struct ChatArtifact: Codable, Equatable, Identifiable {
     let url: String?
 }
 
-enum ComposerSlashCommand: String, CaseIterable, Identifiable {
+enum ComposerLocalSlashAction: String, CaseIterable {
     case new
     case threads
     case logs
     case settings
     case browse
-    case cwd
-    case executor
     case retry
     case voice
     case paste
     case clear
+}
 
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .new:
-            return "New Chat"
-        case .threads:
-            return "Threads"
-        case .logs:
-            return "Run Logs"
-        case .settings:
-            return "Settings"
-        case .browse:
-            return "Browse Workspace"
-        case .cwd:
-            return "Working Directory"
-        case .executor:
-            return "Executor"
-        case .retry:
-            return "Retry Last Prompt"
-        case .voice:
-            return "Start Recording"
-        case .paste:
-            return "Paste Clipboard"
-        case .clear:
-            return "Clear Draft"
-        }
+struct ComposerSlashCommand: Identifiable, Equatable {
+    enum Source: Equatable {
+        case local(ComposerLocalSlashAction)
+        case backend
     }
 
-    var description: String {
-        switch self {
-        case .new:
-            return "Start a fresh thread without leaving the current session."
-        case .threads:
-            return "Open the thread list and jump between conversations."
-        case .logs:
-            return "Open the current run event log view."
-        case .settings:
-            return "Open backend connection and runtime settings."
-        case .browse:
-            return "Open the workspace browser at the current folder or a specific path."
-        case .cwd:
-            return "Show or change the working directory used for new runs."
-        case .executor:
-            return "Show or switch the active executor."
-        case .retry:
-            return "Resend the most recent submitted prompt."
-        case .voice:
-            return "Start hands-free voice capture."
-        case .paste:
-            return "Paste text or an image from the clipboard into the draft."
-        case .clear:
-            return "Clear the current prompt and staged attachments."
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .new:
-            return "square.and.pencil"
-        case .threads:
-            return "text.bubble"
-        case .logs:
-            return "doc.text.magnifyingglass"
-        case .settings:
-            return "slider.horizontal.3"
-        case .browse:
-            return "folder"
-        case .cwd:
-            return "arrow.triangle.branch"
-        case .executor:
-            return "bolt.horizontal.circle"
-        case .retry:
-            return "arrow.clockwise"
-        case .voice:
-            return "mic"
-        case .paste:
-            return "doc.on.clipboard"
-        case .clear:
-            return "xmark.circle"
-        }
-    }
-
-    var usage: String {
-        switch self {
-        case .new:
-            return "/new"
-        case .threads:
-            return "/threads"
-        case .logs:
-            return "/logs"
-        case .settings:
-            return "/settings"
-        case .browse:
-            return "/browse [path]"
-        case .cwd:
-            return "/cwd [path]"
-        case .executor:
-            return "/executor [codex|claude|local]"
-        case .retry:
-            return "/retry"
-        case .voice:
-            return "/voice"
-        case .paste:
-            return "/paste"
-        case .clear:
-            return "/clear"
-        }
-    }
+    let id: String
+    let title: String
+    let description: String
+    let symbol: String
+    let usage: String
+    let group: String?
+    let aliases: [String]
+    let argumentKind: String
+    let argumentOptions: [String]
+    let argumentPlaceholder: String?
+    let source: Source
 
     var acceptsArguments: Bool {
-        switch self {
-        case .browse, .cwd, .executor:
-            return true
-        default:
-            return false
-        }
+        argumentKind != "none"
     }
 
     var insertionText: String {
-        acceptsArguments ? "/\(rawValue) " : "/\(rawValue)"
+        acceptsArguments ? "/\(id) " : "/\(id)"
     }
 
-    var aliases: [String] {
-        switch self {
-        case .new:
-            return ["chat"]
-        case .threads:
-            return ["history"]
-        case .logs:
-            return ["events"]
-        case .settings:
-            return ["config"]
-        case .browse:
-            return ["dir", "files", "workspace"]
-        case .cwd:
-            return ["pwd", "workdir"]
-        case .executor:
-            return ["exec", "agent"]
-        case .retry:
-            return ["rerun", "resend"]
-        case .voice:
-            return ["record", "mic"]
-        case .paste:
-            return ["clipboard"]
-        case .clear:
-            return ["reset"]
-        }
+    init(descriptor: SlashCommandDescriptor) {
+        id = descriptor.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        title = descriptor.title
+        description = descriptor.description
+        symbol = descriptor.symbol
+        usage = descriptor.usage
+        let normalizedGroup = descriptor.group?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        group = normalizedGroup.isEmpty ? nil : normalizedGroup
+        aliases = descriptor.aliases.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        argumentKind = descriptor.argumentKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        argumentOptions = descriptor.argumentOptions.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        argumentPlaceholder = descriptor.argumentPlaceholder
+        source = .backend
+    }
+
+    private init(
+        id: String,
+        title: String,
+        description: String,
+        symbol: String,
+        usage: String,
+        group: String? = nil,
+        aliases: [String],
+        argumentKind: String,
+        argumentOptions: [String] = [],
+        argumentPlaceholder: String? = nil,
+        source: Source
+    ) {
+        self.id = id
+        self.title = title
+        self.description = description
+        self.symbol = symbol
+        self.usage = usage
+        self.group = group
+        self.aliases = aliases
+        self.argumentKind = argumentKind
+        self.argumentOptions = argumentOptions
+        self.argumentPlaceholder = argumentPlaceholder
+        self.source = source
+    }
+
+    static let localCommands: [ComposerSlashCommand] = [
+        .local(
+            .new,
+            title: "New Chat",
+            description: "Start a fresh thread without leaving the current session.",
+            symbol: "square.and.pencil",
+            usage: "/new",
+            group: "Session",
+            aliases: ["chat"]
+        ),
+        .local(
+            .threads,
+            title: "Threads",
+            description: "Open the thread list and jump between conversations.",
+            symbol: "text.bubble",
+            usage: "/threads",
+            group: "Session",
+            aliases: ["history"]
+        ),
+        .local(
+            .logs,
+            title: "Run Logs",
+            description: "Open the current run event log view.",
+            symbol: "doc.text.magnifyingglass",
+            usage: "/logs",
+            group: "Session",
+            aliases: ["events"]
+        ),
+        .local(
+            .settings,
+            title: "Settings",
+            description: "Open backend connection and runtime settings.",
+            symbol: "slider.horizontal.3",
+            usage: "/settings",
+            group: "App",
+            aliases: ["config"]
+        ),
+        .local(
+            .browse,
+            title: "Browse Workspace",
+            description: "Open the workspace browser at the current folder or a specific path.",
+            symbol: "folder",
+            usage: "/browse [path]",
+            group: "Workspace",
+            aliases: ["dir", "files", "workspace"],
+            argumentKind: "path",
+            argumentPlaceholder: "path"
+        ),
+        .local(
+            .retry,
+            title: "Retry Last Prompt",
+            description: "Resend the most recent submitted prompt.",
+            symbol: "arrow.clockwise",
+            usage: "/retry",
+            group: "Session",
+            aliases: ["rerun", "resend"]
+        ),
+        .local(
+            .voice,
+            title: "Start Recording",
+            description: "Start hands-free voice capture.",
+            symbol: "mic",
+            usage: "/voice",
+            group: "Input",
+            aliases: ["record", "mic"]
+        ),
+        .local(
+            .paste,
+            title: "Paste Clipboard",
+            description: "Paste text or an image from the clipboard into the draft.",
+            symbol: "doc.on.clipboard",
+            usage: "/paste",
+            group: "Input",
+            aliases: ["clipboard"]
+        ),
+        .local(
+            .clear,
+            title: "Clear Draft",
+            description: "Clear the current prompt and staged attachments.",
+            symbol: "xmark.circle",
+            usage: "/clear",
+            group: "Input",
+            aliases: ["reset"]
+        ),
+    ]
+
+    static func mergedCatalog(
+        local: [ComposerSlashCommand] = ComposerSlashCommand.localCommands,
+        backend: [ComposerSlashCommand]
+    ) -> [ComposerSlashCommand] {
+        let localIDs = Set(local.map(\.id))
+        let remote = backend.filter { !localIDs.contains($0.id) }
+        return local + remote
+    }
+
+    private static func local(
+        _ action: ComposerLocalSlashAction,
+        title: String,
+        description: String,
+        symbol: String,
+        usage: String,
+        group: String? = nil,
+        aliases: [String],
+        argumentKind: String = "none",
+        argumentOptions: [String] = [],
+        argumentPlaceholder: String? = nil
+    ) -> ComposerSlashCommand {
+        ComposerSlashCommand(
+            id: action.rawValue,
+            title: title,
+            description: description,
+            symbol: symbol,
+            usage: usage,
+            group: group,
+            aliases: aliases,
+            argumentKind: argumentKind,
+            argumentOptions: argumentOptions,
+            argumentPlaceholder: argumentPlaceholder,
+            source: .local(action)
+        )
     }
 
     fileprivate func matches(query: String) -> Bool {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return true }
-        let candidates = [rawValue] + aliases
+        let candidates = [id] + aliases
         return candidates.contains { candidate in
             candidate.hasPrefix(normalized)
         }
@@ -638,7 +762,7 @@ enum ComposerSlashCommand: String, CaseIterable, Identifiable {
     fileprivate func matchesExactly(query: String) -> Bool {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return false }
-        return normalized == rawValue || aliases.contains(normalized)
+        return normalized == id || aliases.contains(normalized)
     }
 }
 
@@ -653,7 +777,10 @@ struct ComposerSlashCommandState: Equatable {
     }
 }
 
-func resolveComposerSlashCommandState(from input: String) -> ComposerSlashCommandState? {
+func resolveComposerSlashCommandState(
+    from input: String,
+    commands: [ComposerSlashCommand] = ComposerSlashCommand.localCommands
+) -> ComposerSlashCommandState? {
     let trimmedLeading = String(input.drop(while: { $0.isWhitespace }))
     guard trimmedLeading.hasPrefix("/") else { return nil }
     guard !trimmedLeading.contains("\n") else { return nil }
@@ -672,10 +799,10 @@ func resolveComposerSlashCommandState(from input: String) -> ComposerSlashComman
     guard tokenIsValid else { return nil }
 
     let arguments = String(payload.dropFirst(token.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-    let suggestions = ComposerSlashCommand.allCases.filter { command in
+    let suggestions = commands.filter { command in
         command.matches(query: normalizedQuery)
     }
-    let exactMatch = ComposerSlashCommand.allCases.first { command in
+    let exactMatch = commands.first { command in
         command.matchesExactly(query: normalizedQuery)
     }
 
@@ -688,7 +815,10 @@ func resolveComposerSlashCommandState(from input: String) -> ComposerSlashComman
 }
 
 #if DEBUG
-func _test_resolveComposerSlashCommandState(_ input: String) -> ComposerSlashCommandState? {
-    resolveComposerSlashCommandState(from: input)
+func _test_resolveComposerSlashCommandState(
+    _ input: String,
+    commands: [ComposerSlashCommand] = ComposerSlashCommand.localCommands
+) -> ComposerSlashCommandState? {
+    resolveComposerSlashCommandState(from: input, commands: commands)
 }
 #endif

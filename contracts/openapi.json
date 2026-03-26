@@ -501,6 +501,17 @@
             "title": "Message",
             "type": "string"
           },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
           "type": {
             "enum": [
               "chat.message",
@@ -1078,6 +1089,132 @@
           }
         },
         "title": "SessionContextUpdateRequest",
+        "type": "object"
+      },
+      "SlashCommandDescriptor": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "argument_kind": {
+            "default": "none",
+            "enum": [
+              "none",
+              "text",
+              "path",
+              "enum"
+            ],
+            "title": "Argument Kind",
+            "type": "string"
+          },
+          "argument_options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Argument Options",
+            "type": "array"
+          },
+          "argument_placeholder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Argument Placeholder"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "usage": {
+            "title": "Usage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "usage",
+          "symbol"
+        ],
+        "title": "SlashCommandDescriptor",
+        "type": "object"
+      },
+      "SlashCommandExecutionRequest": {
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments"
+          }
+        },
+        "title": "SlashCommandExecutionRequest",
+        "type": "object"
+      },
+      "SlashCommandExecutionResponse": {
+        "properties": {
+          "command_id": {
+            "title": "Command Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "session_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionContextResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "command_id",
+          "message"
+        ],
+        "title": "SlashCommandExecutionResponse",
         "type": "object"
       },
       "UploadResponse": {
@@ -1683,6 +1820,17 @@
               "title": "Run Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "after_seq",
+            "required": false,
+            "schema": {
+              "default": -1,
+              "minimum": -1,
+              "title": "After Seq",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -1847,6 +1995,86 @@
           }
         },
         "summary": "List Session Runs"
+      }
+    },
+    "/v1/sessions/{session_id}/slash-commands/{command_id}": {
+      "post": {
+        "operationId": "execute_slash_command_v1_sessions__session_id__slash_commands__command_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlashCommandExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlashCommandExecutionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Slash Command"
+      }
+    },
+    "/v1/slash-commands": {
+      "get": {
+        "operationId": "list_slash_commands_v1_slash_commands_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SlashCommandDescriptor"
+                  },
+                  "title": "Response List Slash Commands V1 Slash Commands Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Slash Commands"
       }
     },
     "/v1/tools/calendar/today": {

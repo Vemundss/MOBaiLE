@@ -29,6 +29,31 @@ def test_run_state_lazy_loads_persisted_run(tmp_path) -> None:
     assert loaded.run_id == "run-1"
     assert loaded.summary == "done"
     assert [event.type for event in loaded.events] == ["run.completed"]
+    assert [event.seq for event in loaded.events] == [0]
+
+
+def test_run_state_assigns_monotonic_event_sequences(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    state = RunState(run_store, max_event_message_chars=16000)
+    state.store_run(
+        RunRecord(
+            run_id="run-seq",
+            session_id="session-1",
+            executor="local",
+            utterance_text="hello",
+            status="running",
+            summary="running",
+            events=[],
+        )
+    )
+
+    state.append_event("run-seq", ExecutionEvent(type="action.started", message="start"))
+    state.append_event("run-seq", ExecutionEvent(type="run.completed", message="done"))
+
+    loaded = state.get_run("run-seq")
+
+    assert loaded is not None
+    assert [event.seq for event in loaded.events] == [0, 1]
 
 
 def test_run_store_persists_session_context(tmp_path) -> None:

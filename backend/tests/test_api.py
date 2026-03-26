@@ -260,6 +260,54 @@ def test_list_session_runs_and_diagnostics(monkeypatch, tmp_path: Path):
     assert diagnostics["event_count"] >= 1
 
 
+def test_run_events_endpoint_replays_from_after_seq(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path)
+    create = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "sess-events",
+            "utterance_text": "create a hello python script and run it",
+            "executor": "local",
+        },
+    )
+    assert create.status_code == 200
+    run_id = create.json()["run_id"]
+
+    final_run: dict[str, object] | None = None
+    for _ in range(40):
+        run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+        payload = run_resp.json()
+        if payload["status"] != "running":
+            final_run = payload
+            break
+        time.sleep(0.05)
+
+    assert final_run is not None
+    all_events = final_run["events"]
+    assert len(all_events) >= 2
+    pivot_seq = int(all_events[0]["seq"])
+
+    response = client.get(
+        f"/v1/runs/{run_id}/events?after_seq={pivot_seq}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+
+    replayed_events = []
+    for chunk in response.text.split("\n\n"):
+        data_lines = []
+        for line in chunk.splitlines():
+            if line.startswith("data:"):
+                raw = line[5:]
+                data_lines.append(raw[1:] if raw.startswith(" ") else raw)
+        if data_lines:
+            replayed_events.append(json.loads("\n".join(data_lines)))
+
+    assert replayed_events
+    assert [event["seq"] for event in replayed_events] == [event["seq"] for event in all_events[1:]]
+
+
 def test_session_context_updates_and_runs_inherit_defaults(monkeypatch, tmp_path: Path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -339,6 +387,55 @@ def test_session_context_rejects_unavailable_executor(monkeypatch, tmp_path: Pat
 
     assert response.status_code == 400
     assert "not available" in response.json()["detail"]
+
+
+def test_slash_command_catalog_and_execution(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "local",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CODEX_BINARY": "missing-codex",
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    catalog = client.get(
+        "/v1/slash-commands",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert catalog.status_code == 200
+    payload = catalog.json()
+    assert [item["id"] for item in payload] == ["cwd", "executor"]
+    assert payload[0]["group"] == "Runtime"
+    assert payload[1]["usage"] == "/executor [local]"
+    assert payload[1]["argument_options"] == ["local"]
+
+    project_dir = workspace / "project"
+    cwd_response = client.post(
+        "/v1/sessions/sess-context/slash-commands/cwd",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"arguments": str(project_dir)},
+    )
+    assert cwd_response.status_code == 200
+    cwd_payload = cwd_response.json()
+    assert cwd_payload["command_id"] == "cwd"
+    assert cwd_payload["session_context"]["working_directory"] == str(project_dir)
+    assert cwd_payload["session_context"]["resolved_working_directory"] == str(project_dir)
+
+    executor_response = client.post(
+        "/v1/sessions/sess-context/slash-commands/executor",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"arguments": "local"},
+    )
+    assert executor_response.status_code == 200
+    executor_payload = executor_response.json()
+    assert executor_payload["command_id"] == "executor"
+    assert executor_payload["session_context"]["executor"] == "local"
+    assert "Available: local." in executor_payload["message"]
 
 
 def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
@@ -1219,6 +1316,8 @@ def test_codex_human_unblock_transitions_to_blocked(monkeypatch, tmp_path: Path)
     assert payload is not None
     assert payload["status"] == "blocked"
     assert "captcha" in payload["summary"].lower()
+    assert payload["pending_human_unblock"]["instructions"].startswith("Complete the CAPTCHA")
+    assert "suggested_reply" in payload["pending_human_unblock"]
     event_types = [event["type"] for event in payload["events"]]
     assert "run.blocked" in event_types
 

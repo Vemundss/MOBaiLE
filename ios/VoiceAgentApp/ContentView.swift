@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showWorkspaceBrowser = false
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var newDirectoryName = ""
+    @State private var isCreatingDirectory = false
     @State private var trustPairHost = false
     @State private var showAdvancedSettings = false
     @State private var settingsConnectionState: SettingsConnectionState = .idle
@@ -113,6 +114,7 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showWorkspaceBrowser, onDismiss: {
                 newDirectoryName = ""
+                isCreatingDirectory = false
                 vm.hideDirectoryBrowser()
             }) {
                 workspaceBrowserSheet
@@ -139,6 +141,7 @@ struct ContentView: View {
             .onChange(of: showWorkspaceBrowser) {
                 if !showWorkspaceBrowser {
                     newDirectoryName = ""
+                    isCreatingDirectory = false
                     vm.hideDirectoryBrowser()
                 }
             }
@@ -358,36 +361,38 @@ struct ContentView: View {
     private var settingsSheet: some View {
         NavigationStack {
             Form {
-                Section("Connection") {
+                Section {
                     TextField("Server URL", text: $vm.serverURL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.footnote.monospaced())
                     SecureField("API Token", text: $vm.apiToken)
                         .font(.footnote.monospaced())
-                    Text("These are the only fields required before you can send prompts or start recording.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Connection")
+                } footer: {
+                    Text("Server URL and token are the only required setup.")
                 }
 
                 Section {
                     settingsConnectionCard
                 }
 
-                Section("Conversation Style") {
+                Section {
                     Picker("Agent guidance", selection: $vm.agentGuidanceMode) {
                         Text("Guided").tag("guided")
                         Text("Minimal").tag("minimal")
                     }
                     .pickerStyle(.segmented)
+                } header: {
+                    Text("Conversation Style")
+                } footer: {
                     Text(vm.agentGuidanceMode == "minimal"
-                        ? "Minimal: keeps chat focused on final results with fewer progress updates."
-                        : "Guided: includes short progress updates and clearer result context.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        ? "Minimal keeps chat focused on final results."
+                        : "Guided adds short progress updates and clearer result context.")
                 }
 
-                Section("Voice & Feedback") {
+                Section {
                     Toggle("AirPods Click To Record", isOn: $vm.airPodsClickToRecordEnabled)
                     Toggle("Haptic Cues", isOn: $vm.hapticCuesEnabled)
                     Toggle("Audio Cues", isOn: $vm.audioCuesEnabled)
@@ -395,13 +400,15 @@ struct ContentView: View {
                     if vm.autoSendAfterSilenceEnabled {
                         TextField("Silence seconds", text: $vm.autoSendAfterSilenceSeconds)
                             .keyboardType(.decimalPad)
-                        Text("Hands-free mode: auto-submits after this much silence while recording.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-                    Text("AirPods click uses headset play/pause controls to start recording and stop+send.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Voice & Feedback")
+                } footer: {
+                    Text(
+                        vm.autoSendAfterSilenceEnabled
+                            ? "AirPods click uses headset controls. Auto-send submits after the selected silence window."
+                            : "AirPods click uses headset controls to start recording and stop+send."
+                    )
                 }
 
                 Section {
@@ -413,9 +420,6 @@ struct ContentView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .font(.footnote.monospaced())
-                        Text("Most people can leave these alone. The workspace picker on the main screen is the easiest way to change folders for new runs.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                         if !vm.backendWorkdirRoot.isEmpty {
                             Button {
                                 vm.workingDirectory = vm.backendWorkdirRoot
@@ -433,9 +437,6 @@ struct ContentView: View {
                             }
                         TextField("Timeout seconds", text: $vm.runTimeoutSeconds)
                             .keyboardType(.numberPad)
-                        Text("Client-side run timeout in seconds. Set 0 to wait indefinitely.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                         Picker("Executor", selection: $vm.executor) {
                             ForEach(vm.selectableExecutors, id: \.self) { option in
                                 Text(option.capitalized).tag(option)
@@ -451,20 +452,16 @@ struct ContentView: View {
                         ForEach(vm.backendExecutorModelRows, id: \.id) { row in
                             LabeledContent("\(row.title) Model", value: row.model)
                         }
-                        Text(vm.developerMode
-                            ? "Developer Mode exposes every reported agent executor plus the internal local fallback."
-                            : "Standard mode follows the backend defaults. Local appears only when the backend is explicitly using its internal fallback.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
+                } footer: {
+                    Text(vm.developerMode
+                        ? "Advanced Runtime overrides backend defaults and exposes the internal local fallback."
+                        : "Advanced Runtime overrides backend defaults when you need them.")
                 }
 
                 Section("Support") {
                     Link("Privacy Policy", destination: privacyPolicyURL)
                     Link("Support", destination: supportURL)
-                    Text("These links are the public pages used for App Store distribution.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")
@@ -485,31 +482,34 @@ struct ContentView: View {
     }
 
     private var settingsConnectionCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label(settingsConnectionTitle, systemImage: settingsConnectionSymbol)
-                        .font(.headline)
-                        .foregroundStyle(settingsConnectionTint)
-                    Text(settingsConnectionMessage)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                Label(settingsConnectionTitle, systemImage: settingsConnectionSymbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(settingsConnectionTint)
+
                 Spacer(minLength: 0)
-                Button {
-                    Task { await checkSettingsConnection() }
-                } label: {
-                    if isCheckingSettingsConnection {
-                        ProgressView()
-                    } else {
-                        Label("Check", systemImage: "arrow.clockwise")
+
+                if vm.hasConfiguredConnection {
+                    Button {
+                        Task { await checkSettingsConnection() }
+                    } label: {
+                        if isCheckingSettingsConnection {
+                            ProgressView()
+                        } else {
+                            Text("Check")
+                        }
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isCheckingSettingsConnection)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(isCheckingSettingsConnection || !vm.hasConfiguredConnection)
             }
+
+            Text(settingsConnectionMessage)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if showsSettingsRuntimeDetails {
                 ViewThatFits(in: .vertical) {
@@ -557,9 +557,9 @@ struct ContentView: View {
     private var settingsConnectionTitle: String {
         switch settingsConnectionState {
         case .idle:
-            return vm.hasConfiguredConnection ? "Check this backend" : "Connection required"
+            return vm.hasConfiguredConnection ? "Verify connection" : "Connection required"
         case .checking:
-            return "Checking backend"
+            return "Checking connection"
         case .success:
             return "Connection verified"
         case .failure:
@@ -571,10 +571,10 @@ struct ContentView: View {
         switch settingsConnectionState {
         case .idle:
             return vm.hasConfiguredConnection
-                ? "Validate the saved URL and token after you update either field."
-                : "Enter a server URL and API token to unlock sending, recording, and live run updates."
+                ? "Check after editing either field."
+                : "Add a server URL and API token to enable prompts, recording, and live updates."
         case .checking:
-            return "Fetching backend config and validating the current token."
+            return "Checking the current backend session."
         case let .success(message), let .failure(message):
             return message
         }
@@ -583,7 +583,7 @@ struct ContentView: View {
     private var settingsConnectionTint: Color {
         switch settingsConnectionState {
         case .idle:
-            return vm.hasConfiguredConnection ? .blue : .orange
+            return vm.hasConfiguredConnection ? .primary : .orange
         case .checking:
             return .blue
         case .success:
@@ -614,10 +614,10 @@ struct ContentView: View {
     private func checkSettingsConnection() async {
         settingsConnectionState = .checking
         do {
-            let cfg = try await vm.refreshRuntimeConfiguration()
+            _ = try await vm.refreshRuntimeConfiguration()
             let host = URL(string: vm.serverURL)?.host ?? vm.serverURL
             settingsConnectionState = .success(
-                "Connected to \(host). Security mode: \(cfg.securityMode). Active provider: \(vm.executor.uppercased()). Model: \(vm.currentBackendModelLabel)."
+                "Connected to \(host)."
             )
         } catch {
             settingsConnectionState = .failure(error.localizedDescription)
@@ -1179,25 +1179,6 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Choose the next working folder", systemImage: "folder.badge.gearshape")
-                            .font(.headline)
-                        Text("Browse the backend workspace, then promote a folder so future commands run from there.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color(.separator).opacity(0.25), lineWidth: 1)
-                    )
-
                     directoryBrowserPanel
                 }
                 .padding()
@@ -1222,18 +1203,13 @@ struct ContentView: View {
 
     private var directoryBrowserPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Browsing")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(vm.directoryBrowserPath.isEmpty ? runtimeDirectoryLabel : vm.directoryBrowserPath)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
+            HStack(alignment: .center, spacing: 10) {
+                Text(vm.directoryBrowserPath.isEmpty ? runtimeDirectoryLabel : vm.directoryBrowserPath)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
                 Spacer(minLength: 0)
-                Button("Use This Folder") {
+                Button("Use Folder") {
                     Task { await vm.useCurrentBrowserDirectoryAsWorkingDirectory() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -1278,26 +1254,44 @@ struct ContentView: View {
                 .disabled(vm.isLoadingDirectoryBrowser)
             }
 
-            HStack(spacing: 6) {
-                TextField("New folder", text: $newDirectoryName)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.footnote.monospaced())
-                    .textFieldStyle(.roundedBorder)
-                Button("Create") {
-                    Task {
-                        let created = await vm.createDirectoryInCurrentBrowser(name: newDirectoryName)
-                        if created {
-                            newDirectoryName = ""
+            if isCreatingDirectory {
+                HStack(spacing: 6) {
+                    TextField("New folder", text: $newDirectoryName)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote.monospaced())
+                        .textFieldStyle(.roundedBorder)
+                    Button("Create") {
+                        Task {
+                            let created = await vm.createDirectoryInCurrentBrowser(name: newDirectoryName)
+                            if created {
+                                newDirectoryName = ""
+                                isCreatingDirectory = false
+                            }
                         }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(
+                        vm.isLoadingDirectoryBrowser ||
+                        newDirectoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
+                    Button("Cancel") {
+                        newDirectoryName = ""
+                        isCreatingDirectory = false
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderedProminent)
+            } else {
+                Button {
+                    isCreatingDirectory = true
+                } label: {
+                    Label("New Folder", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(
-                    vm.isLoadingDirectoryBrowser ||
-                    newDirectoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
+                .disabled(vm.isLoadingDirectoryBrowser)
             }
 
             if vm.isLoadingDirectoryBrowser {
@@ -1322,7 +1316,7 @@ struct ContentView: View {
                     }
                 }
             } else if vm.directoryBrowserEntries.isEmpty {
-                Text("No files found in this folder.")
+                Text("This folder is empty.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -1331,7 +1325,7 @@ struct ContentView: View {
 
             if !canUseBrowsedDirectory,
                !vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("This folder is already the active working directory.")
+                Text("Current working directory.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -1573,58 +1567,66 @@ struct ContentView: View {
             composerFocused = true
             return
         }
-
-        switch command {
-        case .new:
-            vm.clearComposerText()
-            vm.startNewChat()
-        case .threads:
-            vm.clearComposerText()
-            showThreads = true
-            vm.errorText = ""
-        case .logs:
-            vm.clearComposerText()
-            showLogs = true
-            vm.errorText = ""
-        case .settings:
-            vm.clearComposerText()
-            showConnectionSettings = true
-            vm.errorText = ""
-        case .browse:
-            vm.clearComposerText()
-            showWorkspaceBrowser = true
-            if arguments.isEmpty {
-                await vm.refreshDirectoryBrowser()
-                vm.statusText = "Opened the workspace browser."
-            } else {
-                await vm.openDirectory(path: arguments)
-                vm.statusText = "Opened \(arguments)."
-            }
-        case .cwd:
-            let message = await vm.setWorkingDirectoryFromSlashCommand(arguments)
-            vm.clearComposerText()
-            vm.statusText = message
-        case .executor:
-            if !arguments.isEmpty && !vm.selectableExecutors.contains(arguments.lowercased()) {
-                vm.errorText = "Executor \(arguments.lowercased()) isn't available. Options: \(vm.selectableExecutors.joined(separator: ", "))."
+        if command.argumentKind == "enum" && !arguments.isEmpty {
+            let normalized = arguments.lowercased()
+            if !command.argumentOptions.isEmpty && !command.argumentOptions.contains(normalized) {
+                vm.errorText = "\(command.usage) expects one of: \(command.argumentOptions.joined(separator: ", "))."
                 composerFocused = true
                 return
             }
-            let message = await vm.setExecutorFromSlashCommand(arguments)
-            vm.clearComposerText()
-            vm.statusText = message
-        case .retry:
-            vm.clearComposerText()
-            await vm.retryLastPrompt()
-        case .voice:
-            vm.clearComposerText()
-            handleRecordingButtonTap()
-        case .paste:
-            vm.clearComposerText()
-            await vm.pasteClipboardContentIntoDraft()
-        case .clear:
-            vm.clearComposerDraft()
-            vm.statusText = "Cleared the draft."
+        }
+
+        switch command.source {
+        case let .local(action):
+            switch action {
+            case .new:
+                vm.clearComposerText()
+                vm.startNewChat()
+            case .threads:
+                vm.clearComposerText()
+                showThreads = true
+                vm.errorText = ""
+            case .logs:
+                vm.clearComposerText()
+                showLogs = true
+                vm.errorText = ""
+            case .settings:
+                vm.clearComposerText()
+                showConnectionSettings = true
+                vm.errorText = ""
+            case .browse:
+                vm.clearComposerText()
+                showWorkspaceBrowser = true
+                if arguments.isEmpty {
+                    await vm.refreshDirectoryBrowser()
+                    vm.statusText = "Opened the workspace browser."
+                } else {
+                    await vm.openDirectory(path: arguments)
+                    vm.statusText = "Opened \(arguments)."
+                }
+            case .retry:
+                vm.clearComposerText()
+                await vm.retryLastPrompt()
+            case .voice:
+                vm.clearComposerText()
+                handleRecordingButtonTap()
+            case .paste:
+                vm.clearComposerText()
+                await vm.pasteClipboardContentIntoDraft()
+            case .clear:
+                vm.clearComposerDraft()
+                vm.statusText = "Cleared the draft."
+            }
+        case .backend:
+            do {
+                let response = try await vm.executeBackendSlashCommand(command, arguments: arguments)
+                vm.clearComposerText()
+                vm.errorText = ""
+                vm.statusText = response.message
+            } catch {
+                vm.errorText = error.localizedDescription
+                composerFocused = true
+            }
         }
     }
 
@@ -1729,9 +1731,20 @@ private struct ComposerSlashCommandRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(command.usage)
-                    .font(.caption.monospaced().weight(.semibold))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Text(command.usage)
+                        .font(.caption.monospaced().weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if let group = command.group, !group.isEmpty {
+                        Text(group.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.10))
+                            .clipShape(Capsule())
+                    }
+                }
                 Text(command.description)
                     .font(.caption2)
                     .foregroundStyle(.secondary)

@@ -141,6 +141,26 @@ final class APIClient {
         return try jsonDecoder.decode(RuntimeConfig.self, from: data)
     }
 
+    func fetchSlashCommands(
+        serverURL: String,
+        token: String
+    ) async throws -> [SlashCommandDescriptor] {
+        guard let url = URL(string: serverURL + "/v1/slash-commands") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode([SlashCommandDescriptor].self, from: data)
+        } catch let APIError.httpError(code, _) where code == 404 {
+            return []
+        }
+    }
+
     func fetchSessionContext(
         serverURL: String,
         token: String,
@@ -178,6 +198,31 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try jsonDecoder.decode(SessionContext.self, from: data)
+    }
+
+    func executeSlashCommand(
+        serverURL: String,
+        token: String,
+        sessionID: String,
+        commandID: String,
+        arguments: String?
+    ) async throws -> SlashCommandExecutionResponse {
+        guard let encodedSession = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let encodedCommand = commandID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: serverURL + "/v1/sessions/\(encodedSession)/slash-commands/\(encodedCommand)") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try jsonEncoder.encode(
+            SlashCommandExecutionRequest(arguments: arguments)
+        )
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(SlashCommandExecutionResponse.self, from: data)
     }
 
     func fetchDirectoryListing(
@@ -325,12 +370,21 @@ final class APIClient {
     func streamRunEvents(
         serverURL: String,
         token: String,
-        runID: String
+        runID: String,
+        afterSeq: Int? = nil
     ) -> AsyncThrowingStream<ExecutionEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    guard let url = URL(string: serverURL + "/v1/runs/\(runID)/events") else {
+                    guard var components = URLComponents(string: serverURL + "/v1/runs/\(runID)/events") else {
+                        throw APIError.invalidURL
+                    }
+                    if let afterSeq, afterSeq >= 0 {
+                        components.queryItems = [
+                            URLQueryItem(name: "after_seq", value: String(afterSeq))
+                        ]
+                    }
+                    guard let url = components.url else {
                         throw APIError.invalidURL
                     }
 

@@ -4,7 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from app.models.schemas import ActionPlan, ExecutionEvent, RunRecord
+from app.models.schemas import ActionPlan, ExecutionEvent, HumanUnblockRequest, RunRecord
 
 LEGACY_CODEX_THREAD_MAP_COMPAT_REMOVE_AFTER = "2026-07-01"
 
@@ -42,6 +42,7 @@ class RunStore:
                     utterance_text TEXT NOT NULL,
                     working_directory TEXT,
                     status TEXT NOT NULL,
+                    pending_human_unblock_json TEXT,
                     plan_json TEXT,
                     summary TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -55,6 +56,8 @@ class RunStore:
                 conn.execute(
                     "ALTER TABLE runs ADD COLUMN executor TEXT NOT NULL DEFAULT 'local'"
                 )
+            if "pending_human_unblock_json" not in column_names:
+                conn.execute("ALTER TABLE runs ADD COLUMN pending_human_unblock_json TEXT")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS run_events (
@@ -141,22 +144,32 @@ class RunStore:
             next_seq = int(next_seq_row["next_seq"]) if next_seq_row is not None else 0
             self._append_event_conn(conn, run_id, next_seq, event)
 
-    def update_run_status(self, run_id: str, status: str, summary: str) -> None:
+    def update_run_status(
+        self,
+        run_id: str,
+        status: str,
+        summary: str,
+        *,
+        pending_human_unblock: HumanUnblockRequest | None = None,
+    ) -> None:
+        pending_human_unblock_json = (
+            pending_human_unblock.model_dump_json() if pending_human_unblock is not None else None
+        )
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE runs
-                SET status = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+                SET status = ?, summary = ?, pending_human_unblock_json = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE run_id = ?
                 """,
-                (status, summary, run_id),
+                (status, summary, pending_human_unblock_json, run_id),
             )
 
     def load_run(self, run_id: str) -> RunRecord | None:
         with self._connect() as conn:
             run_row = conn.execute(
                 """
-                SELECT run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, created_at, updated_at
+                SELECT run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, created_at, updated_at
                 FROM runs
                 WHERE run_id = ?
                 """,
@@ -180,7 +193,7 @@ class RunStore:
         with self._connect() as conn:
             run_rows = conn.execute(
                 """
-                SELECT run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, created_at, updated_at
+                SELECT run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, created_at, updated_at
                 FROM runs
                 """
             ).fetchall()
@@ -203,7 +216,7 @@ class RunStore:
         with self._connect() as conn:
             run_rows = conn.execute(
                 """
-                SELECT run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, created_at, updated_at
+                SELECT run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, created_at, updated_at
                 FROM runs
                 WHERE session_id = ?
                 ORDER BY datetime(updated_at) DESC
@@ -313,18 +326,22 @@ class RunStore:
 
     def _upsert_run_conn(self, conn: sqlite3.Connection, run: RunRecord) -> None:
         plan_json = run.plan.model_dump_json() if run.plan is not None else None
+        pending_human_unblock_json = (
+            run.pending_human_unblock.model_dump_json() if run.pending_human_unblock is not None else None
+        )
         conn.execute(
             """
             INSERT INTO runs (
-                run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, updated_at
+                run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(run_id) DO UPDATE SET
                 session_id=excluded.session_id,
                 executor=excluded.executor,
                 utterance_text=excluded.utterance_text,
                 working_directory=excluded.working_directory,
                 status=excluded.status,
+                pending_human_unblock_json=excluded.pending_human_unblock_json,
                 plan_json=excluded.plan_json,
                 summary=excluded.summary,
                 updated_at=CURRENT_TIMESTAMP
@@ -336,6 +353,7 @@ class RunStore:
                 run.utterance_text,
                 run.working_directory,
                 run.status,
+                pending_human_unblock_json,
                 plan_json,
                 run.summary,
             ),
@@ -370,15 +388,23 @@ class RunStore:
         event_rows: list[sqlite3.Row],
     ) -> RunRecord:
         plan: ActionPlan | None = None
+        pending_human_unblock: HumanUnblockRequest | None = None
         plan_json = run_row["plan_json"]
         if plan_json:
             try:
                 plan = ActionPlan.model_validate_json(plan_json)
             except Exception:
                 plan = None
+        pending_human_unblock_json = run_row["pending_human_unblock_json"]
+        if pending_human_unblock_json:
+            try:
+                pending_human_unblock = HumanUnblockRequest.model_validate_json(pending_human_unblock_json)
+            except Exception:
+                pending_human_unblock = None
 
         events = [
             ExecutionEvent(
+                seq=row["seq"],
                 event_id=row["event_id"],
                 type=row["type"],
                 action_index=row["action_index"],
@@ -395,6 +421,7 @@ class RunStore:
             utterance_text=run_row["utterance_text"],
             working_directory=run_row["working_directory"],
             status=run_row["status"],
+            pending_human_unblock=pending_human_unblock,
             plan=plan,
             events=events,
             summary=run_row["summary"],

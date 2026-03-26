@@ -104,17 +104,10 @@ final class VoiceAgentViewModel: ObservableObject {
         let path: String
     }
 
-    struct HumanUnblockRequest: Equatable {
-        let instructions: String
-
-        var suggestedReply: String {
-            "I completed the requested unblock step. Continue from the preserved state."
-        }
-    }
-
     private struct ObservedRunContext {
         let runID: String
         let threadID: UUID
+        var lastEventSeq: Int = -1
         var seenEventIDs: Set<String> = []
         var seenEventFingerprints: Set<String> = []
         var events: [ExecutionEvent] = []
@@ -159,6 +152,7 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var backendExecutorDescriptors: [RuntimeExecutorDescriptor] = []
     @Published var backendDefaultExecutor: String = "codex"
     @Published var backendAvailableExecutors: [String] = ["codex"]
+    @Published var backendSlashCommands: [ComposerSlashCommand] = []
     @Published var backendWorkdirRoot: String = ""
     @Published var showDirectoryBrowser: Bool = false
     @Published var isLoadingDirectoryBrowser: Bool = false
@@ -345,6 +339,7 @@ final class VoiceAgentViewModel: ObservableObject {
         backendDefaultExecutor = "codex"
         backendAvailableExecutors = previewExecutors.map(\.id)
         backendExecutorDescriptors = previewExecutors
+        backendSlashCommands = previewSlashCommands()
         directoryBrowserPath = workspace
         directoryBrowserEntries = []
         directoryBrowserError = ""
@@ -462,6 +457,39 @@ final class VoiceAgentViewModel: ObservableObject {
   "artifacts": []
 }
 """
+            ),
+        ]
+    }
+
+    private func previewSlashCommands() -> [ComposerSlashCommand] {
+        [
+            ComposerSlashCommand(
+                descriptor: SlashCommandDescriptor(
+                    id: "cwd",
+                    title: "Working Directory",
+                    description: "Show or change the working directory used for new runs.",
+                    usage: "/cwd [path]",
+                    group: "Runtime",
+                    aliases: ["pwd", "workdir"],
+                    symbol: "arrow.triangle.branch",
+                    argumentKind: "path",
+                    argumentOptions: [],
+                    argumentPlaceholder: "path"
+                )
+            ),
+            ComposerSlashCommand(
+                descriptor: SlashCommandDescriptor(
+                    id: "executor",
+                    title: "Executor",
+                    description: "Show or switch the active executor.",
+                    usage: "/executor [codex|claude|local]",
+                    group: "Runtime",
+                    aliases: ["exec", "agent"],
+                    symbol: "bolt.horizontal.circle",
+                    argumentKind: "enum",
+                    argumentOptions: ["codex", "claude", "local"],
+                    argumentPlaceholder: "executor"
+                )
             ),
         ]
     }
@@ -923,6 +951,7 @@ final class VoiceAgentViewModel: ObservableObject {
     private func observeRun(runID: String, threadID: UUID?) async throws {
         guard let threadID else { return }
         ensureObservedRunContext(runID: runID, threadID: threadID)
+        setThreadPendingHumanUnblock(threadID: threadID, request: nil, persist: false)
         updateThreadMetadata(threadID: threadID, runID: runID, statusText: "Running...", persist: true)
         if activeThreadID == threadID {
             isLoading = true
@@ -997,13 +1026,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
     private func streamRunUntilDone(runID: String, threadID: UUID, timeoutSec: TimeInterval?) async throws {
         let deadline = timeoutSec.map { Date().addingTimeInterval($0) }
-        let stream = client.streamRunEvents(
-            serverURL: normalizedServerURL,
-            token: apiToken,
-            runID: runID
-        )
-        for try await event in stream {
-            ingestEvents([event], runID: runID, threadID: threadID)
+        while true {
             if let deadline, Date() > deadline {
                 throw NSError(
                     domain: "VoiceAgentApp",
@@ -1011,21 +1034,43 @@ final class VoiceAgentViewModel: ObservableObject {
                     userInfo: [NSLocalizedDescriptionKey: "Run timed out while streaming events."]
                 )
             }
-            if event.type == "run.completed" || event.type == "run.failed" || event.type == "run.blocked" || event.type == "run.cancelled" {
-                let run = try await client.fetchRun(
-                    serverURL: normalizedServerURL,
-                    token: apiToken,
-                    runID: runID
-                )
-                applyTerminalRunStateIfNeeded(run, threadID: threadID)
+            if isTerminalStatusText(statusText(for: threadID)) {
                 return
             }
+
+            let stream = client.streamRunEvents(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                runID: runID,
+                afterSeq: observedRunContexts[runID]?.lastEventSeq
+            )
+
+            for try await event in stream {
+                ingestEvents([event], runID: runID, threadID: threadID)
+                if let deadline, Date() > deadline {
+                    throw NSError(
+                        domain: "VoiceAgentApp",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Run timed out while streaming events."]
+                    )
+                }
+                if event.type == "run.completed" || event.type == "run.failed" || event.type == "run.blocked" || event.type == "run.cancelled" {
+                    let run = try await client.fetchRun(
+                        serverURL: normalizedServerURL,
+                        token: apiToken,
+                        runID: runID
+                    )
+                    applyTerminalRunStateIfNeeded(run, threadID: threadID)
+                    return
+                }
+            }
+
+            if isTerminalStatusText(statusText(for: threadID)) {
+                return
+            }
+
+            try await Task.sleep(nanoseconds: 300_000_000)
         }
-        throw NSError(
-            domain: "VoiceAgentApp",
-            code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "Event stream ended before run reached a terminal state."]
-        )
     }
 
     func startNewChat() {
@@ -1244,11 +1289,20 @@ final class VoiceAgentViewModel: ObservableObject {
             !lastSubmittedUserMessage.attachments.isEmpty
     }
 
+    var composerSlashCatalog: [ComposerSlashCommand] {
+        ComposerSlashCommand.mergedCatalog(backend: backendSlashCommands)
+    }
+
     var composerSlashCommandState: ComposerSlashCommandState? {
-        resolveComposerSlashCommandState(from: promptText)
+        resolveComposerSlashCommandState(from: promptText, commands: composerSlashCatalog)
     }
 
     var pendingHumanUnblockRequest: HumanUnblockRequest? {
+        if let threadID = activeThreadID,
+           let thread = threads.first(where: { $0.id == threadID }),
+           let request = thread.pendingHumanUnblock {
+            return request
+        }
         for message in conversation.reversed() {
             if message.role == "user" {
                 return nil
@@ -1358,6 +1412,41 @@ final class VoiceAgentViewModel: ObservableObject {
             errorText = error.localizedDescription
             return fallback
         }
+    }
+
+    @discardableResult
+    func refreshSlashCommandsFromBackend() async throws -> [ComposerSlashCommand] {
+        guard hasConfiguredConnection else {
+            backendSlashCommands = []
+            throw APIError.missingCredentials
+        }
+        let descriptors = try await client.fetchSlashCommands(
+            serverURL: normalizedServerURL,
+            token: apiToken
+        )
+        backendSlashCommands = descriptors.map(ComposerSlashCommand.init(descriptor:))
+        return backendSlashCommands
+    }
+
+    @discardableResult
+    func executeBackendSlashCommand(
+        _ command: ComposerSlashCommand,
+        arguments: String
+    ) async throws -> SlashCommandExecutionResponse {
+        guard hasConfiguredConnection else {
+            throw APIError.missingCredentials
+        }
+        let response = try await client.executeSlashCommand(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            sessionID: sessionID,
+            commandID: command.id,
+            arguments: arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : arguments
+        )
+        if let sessionContext = response.sessionContext {
+            applySessionContext(sessionContext)
+        }
+        return response
     }
 
     @discardableResult
@@ -2152,6 +2241,11 @@ final class VoiceAgentViewModel: ObservableObject {
         backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
         backendTranscribeReady = cfg.transcribeReady ?? false
         backendWorkdirRoot = cfg.workdirRoot ?? ""
+        let slashDescriptors = try await client.fetchSlashCommands(
+            serverURL: normalizedServerURL,
+            token: apiToken
+        )
+        backendSlashCommands = slashDescriptors.map(ComposerSlashCommand.init(descriptor:))
         if normalizedExecutor(from: executor) == nil {
             executor = backendDefaultExecutor
         }
@@ -2334,6 +2428,11 @@ final class VoiceAgentViewModel: ObservableObject {
             return
         }
 
+        setThreadPendingHumanUnblock(
+            threadID: threadID,
+            request: run.status == "blocked" ? run.pendingHumanUnblock : nil,
+            persist: false
+        )
         updateThreadMetadata(
             threadID: threadID,
             summaryText: run.summary,
@@ -2361,18 +2460,25 @@ final class VoiceAgentViewModel: ObservableObject {
         ensureObservedRunContext(runID: runID, threadID: threadID)
         for event in runEvents {
             guard var context = observedRunContexts[runID] else { continue }
-            let eventID = event.eventID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !eventID.isEmpty {
-                if context.seenEventIDs.contains(eventID) {
+            if let seq = event.seq {
+                if seq <= context.lastEventSeq {
                     continue
                 }
-                context.seenEventIDs.insert(eventID)
+                context.lastEventSeq = seq
             } else {
-                let fingerprint = "\(event.type)|\(event.actionIndex ?? -1)|\(event.message)"
-                if context.seenEventFingerprints.contains(fingerprint) {
-                    continue
+                let eventID = event.eventID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !eventID.isEmpty {
+                    if context.seenEventIDs.contains(eventID) {
+                        continue
+                    }
+                    context.seenEventIDs.insert(eventID)
+                } else {
+                    let fingerprint = "\(event.type)|\(event.actionIndex ?? -1)|\(event.message)"
+                    if context.seenEventFingerprints.contains(fingerprint) {
+                        continue
+                    }
+                    context.seenEventFingerprints.insert(fingerprint)
                 }
-                context.seenEventFingerprints.insert(fingerprint)
             }
             context.events.append(event)
             observedRunContexts[runID] = context
@@ -2783,6 +2889,7 @@ final class VoiceAgentViewModel: ObservableObject {
         backendTranscribeProvider = "unknown"
         backendTranscribeReady = false
         backendExecutorDescriptors = []
+        backendSlashCommands = []
         backendWorkdirRoot = ""
     }
 
@@ -2957,6 +3064,20 @@ final class VoiceAgentViewModel: ObservableObject {
                 self.activeRunExecutor = activeRunExecutor
             }
         }
+        if persist {
+            persistThreadSnapshot(threadID: threadID)
+        }
+    }
+
+    private func setThreadPendingHumanUnblock(
+        threadID: UUID,
+        request: HumanUnblockRequest?,
+        persist: Bool = true
+    ) {
+        guard let idx = threadIndex(for: threadID) else { return }
+        var thread = threads[idx]
+        thread.pendingHumanUnblock = request
+        threads[idx] = thread
         if persist {
             persistThreadSnapshot(threadID: threadID)
         }

@@ -8,8 +8,12 @@ final class VoiceAgentModelTests: XCTestCase {
           "run_id":"run-123",
           "session_id":"session-1",
           "utterance_text":"hello",
-          "status":"completed",
-          "summary":"Run completed successfully",
+          "status":"blocked",
+          "pending_human_unblock":{
+            "instructions":"Complete the CAPTCHA, then reply from the phone.",
+            "suggested_reply":"I completed the unblock step."
+          },
+          "summary":"Human unblock required",
           "events":[
             {"type":"action.started","action_index":0,"message":"starting run"}
           ]
@@ -21,6 +25,8 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.runId, "run-123")
         XCTAssertEqual(decoded.events.count, 1)
         XCTAssertEqual(decoded.events.first?.type, "action.started")
+        XCTAssertEqual(decoded.pendingHumanUnblock?.instructions, "Complete the CAPTCHA, then reply from the phone.")
+        XCTAssertEqual(decoded.pendingHumanUnblock?.suggestedReply, "I completed the unblock step.")
     }
 
     func testChatEnvelopeDecodingWithArtifacts() throws {
@@ -132,6 +138,7 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.title, "Chat")
         XCTAssertEqual(decoded.draftText, "")
         XCTAssertTrue(decoded.draftAttachments.isEmpty)
+        XCTAssertNil(decoded.pendingHumanUnblock)
     }
 
     func testRuntimeConfigDecodingSupportsExecutorDiscovery() throws {
@@ -186,6 +193,31 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.resolvedWorkingDirectory, "/Users/test/work/project")
     }
 
+    func testSlashCommandDescriptorDecodingSupportsDynamicCatalog() throws {
+        let json = """
+        {
+          "id":"executor",
+          "title":"Executor",
+          "description":"Show or switch the active executor.",
+          "usage":"/executor [codex|claude|local]",
+          "group":"Runtime",
+          "aliases":["exec","agent"],
+          "symbol":"bolt.horizontal.circle",
+          "argument_kind":"enum",
+          "argument_options":["codex","claude","local"],
+          "argument_placeholder":"executor"
+        }
+        """
+
+        let data = Data(json.utf8)
+        let decoded = try JSONDecoder().decode(SlashCommandDescriptor.self, from: data)
+        let command = ComposerSlashCommand(descriptor: decoded)
+        XCTAssertEqual(command.id, "executor")
+        XCTAssertEqual(command.group, "Runtime")
+        XCTAssertEqual(command.argumentOptions, ["codex", "claude", "local"])
+        XCTAssertTrue(command.acceptsArguments)
+    }
+
     func testDraftAttachmentRoundTripsThroughCodable() throws {
         let attachment = DraftAttachment(
             id: UUID(uuidString: "2E2B216F-5A6F-4B2D-8FCA-0C109D5C4AC8") ?? UUID(),
@@ -216,13 +248,13 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertNotNil(state)
         XCTAssertEqual(state?.query, "")
         XCTAssertEqual(state?.arguments, "")
-        XCTAssertEqual(state?.suggestions.first, .new)
-        XCTAssertTrue(state?.suggestions.contains(.browse) == true)
+        XCTAssertEqual(state?.suggestions.first?.id, "new")
+        XCTAssertTrue(state?.suggestions.contains(where: { $0.id == "browse" }) == true)
     }
 
     func testSlashCommandStateParsesArguments() {
         let state = _test_resolveComposerSlashCommandState("/browse ios/VoiceAgentApp")
-        XCTAssertEqual(state?.exactMatch, .browse)
+        XCTAssertEqual(state?.exactMatch?.id, "browse")
         XCTAssertEqual(state?.arguments, "ios/VoiceAgentApp")
     }
 
@@ -236,6 +268,30 @@ final class VoiceAgentModelTests: XCTestCase {
     func testSlashCommandStateIgnoresAbsolutePaths() {
         let state = _test_resolveComposerSlashCommandState("/Users/test/Mobile Documents/repo")
         XCTAssertNil(state)
+    }
+
+    func testSlashCommandStateUsesBackendCatalogEntries() {
+        let commands = ComposerSlashCommand.mergedCatalog(
+            backend: [
+                ComposerSlashCommand(
+                    descriptor: SlashCommandDescriptor(
+                    id: "executor",
+                    title: "Executor",
+                    description: "Show or switch the active executor.",
+                    usage: "/executor [codex|claude|local]",
+                    group: "Runtime",
+                    aliases: ["exec"],
+                    symbol: "bolt.horizontal.circle",
+                    argumentKind: "enum",
+                        argumentOptions: ["codex", "claude", "local"],
+                        argumentPlaceholder: "executor"
+                    )
+                )
+            ]
+        )
+        let state = _test_resolveComposerSlashCommandState("/exec", commands: commands)
+        XCTAssertEqual(state?.exactMatch?.id, "executor")
+        XCTAssertEqual(state?.suggestions.first?.id, "executor")
     }
 
     @MainActor

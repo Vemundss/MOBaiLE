@@ -55,6 +55,7 @@ class ActionPlan(BaseModel):
 
 
 class ExecutionEvent(BaseModel):
+    seq: int | None = None
     type: Literal[
         "chat.message",
         "log.message",
@@ -77,6 +78,11 @@ class ExecutionEvent(BaseModel):
 class ChatSection(BaseModel):
     title: str
     body: str
+
+
+class HumanUnblockRequest(BaseModel):
+    instructions: str
+    suggested_reply: str = "I completed the requested unblock step. Continue from the preserved state."
 
 
 class AgendaItem(BaseModel):
@@ -126,6 +132,7 @@ class RunRecord(BaseModel):
     utterance_text: str
     working_directory: str | None = None
     status: Literal["running", "completed", "failed", "rejected", "blocked", "cancelled"]
+    pending_human_unblock: HumanUnblockRequest | None = None
     plan: ActionPlan | None = None
     events: list[ExecutionEvent] = Field(default_factory=list)
     summary: str
@@ -233,6 +240,29 @@ class SessionContextResponse(BaseModel):
 class SessionContextUpdateRequest(BaseModel):
     executor: RunExecutorName | None = None
     working_directory: str | None = None
+
+
+class SlashCommandDescriptor(BaseModel):
+    id: str = Field(min_length=1)
+    title: str
+    description: str
+    usage: str
+    group: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    symbol: str
+    argument_kind: Literal["none", "text", "path", "enum"] = "none"
+    argument_options: list[str] = Field(default_factory=list)
+    argument_placeholder: str | None = None
+
+
+class SlashCommandExecutionRequest(BaseModel):
+    arguments: str | None = None
+
+
+class SlashCommandExecutionResponse(BaseModel):
+    command_id: str
+    message: str
+    session_context: SessionContextResponse | None = None
 
 
 class CapabilityProbe(BaseModel):

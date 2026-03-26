@@ -15,6 +15,7 @@ from app.models.schemas import ChatArtifact
 from app.models.schemas import ChatEnvelope
 from app.models.schemas import ChatSection
 from app.models.schemas import ExecutionEvent
+from app.models.schemas import HumanUnblockRequest
 from app.models.schemas import RunDiagnostics
 from app.models.schemas import RunRecord
 from app.models.schemas import RunSummary
@@ -60,6 +61,12 @@ class RunState:
             run = self._runs.get(run_id)
             if run is None:
                 return
+            if event.seq is None:
+                if run.events:
+                    last_seq = run.events[-1].seq
+                    event.seq = (last_seq + 1) if last_seq is not None else len(run.events)
+                else:
+                    event.seq = 0
             run.events.append(event)
             self.run_store.append_event(run_id, event)
 
@@ -110,16 +117,32 @@ class RunState:
             ExecutionEvent(type="log.message", action_index=action_index, message=text),
         )
 
-    def set_run_status(self, run_id: str, status: str, summary: str) -> None:
+    def set_run_status(
+        self,
+        run_id: str,
+        status: str,
+        summary: str,
+        *,
+        pending_human_unblock: HumanUnblockRequest | None = None,
+    ) -> None:
         with self._runs_lock:
             run = self._runs.get(run_id)
             if run is None:
                 return
+            effective_pending_human_unblock = pending_human_unblock
+            if status == "blocked" and effective_pending_human_unblock is None:
+                effective_pending_human_unblock = run.pending_human_unblock
             run.status = status
             run.summary = summary
+            run.pending_human_unblock = effective_pending_human_unblock
             if status in {"completed", "failed", "rejected", "blocked", "cancelled"}:
                 self._cancelled.discard(run_id)
-            self.run_store.update_run_status(run_id, status, summary)
+            self.run_store.update_run_status(
+                run_id,
+                status,
+                summary,
+                pending_human_unblock=effective_pending_human_unblock,
+            )
 
     def is_cancelled(self, run_id: str) -> bool:
         with self._runs_lock:
@@ -177,21 +200,21 @@ class RunState:
             updated_at=run.updated_at,
         )
 
-    def event_stream(self, run_id: str) -> Iterator[str]:
-        sent_count = 0
+    def event_stream(self, run_id: str, *, after_seq: int = -1) -> Iterator[str]:
+        cursor_seq = after_seq
         heartbeat_at = time.monotonic()
         while True:
             with self._runs_lock:
                 run = self._runs.get(run_id)
                 if run is None:
                     break
-                pending_events = run.events[sent_count:]
+                pending_events = [event for event in run.events if self._event_seq(event) > cursor_seq]
                 status = run.status
 
             for event in pending_events:
-                sent_count += 1
+                cursor_seq = self._event_seq(event)
                 payload = json.dumps(event.model_dump())
-                yield f"event: {event.type}\ndata: {payload}\n\n"
+                yield f"id: {cursor_seq}\nevent: {event.type}\ndata: {payload}\n\n"
 
             done = status in {"completed", "failed", "rejected", "blocked", "cancelled"}
             if done and not pending_events:
@@ -202,3 +225,7 @@ class RunState:
                 heartbeat_at = now
                 yield ": keep-alive\n\n"
             time.sleep(0.25)
+
+    @staticmethod
+    def _event_seq(event: ExecutionEvent) -> int:
+        return event.seq if event.seq is not None else -1

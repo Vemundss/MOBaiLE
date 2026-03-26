@@ -43,6 +43,9 @@ from app.models.schemas import (
     RuntimeConfigResponse,
     SessionContextResponse,
     SessionContextUpdateRequest,
+    SlashCommandDescriptor,
+    SlashCommandExecutionRequest,
+    SlashCommandExecutionResponse,
     UploadResponse,
     UtteranceRequest,
     UtteranceResponse,
@@ -376,6 +379,11 @@ def get_runtime_config() -> RuntimeConfigResponse:
     )
 
 
+@app.get("/v1/slash-commands", response_model=list[SlashCommandDescriptor])
+def list_slash_commands() -> list[SlashCommandDescriptor]:
+    return _slash_command_catalog()
+
+
 @app.get("/v1/capabilities", response_model=CapabilitiesResponse)
 def get_capabilities(
     deep: bool = Query(False),
@@ -453,6 +461,22 @@ def update_session_context(session_id: str, payload: SessionContextUpdateRequest
         session_id,
         executor=executor,
         working_directory=working_directory,
+    )
+
+
+@app.post(
+    "/v1/sessions/{session_id}/slash-commands/{command_id}",
+    response_model=SlashCommandExecutionResponse,
+)
+def execute_slash_command(
+    session_id: str,
+    command_id: str,
+    payload: SlashCommandExecutionRequest,
+) -> SlashCommandExecutionResponse:
+    return _execute_slash_command(
+        session_id,
+        command_id=command_id,
+        arguments=payload.arguments,
     )
 
 
@@ -564,10 +588,13 @@ def cancel_run(run_id: str) -> dict[str, str]:
 
 
 @app.get("/v1/runs/{run_id}/events")
-def stream_run_events(run_id: str) -> StreamingResponse:
+def stream_run_events(run_id: str, after_seq: int = Query(-1, ge=-1)) -> StreamingResponse:
     if RUN_STATE.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="run not found")
-    return StreamingResponse(RUN_STATE.event_stream(run_id), media_type="text/event-stream")
+    return StreamingResponse(
+        RUN_STATE.event_stream(run_id, after_seq=after_seq),
+        media_type="text/event-stream",
+    )
 
 
 def _session_context_response(session_id: str) -> SessionContextResponse:
@@ -625,6 +652,116 @@ def _validated_session_context_executor(executor: RunExecutorName) -> RunExecuto
     if executor in ENV.available_agent_executors():
         return executor
     raise HTTPException(status_code=400, detail=f"executor {executor} is not available on this backend")
+
+
+def _slash_command_catalog() -> list[SlashCommandDescriptor]:
+    executor_options = _slash_command_executor_options()
+    executor_usage = "/executor"
+    if executor_options:
+        executor_usage = f"/executor [{'|'.join(executor_options)}]"
+
+    return [
+        SlashCommandDescriptor(
+            id="cwd",
+            title="Working Directory",
+            description="Show or change the working directory used for new runs.",
+            usage="/cwd [path]",
+            group="Runtime",
+            aliases=["pwd", "workdir"],
+            symbol="arrow.triangle.branch",
+            argument_kind="path",
+            argument_placeholder="path",
+        ),
+        SlashCommandDescriptor(
+            id="executor",
+            title="Executor",
+            description="Show or switch the active executor.",
+            usage=executor_usage,
+            group="Runtime",
+            aliases=["exec", "agent"],
+            symbol="bolt.horizontal.circle",
+            argument_kind="enum" if executor_options else "text",
+            argument_options=executor_options,
+            argument_placeholder="executor",
+        ),
+    ]
+
+
+def _slash_command_executor_options() -> list[str]:
+    values = list(ENV.available_agent_executors())
+    if "local" not in values:
+        values.append("local")
+    return values
+
+
+def _execute_slash_command(
+    session_id: str,
+    *,
+    command_id: str,
+    arguments: str | None,
+) -> SlashCommandExecutionResponse:
+    normalized_command = command_id.strip().lower()
+    normalized_arguments = (arguments or "").strip()
+
+    if normalized_command == "cwd":
+        if not normalized_arguments:
+            context = _session_context_response(session_id)
+            return SlashCommandExecutionResponse(
+                command_id="cwd",
+                message=_working_directory_status_message(context),
+                session_context=context,
+            )
+
+        try:
+            resolved_working_directory = str(ENV.resolve_workdir(normalized_arguments))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        context = _update_session_context(
+            session_id,
+            working_directory=resolved_working_directory,
+        )
+        return SlashCommandExecutionResponse(
+            command_id="cwd",
+            message=f"Working directory set to {context.resolved_working_directory}.",
+            session_context=context,
+        )
+
+    if normalized_command == "executor":
+        if not normalized_arguments:
+            context = _session_context_response(session_id)
+            return SlashCommandExecutionResponse(
+                command_id="executor",
+                message=_executor_status_message(context),
+                session_context=context,
+            )
+
+        requested_executor = normalized_arguments.lower()
+        if requested_executor not in {"local", "codex", "claude"}:
+            raise HTTPException(status_code=400, detail=f"executor {requested_executor} is not available on this backend")
+        context = _update_session_context(
+            session_id,
+            executor=_validated_session_context_executor(requested_executor),  # type: ignore[arg-type]
+        )
+        return SlashCommandExecutionResponse(
+            command_id="executor",
+            message=_executor_status_message(context),
+            session_context=context,
+        )
+
+    raise HTTPException(status_code=404, detail=f"unknown slash command {normalized_command}")
+
+
+def _working_directory_status_message(context: SessionContextResponse) -> str:
+    current = context.resolved_working_directory.strip()
+    if current:
+        return f"Working directory: {current}"
+    return "Working directory follows the backend default."
+
+
+def _executor_status_message(context: SessionContextResponse) -> str:
+    options = ", ".join(_slash_command_executor_options())
+    return f"Executor: {context.executor}. Available: {options}."
 
 
 def _fetch_today_calendar_events() -> list[AgendaItem]:

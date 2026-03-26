@@ -374,7 +374,7 @@ bash ./scripts/service_linux.sh restart
 
 This updates:
 - `backend/.env` (`VOICE_AGENT_API_TOKEN`)
-- `backend/pairing.json` (`api_token`, `pair_code`, `pair_code_expires_at`)
+- `backend/pairing.json` (`pair_code`, `pair_code_expires_at`, and removes any legacy `api_token` export)
 
 ## 11) Switch security mode
 

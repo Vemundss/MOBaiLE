@@ -15,8 +15,6 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            bubbleHeader
-
             ForEach(segments) { segment in
                 switch segment.kind {
                 case .markdown:
@@ -48,7 +46,7 @@ struct MessageBubble: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
         .foregroundStyle(isUser ? Color.white : Color.primary)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -109,14 +107,6 @@ struct MessageBubble: View {
             return explicitAttachments
         }
         return parsed + explicitAttachments
-    }
-
-    private var bubbleHeader: some View {
-        HStack(spacing: 6) {
-            Label(isUser ? "You" : "MOBaiLE", systemImage: isUser ? "person.fill" : "sparkles")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isUser ? Color.white.opacity(0.92) : Color.secondary)
-        }
     }
 
     private func openArtifact(_ artifact: ChatArtifact) async {

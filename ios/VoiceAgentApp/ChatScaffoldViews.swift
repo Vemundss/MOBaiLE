@@ -114,7 +114,7 @@ struct ConversationEmptyStateView: View {
         VStack(alignment: .leading, spacing: isConfigured ? 12 : 18) {
             if isConfigured {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Ask about this repo, or start with one of these tasks.")
+                    Text("Ask about this repo, or try a quick start.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -217,20 +217,15 @@ private struct CompactStarterPromptButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 Label(prompt.label, systemImage: prompt.systemImage)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(prompt.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineLimit(2)
             }
-            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
-            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Color(.systemBackground))
@@ -452,7 +447,7 @@ struct ThreadsView: View {
                                 onSelect(thread.id)
                             } label: {
                                 HStack(spacing: 10) {
-                                    VStack(alignment: .leading, spacing: 6) {
+                                    VStack(alignment: .leading, spacing: 4) {
                                         HStack(spacing: 8) {
                                             Text(thread.title)
                                                 .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
@@ -470,7 +465,7 @@ struct ThreadsView: View {
                                         Text(threadPreview(for: thread))
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
-                                            .lineLimit(2)
+                                            .lineLimit(1)
                                         HStack(spacing: 8) {
                                             Text(thread.updatedAt, style: .relative)
                                                 .font(.caption)
@@ -488,16 +483,17 @@ struct ThreadsView: View {
                                 }
                             }
                             .buttonStyle(.plain)
-                            .padding(12)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
                             .background(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(activeThreadID == thread.id ? Color.accentColor.opacity(0.09) : Color(.secondarySystemBackground))
+                                    .fill(activeThreadID == thread.id ? Color.accentColor.opacity(0.06) : Color(.secondarySystemBackground))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                                     .stroke(
                                         activeThreadID == thread.id
-                                            ? Color.accentColor.opacity(0.22)
+                                            ? Color.accentColor.opacity(0.16)
                                             : Color(.separator).opacity(0.08),
                                         lineWidth: 1
                                     )

@@ -11,6 +11,7 @@ from pathlib import Path
 from app.models.schemas import ChatArtifact
 from app.models.schemas import ChatEnvelope
 from app.models.schemas import ChatSection
+from app.models.schemas import HumanUnblockRequest
 
 
 def parse_chat_envelope_payload(raw_text: str) -> dict[str, object] | None:
@@ -177,3 +178,13 @@ def find_human_unblock_section(envelope: ChatEnvelope) -> ChatSection | None:
         if section.title.strip().lower() == "human unblock":
             return section
     return None
+
+
+def human_unblock_request_from_envelope(envelope: ChatEnvelope) -> HumanUnblockRequest | None:
+    section = find_human_unblock_section(envelope)
+    if section is None:
+        return None
+    instructions = section.body.strip()
+    if not instructions:
+        return None
+    return HumanUnblockRequest(instructions=instructions)

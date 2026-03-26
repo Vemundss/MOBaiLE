@@ -12,7 +12,7 @@ from typing import Callable
 from app.claude_text import claude_assistant_text
 from app.claude_text import claude_session_id
 from app.claude_text import parse_claude_stream_event
-from app.chat_envelope import find_human_unblock_section
+from app.chat_envelope import human_unblock_request_from_envelope
 from app.codex_text import CodexAssistantExtractor
 from app.codex_text import parse_codex_json_event
 from app.executors.claude_executor import ClaudeExecutor
@@ -440,17 +440,17 @@ class ExecutionService:
 
     def _append_assistant_payload(self, run_id: str, raw_text: str) -> bool:
         envelope = self.run_state.append_assistant_payload(run_id, raw_text)
-        unblock = find_human_unblock_section(envelope)
+        unblock = human_unblock_request_from_envelope(envelope)
         if unblock is None:
             return False
         run = self.run_state.get_run(run_id)
         if run is not None and run.status == "blocked":
             return True
-        details = unblock.body.strip() or "Human unblock required"
+        details = unblock.instructions.strip() or "Human unblock required"
         summary = details.splitlines()[0].strip() or "Human unblock required"
         self.run_state.append_event(
             run_id,
             ExecutionEvent(type="run.blocked", message=details),
         )
-        self.run_state.set_run_status(run_id, "blocked", summary)
+        self.run_state.set_run_status(run_id, "blocked", summary, pending_human_unblock=unblock)
         return True
