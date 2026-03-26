@@ -92,7 +92,8 @@ The checked-in project does not hard-code a development team, so Xcode should le
 
 - Pairing link opens but app does not connect:
   - verify the backend is running
-  - verify the token and session in `backend/pairing.json` are current
+  - verify the pair code and session in `backend/pairing.json` are current
+  - verify `VOICE_AGENT_API_TOKEN` in `backend/.env` matches the running backend
   - if pairing fails immediately, rotate the pairing file first with `bash ./scripts/rotate_api_token.sh`
 
 - Audio fails but text works:

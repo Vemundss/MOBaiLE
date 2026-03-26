@@ -87,10 +87,10 @@ struct ConversationEmptyStateView: View {
 
     private let starterPrompts = [
         StarterPrompt(
-            label: "Summarize Repo",
+            label: "Map the repo",
             prompt: "summarize this repo and point out the most important modules",
             systemImage: "square.stack.3d.up",
-            detail: "Get a quick map of the codebase and where to start."
+            detail: "Get a quick codebase map and where to start."
         ),
         StarterPrompt(
             label: "Run Smoke Test",
@@ -106,99 +106,30 @@ struct ConversationEmptyStateView: View {
         )
     ]
 
+    private var configuredStarterPrompts: [StarterPrompt] {
+        Array(starterPrompts.prefix(2))
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .center, spacing: 12) {
-                MobaileLogoMark()
-                    .frame(width: 48, height: 48)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("MOBaiLE")
-                        .font(.title3.weight(.semibold))
-                    Text(isConfigured ? "Threaded repo assistant" : "Voice and workspace agent")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                ConnectionBadge(isConnected: isConfigured, statusText: statusText)
-                    .frame(maxWidth: 150, alignment: .trailing)
-            }
-
-            Text(
-                isConfigured
-                    ? "Talk to the repo, record a voice task, and keep every run anchored to the same workspace thread."
-                    : "Connect your backend once, then send prompts, record voice tasks, and watch live run updates from here."
-            )
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Label(
-                    isConfigured ? "Start with a focused task" : "Finish setup first",
-                    systemImage: isConfigured ? "sparkles" : "server.rack"
-                )
-                .font(.headline)
-
-                Text(
-                    isConfigured
-                        ? "Choose a starter prompt or write your own below. Keep the first ask narrow and concrete."
-                        : "Add a server URL and API token in Settings. That unlocks sending, recording, and live run updates."
-                )
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
+        VStack(alignment: .leading, spacing: isConfigured ? 12 : 18) {
             if isConfigured {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Starter prompts")
-                        .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Ask about this repo, or start with one of these tasks.")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    VStack(spacing: 10) {
-                        ForEach(starterPrompts, id: \.label) { prompt in
-                            Button {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(minimum: 0), spacing: 10, alignment: .top),
+                            GridItem(.flexible(minimum: 0), spacing: 10, alignment: .top)
+                        ],
+                        spacing: 10
+                    ) {
+                        ForEach(configuredStarterPrompts, id: \.label) { prompt in
+                            CompactStarterPromptButton(prompt: prompt) {
                                 onUsePrompt(prompt.prompt)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: prompt.systemImage)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(Color.accentColor)
-                                        .frame(width: 32, height: 32)
-                                        .background(Color.accentColor.opacity(0.12))
-                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(prompt.label)
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                        Text(prompt.detail)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-
-                                    Spacer(minLength: 0)
-
-                                    Image(systemName: "arrow.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .padding(12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .fill(Color(.systemBackground))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
-                                )
                             }
-                            .buttonStyle(.plain)
                         }
                     }
 
@@ -208,11 +139,34 @@ struct ConversationEmptyStateView: View {
                         } label: {
                             Label("Retry last prompt", systemImage: "arrow.clockwise")
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered)
                     }
                 }
             } else {
+                HStack(alignment: .center, spacing: 12) {
+                    MobaileLogoMark()
+                        .frame(width: 48, height: 48)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("MOBaiLE")
+                            .font(.title3.weight(.semibold))
+                        Text("Voice and workspace agent")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    ConnectionBadge(isConnected: isConfigured, statusText: statusText)
+                        .frame(maxWidth: 150, alignment: .trailing)
+                }
+
                 VStack(alignment: .leading, spacing: 12) {
+                    Text("Connect your backend once, then prompts, voice tasks, and live run updates all happen here.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
                     Text("What you unlock")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -245,7 +199,7 @@ struct ConversationEmptyStateView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
+        .padding(isConfigured ? 14 : 18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
@@ -254,6 +208,39 @@ struct ConversationEmptyStateView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(Color(.separator).opacity(0.20), lineWidth: 1)
         )
+    }
+}
+
+private struct CompactStarterPromptButton: View {
+    let prompt: StarterPrompt
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(prompt.label, systemImage: prompt.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(prompt.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -439,6 +426,16 @@ struct ThreadsView: View {
     @State private var renameTitle: String = ""
     @State private var pendingDeleteThread: ChatThread?
 
+    private var displayedThreads: [ChatThread] {
+        guard let activeThreadID,
+              let activeIndex = threads.firstIndex(where: { $0.id == activeThreadID }) else {
+            return threads
+        }
+        var ordered = threads
+        let active = ordered.remove(at: activeIndex)
+        return [active] + ordered
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -450,27 +447,26 @@ struct ThreadsView: View {
                     )
                 } else {
                     List {
-                        Section {
-                            SheetIntroCard(
-                                title: "Saved Conversations",
-                                message: "Switch threads, rename them, or delete old ones without losing your current context.",
-                                systemImage: "text.bubble.fill",
-                                tint: .blue
-                            )
-                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                        }
-
-                        ForEach(threads) { thread in
+                        ForEach(displayedThreads) { thread in
                             Button {
                                 onSelect(thread.id)
                             } label: {
                                 HStack(spacing: 10) {
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text(thread.title)
-                                            .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
-                                            .lineLimit(1)
+                                        HStack(spacing: 8) {
+                                            Text(thread.title)
+                                                .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
+                                                .lineLimit(1)
+                                            if activeThreadID == thread.id {
+                                                Text("Current")
+                                                    .font(.caption2.weight(.semibold))
+                                                    .padding(.horizontal, 7)
+                                                    .padding(.vertical, 3)
+                                                    .background(Color.accentColor.opacity(0.12))
+                                                    .foregroundStyle(Color.accentColor)
+                                                    .clipShape(Capsule())
+                                            }
+                                        }
                                         Text(threadPreview(for: thread))
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
@@ -489,17 +485,22 @@ struct ThreadsView: View {
                                         }
                                     }
                                     Spacer()
-                                    if activeThreadID == thread.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.blue)
-                                    }
                                 }
                             }
                             .buttonStyle(.plain)
                             .padding(12)
                             .background(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(Color(.secondarySystemBackground))
+                                    .fill(activeThreadID == thread.id ? Color.accentColor.opacity(0.09) : Color(.secondarySystemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(
+                                        activeThreadID == thread.id
+                                            ? Color.accentColor.opacity(0.22)
+                                            : Color(.separator).opacity(0.08),
+                                        lineWidth: 1
+                                    )
                             )
                             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                             .listRowBackground(Color.clear)

@@ -16,7 +16,6 @@ def plan_from_utterance(utterance_text: str) -> ActionPlan:
                 Action(
                     type="run_command",
                     command="python3 hello.py",
-                    timeout_sec=30,
                 ),
             ],
         )
@@ -27,7 +26,6 @@ def plan_from_utterance(utterance_text: str) -> ActionPlan:
             Action(
                 type="run_command",
                 command=f"python3 -c \"print('received:', {utterance_text!r})\"",
-                timeout_sec=30,
             )
         ],
     )

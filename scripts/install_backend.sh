@@ -126,6 +126,7 @@ write_env_file() {
   local host_value="127.0.0.1"
   local codex_home_value="~/.codex"
   local codex_search_value="true"
+  local context_file_value="../.mobaile/AGENT_CONTEXT.md"
   local playwright_output_value="data/playwright"
   local playwright_profile_value="data/playwright-profile"
   if [[ "${EXPOSE_NETWORK}" == "true" ]]; then
@@ -152,6 +153,7 @@ write_env_file() {
         seen_host=0
         seen_codex_home=0
         seen_codex_search=0
+        seen_context_file=0
         seen_playwright_output=0
         seen_playwright_profile=0
       }
@@ -185,6 +187,15 @@ write_env_file() {
         print
         next
       }
+      /^VOICE_AGENT_CODEX_CONTEXT_FILE=/ {
+        seen_context_file=1
+        if ($0 == "VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md") {
+          print "VOICE_AGENT_CODEX_CONTEXT_FILE=" context_file
+        } else {
+          print
+        }
+        next
+      }
       /^VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=/ {
         seen_playwright_output=1
         print
@@ -203,12 +214,14 @@ write_env_file() {
         if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
         if (!seen_codex_home) print "VOICE_AGENT_CODEX_HOME=" codex_home
         if (!seen_codex_search) print "VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=" codex_search
+        if (!seen_context_file) print "VOICE_AGENT_CODEX_CONTEXT_FILE=" context_file
         if (!seen_playwright_output) print "VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=" playwright_output
         if (!seen_playwright_profile) print "VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=" playwright_profile
       }
       ' \
       -v codex_home="${codex_home_value}" \
       -v codex_search="${codex_search_value}" \
+      -v context_file="${context_file_value}" \
       -v playwright_output="${playwright_output_value}" \
       -v playwright_profile="${playwright_profile_value}" \
       "${ENV_FILE}" > "${tmp_env}"
@@ -229,7 +242,7 @@ VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=${codex_search_value}
 VOICE_AGENT_CODEX_GUARDRAILS=warn
 VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]
 VOICE_AGENT_CODEX_USE_CONTEXT=true
-VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md
+VOICE_AGENT_CODEX_CONTEXT_FILE=${context_file_value}
 # Optional Claude Code support:
 VOICE_AGENT_CLAUDE_BINARY=claude
 # VOICE_AGENT_CLAUDE_MODEL=sonnet
@@ -324,17 +337,12 @@ main() {
     python3 "${REPO_ROOT}/scripts/provision_codex_autonomy.py" --mode "${SECURITY_MODE}" || true
   fi
 
-  if [[ -f "${ENV_FILE}" ]]; then
-    token="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2}' "${ENV_FILE}")"
-  fi
-
   local server_url
   server_url="$(detect_url)"
 
   cat > "${PAIRING_FILE}" <<EOF
 {
   "server_url": "${server_url}",
-  "api_token": "${token}",
   "session_id": "iphone-app",
   "pair_code": "${pair_code}",
   "pair_code_expires_at": "${pair_code_expires_at}"

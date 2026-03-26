@@ -49,17 +49,16 @@ fi
 mv "${TMP_ENV}" "${ENV_FILE}"
 
 if [[ -f "${PAIRING_FILE}" ]]; then
-  python3 - "${PAIRING_FILE}" "${NEW_TOKEN}" "${NEW_PAIR_CODE}" "${PAIR_EXPIRES_AT}" <<'PY'
+  python3 - "${PAIRING_FILE}" "${NEW_PAIR_CODE}" "${PAIR_EXPIRES_AT}" <<'PY'
 import json
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
-token = sys.argv[2]
-pair_code = sys.argv[3]
-expires = sys.argv[4]
+pair_code = sys.argv[2]
+expires = sys.argv[3]
 payload = json.loads(path.read_text(encoding="utf-8"))
-payload["api_token"] = token
+payload.pop("api_token", None)
 payload["pair_code"] = pair_code
 payload["pair_code_expires_at"] = expires
 path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

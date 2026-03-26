@@ -1,53 +1,41 @@
 # Scripts
 
-Quick ways to install and operate the backend.
+This file is an index, not the canonical setup guide. For installation, service management,
+pairing, and end-to-end usage, prefer [`docs/USAGE.md`](../docs/USAGE.md).
 
-## Fastest Backend Install (No Clone Needed)
+## Install and Bootstrap
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
-```
+- `bootstrap_server.sh`: managed install/update into `~/MOBaiLE` by default
+- `install_backend.sh`: install and configure the backend in the current checkout
+- `set_security_mode.sh`: switch an existing `backend/.env` between `safe` and `full-access`
+- `rotate_api_token.sh`: rotate `VOICE_AGENT_API_TOKEN` and refresh pairing code exports
 
-This flow can install `uv` for you and manages a repo clone in `~/MOBaiLE` by default.
+## Operations
 
-## Managed Install In `~/MOBaiLE`
+- `doctor.sh`: host/runtime health checks
+- `service_macos.sh`: launchd install/start/stop/status/logs/sync
+- `service_linux.sh`: systemd user-service install/start/stop/status/logs/sync
+- `warmup_capabilities.sh`: preflight capabilities and runtime readiness
+- `pairing_qr.sh`: generate pairing QR from `backend/pairing.json`
+- `phone_connectivity_smoke.sh`: end-to-end connectivity smoke test
 
-```bash
-bash ./scripts/bootstrap_server.sh --mode safe
-# or:
-bash ./scripts/bootstrap_server.sh --mode full-access
-# or for the autonomous Codex stack:
-bash ./scripts/bootstrap_server.sh --mode full-access --with-autonomy-stack
-```
+## Contracts and Autonomy
 
-Note:
-- `bootstrap_server.sh` clones or updates `~/MOBaiLE` unless you pass `--dir`
-- use this when you want a managed install location, not when you specifically want to use your current checkout
+- `sync_contracts.py`: refresh checked-in contracts from backend schemas
+- `provision_codex_autonomy.py`: provision Codex MCP and skill stack for trusted hosts
 
-## Use Your Current Checkout
+## Release and App Store
 
-```bash
-bash ./scripts/install_backend.sh --mode safe
-# or:
-bash ./scripts/install_backend.sh --mode full-access
-# or for the autonomous Codex stack:
-bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
-```
+- `capture_app_store_screenshots.sh`: capture screenshot set into `build/`
+- `render_app_store_screenshots.py`: process screenshot assets
+- `ios_release_version.rb`: inspect or compute iOS release versions
 
-Notes:
-- `install_backend.sh` installs `uv` for you when it is missing
-- `install_backend.sh` defaults to local-only bind (`127.0.0.1`)
-- add `--expose-network` when you want phone pairing over LAN/Tailscale
-- if no Codex/Claude CLI is installed, MOBaiLE keeps the internal `local` executor available for smoke/dev flows
-- `--with-autonomy-stack` provisions Codex MCP servers and the managed skills pack for more autonomous remote control
-
-## npm Command Wrappers (Optional)
-
-From repo root:
+## Optional npm Wrappers
 
 ```bash
 npm run setup:server
 npm run setup:server:auto
+npm run backend:install
 npm run backend:install:auto
 npm run backend:start
 npm run doctor
@@ -56,93 +44,12 @@ npm run ios:open
 npm run ios:version
 ```
 
-For iOS release automation, see [`docs/IOS_RELEASE_AUTOMATION.md`](../docs/IOS_RELEASE_AUTOMATION.md).
-
-## Direct Script Commands
-
-After install, these are the most useful direct script commands.
-
-`bootstrap_server.sh` already enables network exposure for you.
-
-Run environment and connectivity checks:
+## Common Direct Commands
 
 ```bash
 bash ./scripts/doctor.sh
-```
-
-Install and manage backend as macOS launchd service:
-
-```bash
-bash ./scripts/service_macos.sh install
-bash ./scripts/service_macos.sh sync
 bash ./scripts/service_macos.sh status
-bash ./scripts/service_macos.sh logs
-bash ./scripts/service_macos.sh warmup
-```
-
-Install and manage backend as Linux systemd user service:
-
-```bash
-bash ./scripts/service_linux.sh install
-bash ./scripts/service_linux.sh sync
 bash ./scripts/service_linux.sh status
-bash ./scripts/service_linux.sh logs
-bash ./scripts/service_linux.sh warmup
-```
-
-Notes:
-- Linux service management uses `systemd --user`.
-- For always-on behavior after logout/reboot on headless hosts, you may need `sudo loginctl enable-linger $USER`.
-
-Warmup runs automatically after `install/start/restart` unless disabled with:
-
-```bash
-export VOICE_AGENT_WARMUP_ON_START=false
-```
-
-Run capability warmup directly:
-
-```bash
-bash ./scripts/warmup_capabilities.sh
-```
-
-Run end-to-end connection smoke using `backend/pairing.json`:
-
-```bash
-bash ./scripts/phone_connectivity_smoke.sh
-```
-
-Generate a pairing QR from `backend/pairing.json`:
-
-```bash
 bash ./scripts/pairing_qr.sh
-# Optional raw JSON payload QR:
-bash ./scripts/pairing_qr.sh --format json
-```
-
-Rotate backend API token (updates `backend/.env` and `backend/pairing.json`):
-
-```bash
-bash ./scripts/rotate_api_token.sh
-```
-
-Provision or refresh the autonomous Codex stack:
-
-```bash
-python3 ./scripts/provision_codex_autonomy.py --mode full-access
-```
-
-Switch backend security mode after install:
-
-```bash
-bash ./scripts/set_security_mode.sh safe
-bash ./scripts/set_security_mode.sh full-access
-```
-
-Sync checked-in contracts from backend models:
-
-```bash
-cd backend
-uv run python ../scripts/sync_contracts.py
-uv run python ../scripts/sync_contracts.py --check
+cd backend && uv run python ../scripts/sync_contracts.py --check
 ```

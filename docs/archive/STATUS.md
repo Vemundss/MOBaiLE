@@ -1,5 +1,8 @@
 # Project Status
 
+> Historical project log only. Do not treat this file as the canonical source for current
+> setup or runtime behavior. Prefer `README.md`, `ARCHITECTURE.md`, and `docs/USAGE.md`.
+
 Last updated: 2026-02-27
 
 ## 1) Snapshot

@@ -63,6 +63,41 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertNil(resolved)
     }
 
+    func testResolveImageURLRejectsExternalHTTPSURL() {
+        let resolved = _test_resolveImageURL("https://example.com/plot.png", serverURL: "http://127.0.0.1:8000")
+        XCTAssertNil(resolved)
+    }
+
+    func testResolveImageURLAcceptsBackendProtectedURL() {
+        let resolved = _test_resolveImageURL(
+            "http://127.0.0.1:8000/v1/files?path=%2FUsers%2Ftest%2Fplot.png",
+            serverURL: "http://127.0.0.1:8000"
+        )
+        XCTAssertEqual(resolved, "http://127.0.0.1:8000/v1/files?path=%2FUsers%2Ftest%2Fplot.png")
+    }
+
+    func testPendingPairingWarnsForRFC1918HTTP() {
+        let pending = VoiceAgentViewModel.PendingPairing(
+            serverURL: "http://192.168.1.20:8000",
+            sessionID: "iphone-app",
+            pairCode: "123456",
+            legacyToken: nil
+        )
+        XCTAssertEqual(pending.badgeText, "LOCAL")
+        XCTAssertNotNil(pending.localNetworkWarning)
+    }
+
+    func testPendingPairingDoesNotWarnForTailscaleHTTP() {
+        let pending = VoiceAgentViewModel.PendingPairing(
+            serverURL: "http://mobaile.ts.net:8000",
+            sessionID: "iphone-app",
+            pairCode: "123456",
+            legacyToken: nil
+        )
+        XCTAssertEqual(pending.badgeText, "LOCAL")
+        XCTAssertNil(pending.localNetworkWarning)
+    }
+
     func testConversationMessageDecodingDefaultsAttachmentsToEmpty() throws {
         let json = """
         {
@@ -132,6 +167,25 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.claudeModel, "claude-sonnet-4-5")
     }
 
+    func testSessionContextDecodingSupportsResolvedDefaults() throws {
+        let json = """
+        {
+          "session_id":"iphone-app",
+          "executor":"codex",
+          "working_directory":"/Users/test/work/project",
+          "resolved_working_directory":"/Users/test/work/project",
+          "updated_at":"2026-03-26T18:00:00Z"
+        }
+        """
+
+        let data = Data(json.utf8)
+        let decoded = try JSONDecoder().decode(SessionContext.self, from: data)
+        XCTAssertEqual(decoded.sessionId, "iphone-app")
+        XCTAssertEqual(decoded.executor, "codex")
+        XCTAssertEqual(decoded.workingDirectory, "/Users/test/work/project")
+        XCTAssertEqual(decoded.resolvedWorkingDirectory, "/Users/test/work/project")
+    }
+
     func testDraftAttachmentRoundTripsThroughCodable() throws {
         let attachment = DraftAttachment(
             id: UUID(uuidString: "2E2B216F-5A6F-4B2D-8FCA-0C109D5C4AC8") ?? UUID(),
@@ -155,5 +209,147 @@ final class VoiceAgentModelTests: XCTestCase {
         """
         let extracted = _test_extractInlineArtifactTitles(text, serverURL: "http://127.0.0.1:8000")
         XCTAssertEqual(extracted, ["notes.txt", "report.pdf"])
+    }
+
+    func testSlashCommandStateForBareSlashShowsCatalog() {
+        let state = _test_resolveComposerSlashCommandState("/")
+        XCTAssertNotNil(state)
+        XCTAssertEqual(state?.query, "")
+        XCTAssertEqual(state?.arguments, "")
+        XCTAssertEqual(state?.suggestions.first, .new)
+        XCTAssertTrue(state?.suggestions.contains(.browse) == true)
+    }
+
+    func testSlashCommandStateParsesArguments() {
+        let state = _test_resolveComposerSlashCommandState("/browse ios/VoiceAgentApp")
+        XCTAssertEqual(state?.exactMatch, .browse)
+        XCTAssertEqual(state?.arguments, "ios/VoiceAgentApp")
+    }
+
+    func testSlashCommandStateTreatsUnknownAlphaInputAsCommandContext() {
+        let state = _test_resolveComposerSlashCommandState("/unknown-command")
+        XCTAssertNotNil(state)
+        XCTAssertNil(state?.exactMatch)
+        XCTAssertTrue(state?.hasUnknownCommand == true)
+    }
+
+    func testSlashCommandStateIgnoresAbsolutePaths() {
+        let state = _test_resolveComposerSlashCommandState("/Users/test/Mobile Documents/repo")
+        XCTAssertNil(state)
+    }
+
+    @MainActor
+    func testRunEventsStayBoundToOriginThreadAfterSwitch() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let originThreadID = vm.activeThreadID else {
+            XCTFail("Expected an origin thread")
+            return
+        }
+        vm.createNewThread()
+        guard let otherThreadID = vm.activeThreadID else {
+            XCTFail("Expected a second thread")
+            return
+        }
+
+        defer {
+            vm.deleteThread(otherThreadID)
+            vm.deleteThread(originThreadID)
+        }
+
+        vm.switchToThread(originThreadID)
+        let runID = "test-run-\(UUID().uuidString)"
+        vm._test_updateThreadMetadata(
+            threadID: originThreadID,
+            runID: runID,
+            statusText: "Running...",
+            activeRunExecutor: "codex"
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: originThreadID)
+
+        vm.switchToThread(otherThreadID)
+        let event = ExecutionEvent(
+            type: "assistant.message",
+            actionIndex: nil,
+            message: "Bound to the origin thread",
+            eventID: "evt-\(UUID().uuidString)",
+            createdAt: nil
+        )
+        vm._test_ingestRunEvents([event], runID: runID, threadID: originThreadID)
+
+        XCTAssertTrue(vm.conversation.isEmpty)
+        XCTAssertTrue(vm.events.isEmpty)
+
+        vm.switchToThread(originThreadID)
+
+        XCTAssertEqual(vm.conversation.last?.text, "Bound to the origin thread")
+        XCTAssertEqual(vm.events.last?.message, "Bound to the origin thread")
+    }
+
+    @MainActor
+    func testConcurrentObservedRunsKeepPerThreadEventState() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let firstThreadID = vm.activeThreadID else {
+            XCTFail("Expected a first thread")
+            return
+        }
+        vm.createNewThread()
+        guard let secondThreadID = vm.activeThreadID else {
+            XCTFail("Expected a second thread")
+            return
+        }
+
+        defer {
+            vm.deleteThread(secondThreadID)
+            vm.deleteThread(firstThreadID)
+        }
+
+        let firstRunID = "test-run-a-\(UUID().uuidString)"
+        let secondRunID = "test-run-b-\(UUID().uuidString)"
+
+        vm._test_updateThreadMetadata(
+            threadID: firstThreadID,
+            runID: firstRunID,
+            statusText: "Running...",
+            activeRunExecutor: "codex"
+        )
+        vm._test_updateThreadMetadata(
+            threadID: secondThreadID,
+            runID: secondRunID,
+            statusText: "Running...",
+            activeRunExecutor: "codex"
+        )
+        vm._test_bindObservedRun(runID: firstRunID, threadID: firstThreadID)
+        vm._test_bindObservedRun(runID: secondRunID, threadID: secondThreadID)
+
+        let firstEvent = ExecutionEvent(
+            type: "assistant.message",
+            actionIndex: nil,
+            message: "First thread response",
+            eventID: "evt-a-\(UUID().uuidString)",
+            createdAt: nil
+        )
+        let secondEvent = ExecutionEvent(
+            type: "assistant.message",
+            actionIndex: nil,
+            message: "Second thread response",
+            eventID: "evt-b-\(UUID().uuidString)",
+            createdAt: nil
+        )
+
+        vm._test_ingestRunEvents([firstEvent], runID: firstRunID, threadID: firstThreadID)
+        vm._test_ingestRunEvents([secondEvent], runID: secondRunID, threadID: secondThreadID)
+
+        XCTAssertEqual(vm.conversation.last?.text, "Second thread response")
+        XCTAssertEqual(vm.events.last?.message, "Second thread response")
+
+        vm.switchToThread(firstThreadID)
+        XCTAssertEqual(vm.conversation.last?.text, "First thread response")
+        XCTAssertEqual(vm.events.last?.message, "First thread response")
+
+        vm.switchToThread(secondThreadID)
+        XCTAssertEqual(vm.conversation.last?.text, "Second thread response")
+        XCTAssertEqual(vm.events.last?.message, "Second thread response")
     }
 }

@@ -193,7 +193,7 @@ class ExecutionService:
         cancelled = False
         blocked = False
         timeout_sec = self._agent_timeout_sec(executor)
-        deadline = time.monotonic() + timeout_sec
+        deadline = time.monotonic() + timeout_sec if timeout_sec > 0 else None
         linked_session_id = resume_session_id
 
         while True:
@@ -255,7 +255,7 @@ class ExecutionService:
             if run is not None and run.status == "blocked":
                 blocked = True
                 break
-            if time.monotonic() > deadline:
+            if deadline is not None and time.monotonic() > deadline:
                 timed_out = True
                 break
 

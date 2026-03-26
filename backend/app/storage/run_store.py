@@ -79,6 +79,16 @@ class RunStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS session_context (
+                    session_id TEXT PRIMARY KEY,
+                    executor TEXT,
+                    working_directory TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS agent_session_map (
                     executor TEXT NOT NULL,
                     session_id TEXT NOT NULL,
@@ -142,6 +152,29 @@ class RunStore:
                 (status, summary, run_id),
             )
 
+    def load_run(self, run_id: str) -> RunRecord | None:
+        with self._connect() as conn:
+            run_row = conn.execute(
+                """
+                SELECT run_id, session_id, executor, utterance_text, working_directory, status, plan_json, summary, created_at, updated_at
+                FROM runs
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            if run_row is None:
+                return None
+            event_rows = conn.execute(
+                """
+                SELECT run_id, seq, event_id, type, action_index, message, created_at
+                FROM run_events
+                WHERE run_id = ?
+                ORDER BY seq
+                """,
+                (run_id,),
+            ).fetchall()
+        return self._hydrate_run(run_row, event_rows)
+
     def load_all(self) -> dict[str, RunRecord]:
         runs: dict[str, RunRecord] = {}
         with self._connect() as conn:
@@ -159,38 +192,10 @@ class RunStore:
                 """
             ).fetchall()
 
-        events_by_run: dict[str, list[ExecutionEvent]] = {}
-        for row in event_rows:
-            events_by_run.setdefault(row["run_id"], []).append(
-                ExecutionEvent(
-                    event_id=row["event_id"],
-                    type=row["type"],
-                    action_index=row["action_index"],
-                    message=row["message"],
-                    created_at=row["created_at"],
-                )
-            )
-
         for row in run_rows:
-            plan: ActionPlan | None = None
-            plan_json = row["plan_json"]
-            if plan_json:
-                try:
-                    plan = ActionPlan.model_validate_json(plan_json)
-                except Exception:
-                    plan = None
-            runs[row["run_id"]] = RunRecord(
-                run_id=row["run_id"],
-                session_id=row["session_id"],
-                executor=row["executor"] or "local",
-                utterance_text=row["utterance_text"],
-                working_directory=row["working_directory"],
-                status=row["status"],
-                plan=plan,
-                events=events_by_run.get(row["run_id"], []),
-                summary=row["summary"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
+            runs[row["run_id"]] = self._hydrate_run(
+                row,
+                [event_row for event_row in event_rows if event_row["run_id"] == row["run_id"]],
             )
         return runs
 
@@ -217,43 +222,58 @@ class RunStore:
                 run_ids,
             ).fetchall() if run_ids else []
 
-        events_by_run: dict[str, list[ExecutionEvent]] = {}
-        for row in event_rows:
-            events_by_run.setdefault(row["run_id"], []).append(
-                ExecutionEvent(
-                    event_id=row["event_id"],
-                    type=row["type"],
-                    action_index=row["action_index"],
-                    message=row["message"],
-                    created_at=row["created_at"],
-                )
-            )
-
         results: list[RunRecord] = []
         for row in run_rows:
-            plan: ActionPlan | None = None
-            plan_json = row["plan_json"]
-            if plan_json:
-                try:
-                    plan = ActionPlan.model_validate_json(plan_json)
-                except Exception:
-                    plan = None
             results.append(
-                RunRecord(
-                    run_id=row["run_id"],
-                    session_id=row["session_id"],
-                    executor=row["executor"] or "local",
-                    utterance_text=row["utterance_text"],
-                    working_directory=row["working_directory"],
-                    status=row["status"],
-                    plan=plan,
-                    events=events_by_run.get(row["run_id"], []),
-                    summary=row["summary"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
+                self._hydrate_run(
+                    row,
+                    [event_row for event_row in event_rows if event_row["run_id"] == row["run_id"]],
                 )
             )
         return results
+
+    def get_session_context(self, session_id: str) -> sqlite3.Row | None:
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                SELECT session_id, executor, working_directory, updated_at
+                FROM session_context
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+
+    def upsert_session_context(
+        self,
+        session_id: str,
+        *,
+        executor: str | None,
+        working_directory: str | None,
+    ) -> sqlite3.Row:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_context (
+                    session_id, executor, working_directory, updated_at
+                )
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    executor=excluded.executor,
+                    working_directory=excluded.working_directory,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (session_id, executor, working_directory),
+            )
+            row = conn.execute(
+                """
+                SELECT session_id, executor, working_directory, updated_at
+                FROM session_context
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        assert row is not None
+        return row
 
     def get_agent_session_id(self, executor: str, session_id: str, client_thread_id: str) -> str | None:
         with self._connect() as conn:
@@ -342,4 +362,42 @@ class RunStore:
                 event.message,
                 event.created_at,
             ),
+        )
+
+    def _hydrate_run(
+        self,
+        run_row: sqlite3.Row,
+        event_rows: list[sqlite3.Row],
+    ) -> RunRecord:
+        plan: ActionPlan | None = None
+        plan_json = run_row["plan_json"]
+        if plan_json:
+            try:
+                plan = ActionPlan.model_validate_json(plan_json)
+            except Exception:
+                plan = None
+
+        events = [
+            ExecutionEvent(
+                event_id=row["event_id"],
+                type=row["type"],
+                action_index=row["action_index"],
+                message=row["message"],
+                created_at=row["created_at"],
+            )
+            for row in event_rows
+        ]
+
+        return RunRecord(
+            run_id=run_row["run_id"],
+            session_id=run_row["session_id"],
+            executor=run_row["executor"] or "local",
+            utterance_text=run_row["utterance_text"],
+            working_directory=run_row["working_directory"],
+            status=run_row["status"],
+            plan=plan,
+            events=events,
+            summary=run_row["summary"],
+            created_at=run_row["created_at"],
+            updated_at=run_row["updated_at"],
         )

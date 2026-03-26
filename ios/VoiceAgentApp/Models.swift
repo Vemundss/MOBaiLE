@@ -133,7 +133,7 @@ struct UtteranceRequest: Encodable {
     let utteranceText: String
     let attachments: [ChatArtifact]
     let mode: String
-    let executor: String
+    let executor: String?
     let workingDirectory: String?
     let responseMode: String?
     let responseProfile: String?
@@ -342,6 +342,32 @@ struct RuntimeConfig: Decodable {
     }
 }
 
+struct SessionContextUpdateRequest: Encodable {
+    let executor: String?
+    let workingDirectory: String?
+
+    enum CodingKeys: String, CodingKey {
+        case executor
+        case workingDirectory = "working_directory"
+    }
+}
+
+struct SessionContext: Decodable {
+    let sessionId: String
+    let executor: String
+    let workingDirectory: String?
+    let resolvedWorkingDirectory: String
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case executor
+        case workingDirectory = "working_directory"
+        case resolvedWorkingDirectory = "resolved_working_directory"
+        case updatedAt = "updated_at"
+    }
+}
+
 struct DirectoryEntry: Decodable, Identifiable {
     var id: String { path }
     let name: String
@@ -436,3 +462,233 @@ struct ChatArtifact: Codable, Equatable, Identifiable {
     let mime: String?
     let url: String?
 }
+
+enum ComposerSlashCommand: String, CaseIterable, Identifiable {
+    case new
+    case threads
+    case logs
+    case settings
+    case browse
+    case cwd
+    case executor
+    case retry
+    case voice
+    case paste
+    case clear
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .new:
+            return "New Chat"
+        case .threads:
+            return "Threads"
+        case .logs:
+            return "Run Logs"
+        case .settings:
+            return "Settings"
+        case .browse:
+            return "Browse Workspace"
+        case .cwd:
+            return "Working Directory"
+        case .executor:
+            return "Executor"
+        case .retry:
+            return "Retry Last Prompt"
+        case .voice:
+            return "Start Recording"
+        case .paste:
+            return "Paste Clipboard"
+        case .clear:
+            return "Clear Draft"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .new:
+            return "Start a fresh thread without leaving the current session."
+        case .threads:
+            return "Open the thread list and jump between conversations."
+        case .logs:
+            return "Open the current run event log view."
+        case .settings:
+            return "Open backend connection and runtime settings."
+        case .browse:
+            return "Open the workspace browser at the current folder or a specific path."
+        case .cwd:
+            return "Show or change the working directory used for new runs."
+        case .executor:
+            return "Show or switch the active executor."
+        case .retry:
+            return "Resend the most recent submitted prompt."
+        case .voice:
+            return "Start hands-free voice capture."
+        case .paste:
+            return "Paste text or an image from the clipboard into the draft."
+        case .clear:
+            return "Clear the current prompt and staged attachments."
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .new:
+            return "square.and.pencil"
+        case .threads:
+            return "text.bubble"
+        case .logs:
+            return "doc.text.magnifyingglass"
+        case .settings:
+            return "slider.horizontal.3"
+        case .browse:
+            return "folder"
+        case .cwd:
+            return "arrow.triangle.branch"
+        case .executor:
+            return "bolt.horizontal.circle"
+        case .retry:
+            return "arrow.clockwise"
+        case .voice:
+            return "mic"
+        case .paste:
+            return "doc.on.clipboard"
+        case .clear:
+            return "xmark.circle"
+        }
+    }
+
+    var usage: String {
+        switch self {
+        case .new:
+            return "/new"
+        case .threads:
+            return "/threads"
+        case .logs:
+            return "/logs"
+        case .settings:
+            return "/settings"
+        case .browse:
+            return "/browse [path]"
+        case .cwd:
+            return "/cwd [path]"
+        case .executor:
+            return "/executor [codex|claude|local]"
+        case .retry:
+            return "/retry"
+        case .voice:
+            return "/voice"
+        case .paste:
+            return "/paste"
+        case .clear:
+            return "/clear"
+        }
+    }
+
+    var acceptsArguments: Bool {
+        switch self {
+        case .browse, .cwd, .executor:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var insertionText: String {
+        acceptsArguments ? "/\(rawValue) " : "/\(rawValue)"
+    }
+
+    var aliases: [String] {
+        switch self {
+        case .new:
+            return ["chat"]
+        case .threads:
+            return ["history"]
+        case .logs:
+            return ["events"]
+        case .settings:
+            return ["config"]
+        case .browse:
+            return ["dir", "files", "workspace"]
+        case .cwd:
+            return ["pwd", "workdir"]
+        case .executor:
+            return ["exec", "agent"]
+        case .retry:
+            return ["rerun", "resend"]
+        case .voice:
+            return ["record", "mic"]
+        case .paste:
+            return ["clipboard"]
+        case .clear:
+            return ["reset"]
+        }
+    }
+
+    fileprivate func matches(query: String) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return true }
+        let candidates = [rawValue] + aliases
+        return candidates.contains { candidate in
+            candidate.hasPrefix(normalized)
+        }
+    }
+
+    fileprivate func matchesExactly(query: String) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return normalized == rawValue || aliases.contains(normalized)
+    }
+}
+
+struct ComposerSlashCommandState: Equatable {
+    let query: String
+    let arguments: String
+    let suggestions: [ComposerSlashCommand]
+    let exactMatch: ComposerSlashCommand?
+
+    var hasUnknownCommand: Bool {
+        !query.isEmpty && exactMatch == nil && suggestions.isEmpty
+    }
+}
+
+func resolveComposerSlashCommandState(from input: String) -> ComposerSlashCommandState? {
+    let trimmedLeading = String(input.drop(while: { $0.isWhitespace }))
+    guard trimmedLeading.hasPrefix("/") else { return nil }
+    guard !trimmedLeading.contains("\n") else { return nil }
+
+    let payload = String(trimmedLeading.dropFirst())
+    let token = String(payload.prefix(while: { !$0.isWhitespace }))
+    if token.contains("/") {
+        return nil
+    }
+
+    let allowedScalars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+    let normalizedQuery = token.lowercased()
+    let tokenIsValid = normalizedQuery.unicodeScalars.allSatisfy { scalar in
+        allowedScalars.contains(scalar)
+    }
+    guard tokenIsValid else { return nil }
+
+    let arguments = String(payload.dropFirst(token.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    let suggestions = ComposerSlashCommand.allCases.filter { command in
+        command.matches(query: normalizedQuery)
+    }
+    let exactMatch = ComposerSlashCommand.allCases.first { command in
+        command.matchesExactly(query: normalizedQuery)
+    }
+
+    return ComposerSlashCommandState(
+        query: normalizedQuery,
+        arguments: arguments,
+        suggestions: suggestions,
+        exactMatch: exactMatch
+    )
+}
+
+#if DEBUG
+func _test_resolveComposerSlashCommandState(_ input: String) -> ComposerSlashCommandState? {
+    resolveComposerSlashCommandState(from: input)
+}
+#endif

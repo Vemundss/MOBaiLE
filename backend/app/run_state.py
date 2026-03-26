@@ -26,12 +26,23 @@ class RunState:
         self.run_store = run_store
         self.max_event_message_chars = max_event_message_chars
         self._runs_lock = threading.Lock()
-        self._runs = self.run_store.load_all()
+        self._runs: dict[str, RunRecord] = {}
         self._cancelled: set[str] = set()
 
     def get_run(self, run_id: str) -> RunRecord | None:
         with self._runs_lock:
-            return self._runs.get(run_id)
+            cached = self._runs.get(run_id)
+        if cached is not None:
+            return cached
+        loaded = self.run_store.load_run(run_id)
+        if loaded is None:
+            return None
+        with self._runs_lock:
+            existing = self._runs.get(run_id)
+            if existing is not None:
+                return existing
+            self._runs[run_id] = loaded
+            return loaded
 
     def store_run(self, run: RunRecord) -> None:
         with self._runs_lock:

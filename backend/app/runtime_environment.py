@@ -62,6 +62,15 @@ def _stable_key(raw_value: str) -> str:
     return cleaned or "default"
 
 
+def _read_non_negative_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default)).strip()
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        return default
+    return max(0, parsed)
+
+
 @dataclass(frozen=True)
 class RuntimeEnvironment:
     backend_root: Path
@@ -167,10 +176,10 @@ class RuntimeEnvironment:
             "no",
             "off",
         }
-        codex_timeout_sec = int(os.getenv("VOICE_AGENT_CODEX_TIMEOUT_SEC", "900"))
+        codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 0)
         codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
         claude_model_override = os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
-        claude_timeout_sec = int(os.getenv("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", str(codex_timeout_sec)))
+        claude_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", codex_timeout_sec)
         playwright_output_dir = _resolve_path_value(
             os.getenv("VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR", "data/playwright").strip() or "data/playwright",
             base_dir=backend_root,
@@ -189,7 +198,7 @@ class RuntimeEnvironment:
             "no",
             "off",
         }
-        runtime_context_file = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "AGENT_CONTEXT.md").strip()
+        runtime_context_file = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "../.mobaile/AGENT_CONTEXT.md").strip()
         runtime_context = load_runtime_context(runtime_context_file, backend_root)
         guardrails_mode = os.getenv("VOICE_AGENT_CODEX_GUARDRAILS", "warn").strip().lower()
         dangerous_confirm_token = os.getenv(

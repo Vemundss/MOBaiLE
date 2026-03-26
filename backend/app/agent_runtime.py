@@ -9,12 +9,19 @@ ResponseProfile = Literal["guided", "minimal"]
 
 
 def load_runtime_context(context_file: str, backend_root: Path) -> str:
-    path = Path(context_file)
-    if not path.is_absolute():
-        path = (backend_root / path).resolve()
-    if not path.exists() or not path.is_file():
-        return ""
-    return path.read_text(encoding="utf-8").strip()
+    raw_path = Path(context_file)
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+    else:
+        candidates.append((backend_root / raw_path).resolve())
+        # Compatibility fallback for older installs that still point at backend/AGENT_CONTEXT.md.
+        if raw_path.name == "AGENT_CONTEXT.md":
+            candidates.append((backend_root.parent / ".mobaile" / "AGENT_CONTEXT.md").resolve())
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    return ""
 
 
 def context_leak_markers(runtime_context: str) -> list[str]:

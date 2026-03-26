@@ -4,6 +4,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+@MainActor
 struct ContentView: View {
     private let privacyPolicyURL = URL(string: "https://vemundss.github.io/MOBaiLE/privacy-policy.html")!
     private let supportURL = URL(string: "https://vemundss.github.io/MOBaiLE/support.html")!
@@ -20,9 +21,7 @@ struct ContentView: View {
     @State private var trustPairHost = false
     @State private var showAdvancedSettings = false
     @State private var settingsConnectionState: SettingsConnectionState = .idle
-    @State private var runtimeContextExpanded = false
     @State private var showMicrophonePrimer = false
-    @State private var copiedWorkspacePath = false
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -186,6 +185,11 @@ struct ContentView: View {
                 Button("Files") {
                     showFileImporter = true
                 }
+                Button("Paste from Clipboard") {
+                    Task {
+                        await vm.pasteClipboardContentIntoDraft()
+                    }
+                }
                 Button("Cancel", role: .cancel) {}
             }
             .photosPicker(
@@ -326,8 +330,10 @@ struct ContentView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 4)
-            .safeAreaInset(edge: .top, spacing: 4) {
-                runtimeInfoBar
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if shouldShowRuntimeInfoBar {
+                    runtimeInfoBar
+                }
             }
             .onChange(of: vm.conversation.last) {
                 withAnimation(.easeOut(duration: 0.18)) {
@@ -352,10 +358,6 @@ struct ContentView: View {
     private var settingsSheet: some View {
         NavigationStack {
             Form {
-                Section {
-                    settingsConnectionCard
-                }
-
                 Section("Connection") {
                     TextField("Server URL", text: $vm.serverURL)
                         .textInputAutocapitalization(.never)
@@ -366,6 +368,10 @@ struct ContentView: View {
                     Text("These are the only fields required before you can send prompts or start recording.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    settingsConnectionCard
                 }
 
                 Section("Conversation Style") {
@@ -427,7 +433,7 @@ struct ContentView: View {
                             }
                         TextField("Timeout seconds", text: $vm.runTimeoutSeconds)
                             .keyboardType(.numberPad)
-                        Text("Max time to wait for a run before the app marks it as timed out.")
+                        Text("Client-side run timeout in seconds. Set 0 to wait indefinitely.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Picker("Executor", selection: $vm.executor) {
@@ -465,13 +471,12 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onDisappear {
                 vm.hideDirectoryBrowser()
-                vm.persistSettings()
+                Task { await vm.persistAndSyncRuntimeSettings() }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         vm.hideDirectoryBrowser()
-                        vm.persistSettings()
                         showConnectionSettings = false
                     }
                 }
@@ -506,28 +511,40 @@ struct ContentView: View {
                 .disabled(isCheckingSettingsConnection || !vm.hasConfiguredConnection)
             }
 
-            ViewThatFits(in: .vertical) {
-                HStack(spacing: 8) {
-                    RuntimeContextChip(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased())
-                    RuntimeContextChip(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel)
-                    RuntimeContextChip(icon: "sparkles", label: "Model", value: vm.currentBackendModelLabel)
-                    if !vm.backendWorkdirRoot.isEmpty {
-                        RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
-                    }
-                }
-                VStack(alignment: .leading, spacing: 8) {
+            if showsSettingsRuntimeDetails {
+                ViewThatFits(in: .vertical) {
                     HStack(spacing: 8) {
                         RuntimeContextChip(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased())
                         RuntimeContextChip(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel)
                         RuntimeContextChip(icon: "sparkles", label: "Model", value: vm.currentBackendModelLabel)
+                        if !vm.backendWorkdirRoot.isEmpty {
+                            RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
+                        }
                     }
-                    if !vm.backendWorkdirRoot.isEmpty {
-                        RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            RuntimeContextChip(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased())
+                            RuntimeContextChip(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel)
+                            RuntimeContextChip(icon: "sparkles", label: "Model", value: vm.currentBackendModelLabel)
+                        }
+                        if !vm.backendWorkdirRoot.isEmpty {
+                            RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
+                        }
                     }
                 }
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var showsSettingsRuntimeDetails: Bool {
+        guard vm.hasConfiguredConnection else { return false }
+        switch settingsConnectionState {
+        case .idle:
+            return false
+        case .checking, .success, .failure:
+            return true
+        }
     }
 
     private var isCheckingSettingsConnection: Bool {
@@ -540,7 +557,7 @@ struct ContentView: View {
     private var settingsConnectionTitle: String {
         switch settingsConnectionState {
         case .idle:
-            return vm.hasConfiguredConnection ? "Validate this backend" : "Connection required"
+            return vm.hasConfiguredConnection ? "Check this backend" : "Connection required"
         case .checking:
             return "Checking backend"
         case .success:
@@ -554,7 +571,7 @@ struct ContentView: View {
         switch settingsConnectionState {
         case .idle:
             return vm.hasConfiguredConnection
-                ? "Use Check to verify the saved server URL and token before you record or send."
+                ? "Validate the saved URL and token after you update either field."
                 : "Enter a server URL and API token to unlock sending, recording, and live run updates."
         case .checking:
             return "Fetching backend config and validating the current token."
@@ -607,9 +624,13 @@ struct ContentView: View {
         }
     }
 
+    private var composerSlashCommandState: ComposerSlashCommandState? {
+        vm.composerSlashCommandState
+    }
+
     private var composerBar: some View {
         VStack(spacing: 6) {
-            if vm.isRecording || shouldShowRecordingNotice {
+            if shouldShowRecordingNotice {
                 recordingStatusBanner
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -639,8 +660,8 @@ struct ContentView: View {
                 )
             }
 
-            VStack(spacing: 10) {
-                if shouldShowComposerSummaryRow {
+            VStack(spacing: 8) {
+                if shouldShowComposerSummaryRow && !vm.isRecording {
                     HStack(spacing: 8) {
                         if shouldShowComposerStatusSummary {
                             Label(composerStatusSummaryText, systemImage: composerStatusSummaryIcon)
@@ -677,7 +698,7 @@ struct ContentView: View {
                     }
                 }
 
-                if !vm.draftAttachments.isEmpty {
+                if !vm.draftAttachments.isEmpty && !vm.isRecording {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(vm.draftAttachments) { attachment in
@@ -694,125 +715,29 @@ struct ContentView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                HStack(alignment: .bottom, spacing: 10) {
-                    Button {
-                        composerFocused = false
-                        showAttachmentOptions = true
-                    } label: {
-                        Image(systemName: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .frame(width: 42, height: 42)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(vm.draftAttachments.isEmpty ? .secondary : Color.accentColor)
-                    .background(
-                        Circle()
-                            .fill(Color(.systemBackground))
+                if let slashState = composerSlashCommandState, !vm.isRecording {
+                    ComposerSlashCommandMenu(
+                        state: slashState,
+                        onSelect: { command in
+                            handleSlashCommandSelection(command, state: slashState)
+                        }
                     )
-                    .accessibilityLabel("Add attachment")
-                    .disabled(!vm.hasConfiguredConnection || vm.isLoading || vm.isRecording)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
 
-                    ZStack(alignment: .topLeading) {
-                        TextEditor(text: $vm.promptText)
-                            .focused($composerFocused)
-                            .disabled(vm.isRecording)
-                            .scrollContentBackground(.hidden)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 8)
-                            .frame(height: composerHeight)
-                            .background(Color(.systemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(
-                                        composerFocused
-                                            ? Color.accentColor.opacity(0.28)
-                                            : Color(.separator).opacity(0.10),
-                                        lineWidth: 1
-                                    )
-                            )
-
-                        if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(composerPlaceholder)
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, 14)
-                                .padding(.top, 16)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.16), value: composerHeight)
-
-                    HStack(spacing: 6) {
-                        Button {
-                            composerFocused = false
-                            handleRecordingButtonTap()
-                        } label: {
-                            Image(systemName: vm.isRecording ? "stop.fill" : "mic.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(vm.isRecording ? .red : .blue)
-                        .background(
-                            Circle()
-                                .fill(Color(.systemBackground))
-                        )
-                        .contentShape(Circle())
-                        .accessibilityLabel(vm.isRecording ? "Stop recording and send" : "Start recording")
-                        .disabled(vm.isLoading || !vm.hasConfiguredConnection)
-
-                        if vm.canCancelActiveOperation {
-                            Button {
-                                composerFocused = false
-                                vm.cancelActiveOperation()
-                            } label: {
-                                Image(systemName: "stop.fill")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .frame(width: 44, height: 44)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.white)
-                            .background(
-                                Circle()
-                                    .fill(Color.red)
-                            )
-                            .contentShape(Circle())
-                            .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
-                        } else {
-                            Button {
-                                composerFocused = false
-                                Task { await vm.sendPrompt() }
-                            } label: {
-                                Image(systemName: "arrow.up")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .frame(width: 44, height: 44)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.white)
-                            .background(
-                                Circle()
-                                    .fill(Color.accentColor)
-                            )
-                            .contentShape(Circle())
-                            .accessibilityLabel("Send prompt")
-                            .disabled(
-                                !vm.hasConfiguredConnection ||
-                                !vm.hasDraftContent ||
-                                vm.isRecording
-                            )
-                        }
-                    }
-                    .opacity(vm.hasConfiguredConnection ? 1 : 0.6)
+                if vm.isRecording {
+                    recordingComposerRow
+                } else {
+                    standardComposerRow
                 }
             }
-            .padding(10)
+            .padding(8)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color(.secondarySystemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(Color(.separator).opacity(0.16), lineWidth: 1)
             )
         }
@@ -829,6 +754,179 @@ struct ContentView: View {
                     composerFocused = false
                 }
         )
+    }
+
+    private var standardComposerRow: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            Button {
+                composerFocused = false
+                showAttachmentOptions = true
+            } label: {
+                Image(systemName: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 42, height: 42)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(vm.draftAttachments.isEmpty ? .secondary : Color.accentColor)
+            .background(
+                Circle()
+                    .fill(Color(.systemBackground))
+            )
+            .accessibilityLabel("Add attachment")
+            .disabled(!vm.hasConfiguredConnection || vm.isLoading)
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $vm.promptText)
+                    .focused($composerFocused)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                    .frame(height: composerHeight)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(
+                                composerFocused
+                                    ? Color.accentColor.opacity(0.28)
+                                    : Color(.separator).opacity(0.10),
+                                lineWidth: 1
+                            )
+                    )
+
+                if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(composerPlaceholder)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 14)
+                        .padding(.top, 16)
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeInOut(duration: 0.16), value: composerHeight)
+
+            HStack(spacing: 6) {
+                Button {
+                    composerFocused = false
+                    handleRecordingButtonTap()
+                } label: {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+                .background(
+                    Circle()
+                        .fill(Color(.systemBackground))
+                )
+                .contentShape(Circle())
+                .accessibilityLabel("Start recording")
+                .disabled(vm.isLoading || !vm.hasConfiguredConnection)
+
+                if vm.canCancelActiveOperation {
+                    Button {
+                        composerFocused = false
+                        vm.cancelActiveOperation()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .background(
+                        Circle()
+                            .fill(Color.red)
+                    )
+                    .contentShape(Circle())
+                    .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
+                } else {
+                    Button {
+                        handleComposerSend()
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .bold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .background(
+                        Circle()
+                            .fill(Color.accentColor)
+                    )
+                    .contentShape(Circle())
+                    .accessibilityLabel("Send prompt")
+                    .disabled(
+                        !vm.hasConfiguredConnection ||
+                        !vm.hasDraftContent
+                    )
+                }
+            }
+            .opacity(vm.hasConfiguredConnection ? 1 : 0.6)
+        }
+    }
+
+    private var recordingComposerRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+
+                    if let startedAt = vm.recordingStartedAt {
+                        TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                            Text(recordingDurationLabel(since: startedAt, now: context.date))
+                                .font(.headline.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(.primary)
+                        }
+                    } else {
+                        Text("Recording")
+                            .font(.headline.weight(.semibold))
+                    }
+
+                    if vm.autoSendAfterSilenceEnabled {
+                        Text("Auto-send")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.blue.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                Text(recordingSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if !vm.draftAttachments.isEmpty {
+                    Label(attachmentSummaryText, systemImage: "paperclip.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                handleRecordingButtonTap()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 48, height: 48)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(
+                Circle()
+                    .fill(Color.red)
+            )
+            .contentShape(Circle())
+            .accessibilityLabel("Stop recording and send")
+        }
     }
 
     private func shortRunID(_ runID: String) -> String {
@@ -849,7 +947,36 @@ struct ContentView: View {
     }
 
     private var shouldShowComposerStatusSummary: Bool {
-        !vm.isRecording && !vm.statusText.isEmpty && vm.statusText != "Idle"
+        guard !vm.isRecording else { return false }
+
+        let lower = composerStatusSummaryText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard !lower.isEmpty, lower != "idle" else { return false }
+
+        if lower == "ready for prompts" || lower == "completed" {
+            return false
+        }
+
+        if vm.isLoading || vm.isUploadingAttachments {
+            return true
+        }
+
+        return lower.contains("input")
+            || lower.contains("blocked")
+            || lower.contains("fail")
+            || lower.contains("cancel")
+            || lower.contains("timed out")
+            || lower.contains("upload")
+            || lower.contains("start")
+            || lower.contains("preparing")
+            || lower.contains("transcrib")
+            || lower.contains("microphone")
+            || lower.contains("recorder")
+            || lower.contains("access")
+            || lower.contains("set server")
+            || lower.contains("token")
     }
 
     private var shouldShowComposerSummaryRow: Bool {
@@ -912,15 +1039,15 @@ struct ContentView: View {
 
     private var composerPlaceholder: String {
         if !vm.hasConfiguredConnection {
-            return "Connect backend first"
+            return "Connect backend"
         }
         if vm.isRecording {
             return "Voice recording in progress"
         }
         if vm.draftAttachments.isEmpty {
-            return "Ask MOBaiLE about this repo"
+            return composerFocused ? "Ask about this repo or type /" : "Ask about this repo"
         }
-        return "Add context for these attachments"
+        return composerFocused ? "Add context for these files" : "Add context"
     }
 
     private var headerStatusText: String {
@@ -948,28 +1075,11 @@ struct ContentView: View {
     }
 
     private var runtimeDirectorySummary: String {
-        shortPathLabel(runtimeDirectoryLabel)
+        compactPathLabel(runtimeDirectoryLabel)
     }
 
-    private var showsExpandedRuntimeContext: Bool {
-        vm.hasConfiguredConnection && runtimeContextExpanded
-    }
-
-    private var runtimeStatusTint: Color {
-        let lower = bottomRunStatusText.lowercased()
-        if lower.contains("input") || lower.contains("blocked") {
-            return .orange
-        }
-        if lower.contains("fail") || lower.contains("cancel") || lower.contains("timed out") {
-            return .red
-        }
-        if lower.contains("complete") {
-            return .green
-        }
-        if vm.isLoading || lower.contains("think") || lower.contains("plan") || lower.contains("execut") || lower.contains("summar") {
-            return .blue
-        }
-        return .secondary
+    private var shouldShowRuntimeInfoBar: Bool {
+        vm.hasConfiguredConnection || !vm.conversation.isEmpty
     }
 
     private var canUseBrowsedDirectory: Bool {
@@ -983,18 +1093,14 @@ struct ContentView: View {
             if !vm.hasConfiguredConnection {
                 setupRuntimeInfoBar
                     .transition(.move(edge: .top).combined(with: .opacity))
-            } else if showsExpandedRuntimeContext {
-                expandedRuntimeInfoBar
-                    .transition(.move(edge: .top).combined(with: .opacity))
             } else {
                 compactRuntimeInfoBar
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 6)
         .background(Color(.systemBackground).opacity(0.96))
-        .animation(.easeInOut(duration: 0.18), value: showsExpandedRuntimeContext)
         .overlay(
             Rectangle()
                 .fill(Color(.separator).opacity(0.35))
@@ -1022,157 +1128,51 @@ struct ContentView: View {
 
     private var compactRuntimeInfoBar: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(runtimeDirectorySummary)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    copyWorkspacePathButton
-                }
-                Text(compactRuntimeSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Label {
+                Text(runtimeDirectorySummary)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "folder.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
             }
+            .accessibilityLabel("Current workspace \(runtimeDirectoryLabel)")
 
             Spacer(minLength: 0)
 
-            if !vm.statusText.isEmpty && vm.statusText != "Idle" {
-                StatusPill(text: bottomRunStatusText, tint: runtimeStatusTint)
+            if vm.isLoading || vm.isUploadingAttachments {
+                ProgressView()
+                    .controlSize(.small)
             }
 
             runtimeWorkspaceButton
-            runtimeContextToggleButton
         }
-    }
-
-    private var expandedRuntimeInfoBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Live Context")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(runtimeDirectoryLabel)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                        copyWorkspacePathButton
-                            .padding(.top, 1)
-                    }
-                }
-
-                Spacer(minLength: 0)
-
-                if !vm.statusText.isEmpty && vm.statusText != "Idle" {
-                    StatusPill(text: bottomRunStatusText, tint: runtimeStatusTint)
-                }
-
-                runtimeWorkspaceButton
-
-                if !vm.conversation.isEmpty {
-                    runtimeContextToggleButton
-                }
-            }
-
-            ViewThatFits(in: .vertical) {
-                HStack(spacing: 8) {
-                    RuntimeContextChip(icon: "cpu", label: "Executor", value: runtimeExecutorLabel)
-                    RuntimeContextChip(icon: "folder.fill", label: "Workspace", value: runtimeDirectorySummary)
-                    if !vm.runID.isEmpty {
-                        RuntimeContextChip(icon: "number", label: "Run", value: shortRunID(vm.runID))
-                    }
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        RuntimeContextChip(icon: "cpu", label: "Executor", value: runtimeExecutorLabel)
-                        RuntimeContextChip(icon: "folder.fill", label: "Workspace", value: runtimeDirectorySummary)
-                    }
-                    if !vm.runID.isEmpty {
-                        RuntimeContextChip(icon: "number", label: "Run", value: shortRunID(vm.runID))
-                    }
-                }
-            }
-
-            Text(expandedRuntimeDescription)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var compactRuntimeSubtitle: String {
-        if !vm.hasConfiguredConnection {
-            return "Setup required before you can send or record"
-        }
-        if vm.isUploadingAttachments {
-            return "Uploading attachments before the run starts"
-        }
-        if vm.isLoading && !vm.runID.isEmpty {
-            return "\(runtimeExecutorLabel) running - \(shortRunID(vm.runID))"
-        }
-        if !vm.runID.isEmpty {
-            return "\(runtimeExecutorLabel) last run - \(shortRunID(vm.runID))"
-        }
-        return "\(runtimeExecutorLabel) ready for the next run"
-    }
-
-    private var expandedRuntimeDescription: String {
-        if !vm.hasConfiguredConnection {
-            return "Connect a backend to unlock sending, recording, and workspace browsing."
-        }
-        if vm.isUploadingAttachments {
-            return "Attachments are uploading now. You can cancel here if you picked the wrong files or want to pause before starting the run."
-        }
-        if vm.isLoading {
-            return "The current run is streaming updates here while new commands continue using this workspace."
-        }
-        return "New runs start in this workspace. Use Workspace to browse folders and promote one to the active working directory."
     }
 
     private var runtimeWorkspaceButton: some View {
-        Button {
+        Group {
             if vm.hasConfiguredConnection {
-                showWorkspaceBrowser = true
-                Task { await vm.refreshDirectoryBrowser() }
+                Button {
+                    showWorkspaceBrowser = true
+                    Task { await vm.refreshDirectoryBrowser() }
+                } label: {
+                    Text("Browse")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Browse workspace")
             } else {
-                showConnectionSettings = true
+                Button {
+                    showConnectionSettings = true
+                } label: {
+                    Label("Setup", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderedProminent)
             }
-        } label: {
-            Label(
-                vm.hasConfiguredConnection ? "Workspace" : "Setup",
-                systemImage: vm.hasConfiguredConnection ? "folder" : "slider.horizontal.3"
-            )
         }
-        .buttonStyle(.borderedProminent)
         .controlSize(.small)
-    }
-
-    private var copyWorkspacePathButton: some View {
-        Button {
-            copyWorkspacePath()
-        } label: {
-            Image(systemName: copiedWorkspacePath ? "checkmark.circle.fill" : "doc.on.doc")
-                .font(.caption.weight(.semibold))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(copiedWorkspacePath ? .green : .secondary)
-        .accessibilityLabel(copiedWorkspacePath ? "Workspace path copied" : "Copy workspace path")
-    }
-
-    private var runtimeContextToggleButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                runtimeContextExpanded.toggle()
-            }
-        } label: {
-            Image(systemName: runtimeContextExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
-                .font(.system(size: 19))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .accessibilityLabel(runtimeContextExpanded ? "Collapse live context" : "Expand live context")
     }
 
     private var workspaceBrowserSheet: some View {
@@ -1221,20 +1221,20 @@ struct ContentView: View {
     }
 
     private var directoryBrowserPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Workspace Browser")
+                    Text("Browsing")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(vm.directoryBrowserPath.isEmpty ? runtimeDirectoryLabel : vm.directoryBrowserPath)
-                        .font(.caption.monospaced())
+                        .font(.footnote.monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
                 Spacer(minLength: 0)
                 Button("Use This Folder") {
-                    vm.useCurrentBrowserDirectoryAsWorkingDirectory()
+                    Task { await vm.useCurrentBrowserDirectoryAsWorkingDirectory() }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -1254,7 +1254,7 @@ struct ContentView: View {
                                     Task { await vm.openDirectory(path: crumb.path) }
                                 }
                                 .buttonStyle(.bordered)
-                                .controlSize(.mini)
+                                .controlSize(.small)
                             }
                         }
                     }
@@ -1265,7 +1265,7 @@ struct ContentView: View {
                     Image(systemName: "arrow.up")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .disabled(!vm.canNavigateDirectoryUp || vm.isLoadingDirectoryBrowser)
 
                 Button {
@@ -1274,7 +1274,7 @@ struct ContentView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .disabled(vm.isLoadingDirectoryBrowser)
             }
 
@@ -1282,7 +1282,7 @@ struct ContentView: View {
                 TextField("New folder", text: $newDirectoryName)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .font(.caption2.monospaced())
+                    .font(.footnote.monospaced())
                     .textFieldStyle(.roundedBorder)
                 Button("Create") {
                     Task {
@@ -1293,7 +1293,7 @@ struct ContentView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.mini)
+                .controlSize(.small)
                 .disabled(
                     vm.isLoadingDirectoryBrowser ||
                     newDirectoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1348,28 +1348,39 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            LazyVStack(spacing: 6) {
+            LazyVStack(spacing: 8) {
                 ForEach(vm.filteredDirectoryBrowserEntries) { entry in
                     Button {
                         Task { await vm.openDirectoryEntry(entry) }
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 10) {
                             Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
-                                .font(.caption2)
+                                .font(.footnote.weight(.semibold))
                                 .foregroundStyle(entry.isDirectory ? .blue : .secondary)
                             Text(entry.name)
-                                .font(.caption2.monospaced())
+                                .font(.footnote.monospaced())
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             if entry.isDirectory {
                                 Image(systemName: "chevron.right")
-                                    .font(.caption2)
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color(.systemBackground))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+                        )
                     }
                     .buttonStyle(.plain)
                     .disabled(!entry.isDirectory)
+                    .opacity(entry.isDirectory ? 1 : 0.82)
                 }
             }
         }
@@ -1393,6 +1404,21 @@ struct ContentView: View {
         if trimmed == "/" { return "/" }
         let last = URL(fileURLWithPath: trimmed).lastPathComponent
         return last.isEmpty ? trimmed : last
+    }
+
+    private func compactPathLabel(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "~" }
+        if trimmed == "/" { return "/" }
+
+        let url = URL(fileURLWithPath: trimmed)
+        let last = url.lastPathComponent
+        guard !last.isEmpty else { return trimmed }
+
+        let parent = url.deletingLastPathComponent().lastPathComponent
+        guard !parent.isEmpty, parent != "/", parent != last else { return last }
+
+        return "\(parent)/\(last)"
     }
 
     private func applyPreviewPresentationIfNeeded() {
@@ -1426,15 +1452,16 @@ struct ContentView: View {
                 HStack(alignment: .center, spacing: 10) {
                     Circle()
                         .fill(Color.red)
-                        .frame(width: 10, height: 10)
+                        .frame(width: 8, height: 8)
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Recording voice prompt")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.caption.weight(.semibold))
                         TimelineView(.periodic(from: startedAt, by: 1)) { context in
                             Text("\(recordingDurationLabel(since: startedAt, now: context.date)) • \(recordingSubtitle)")
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                     }
 
@@ -1448,9 +1475,14 @@ struct ContentView: View {
                         .background((vm.autoSendAfterSilenceEnabled ? Color.blue : Color.secondary).opacity(0.12))
                         .clipShape(Capsule())
                 }
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.red.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.red.opacity(0.12), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else if vm.statusText == "Microphone access needed" {
                 InlineNoticeCard(
                     title: "Microphone access is off",
@@ -1505,13 +1537,145 @@ struct ContentView: View {
         Task { await vm.startRecording() }
     }
 
-    private func copyWorkspacePath() {
-        UIPasteboard.general.string = runtimeDirectoryLabel
-        copiedWorkspacePath = true
-        Task {
-            try? await Task.sleep(nanoseconds: 1_100_000_000)
-            copiedWorkspacePath = false
+    private func handleComposerSend() {
+        composerFocused = false
+        guard let slashState = composerSlashCommandState else {
+            Task { await vm.sendPrompt() }
+            return
         }
+        guard let command = slashState.exactMatch else {
+            if slashState.query.isEmpty {
+                vm.errorText = "Choose a slash command from the list."
+            } else {
+                vm.errorText = "Unknown slash command /\(slashState.query)."
+            }
+            composerFocused = true
+            return
+        }
+        Task { await executeSlashCommand(command, arguments: slashState.arguments) }
+    }
+
+    private func handleSlashCommandSelection(_ command: ComposerSlashCommand, state: ComposerSlashCommandState) {
+        if state.exactMatch == command {
+            composerFocused = false
+            Task { await executeSlashCommand(command, arguments: state.arguments) }
+            return
+        }
+        vm.prepareSlashCommand(command)
+        composerFocused = true
+    }
+
+    private func executeSlashCommand(_ command: ComposerSlashCommand, arguments rawArguments: String) async {
+        let arguments = rawArguments.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !command.acceptsArguments && !arguments.isEmpty {
+            vm.errorText = "\(command.usage) does not take extra arguments."
+            composerFocused = true
+            return
+        }
+
+        switch command {
+        case .new:
+            vm.clearComposerText()
+            vm.startNewChat()
+        case .threads:
+            vm.clearComposerText()
+            showThreads = true
+            vm.errorText = ""
+        case .logs:
+            vm.clearComposerText()
+            showLogs = true
+            vm.errorText = ""
+        case .settings:
+            vm.clearComposerText()
+            showConnectionSettings = true
+            vm.errorText = ""
+        case .browse:
+            vm.clearComposerText()
+            showWorkspaceBrowser = true
+            if arguments.isEmpty {
+                await vm.refreshDirectoryBrowser()
+                vm.statusText = "Opened the workspace browser."
+            } else {
+                await vm.openDirectory(path: arguments)
+                vm.statusText = "Opened \(arguments)."
+            }
+        case .cwd:
+            let message = await vm.setWorkingDirectoryFromSlashCommand(arguments)
+            vm.clearComposerText()
+            vm.statusText = message
+        case .executor:
+            if !arguments.isEmpty && !vm.selectableExecutors.contains(arguments.lowercased()) {
+                vm.errorText = "Executor \(arguments.lowercased()) isn't available. Options: \(vm.selectableExecutors.joined(separator: ", "))."
+                composerFocused = true
+                return
+            }
+            let message = await vm.setExecutorFromSlashCommand(arguments)
+            vm.clearComposerText()
+            vm.statusText = message
+        case .retry:
+            vm.clearComposerText()
+            await vm.retryLastPrompt()
+        case .voice:
+            vm.clearComposerText()
+            handleRecordingButtonTap()
+        case .paste:
+            vm.clearComposerText()
+            await vm.pasteClipboardContentIntoDraft()
+        case .clear:
+            vm.clearComposerDraft()
+            vm.statusText = "Cleared the draft."
+        }
+    }
+
+}
+
+private struct ComposerSlashCommandMenu: View {
+    let state: ComposerSlashCommandState
+    let onSelect: (ComposerSlashCommand) -> Void
+
+    private var visibleCommands: [ComposerSlashCommand] {
+        Array(state.suggestions.prefix(6))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("Slash Commands", systemImage: "chevron.left.forwardslash.chevron.right")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+                Text(state.exactMatch == nil ? "Tap to insert" : "Tap to run")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if state.hasUnknownCommand {
+                Text("No slash command matches /\(state.query).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(visibleCommands) { command in
+                    Button {
+                        onSelect(command)
+                    } label: {
+                        ComposerSlashCommandRow(
+                            command: command,
+                            arguments: state.arguments,
+                            isReadyToRun: state.exactMatch == command
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+        )
     }
 }
 
@@ -1542,18 +1706,52 @@ private struct RuntimeContextChip: View {
     }
 }
 
-private struct StatusPill: View {
-    let text: String
-    let tint: Color
+private struct ComposerSlashCommandRow: View {
+    let command: ComposerSlashCommand
+    let arguments: String
+    let isReadyToRun: Bool
+
+    private var hintText: String {
+        if isReadyToRun {
+            if command.acceptsArguments && !arguments.isEmpty {
+                return "Run"
+            }
+            return "Use"
+        }
+        return "Insert"
+    }
 
     var body: some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(tint.opacity(0.12))
-            .clipShape(Capsule())
+        HStack(spacing: 10) {
+            Image(systemName: command.symbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(command.usage)
+                    .font(.caption.monospaced().weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(command.description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+
+            Text(hintText)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(isReadyToRun ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background((isReadyToRun ? Color.accentColor : Color.secondary).opacity(0.10))
+                .clipShape(Capsule())
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -1564,40 +1762,39 @@ private struct DraftAttachmentChip: View {
     let onRemove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: iconName)
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tintColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.fileName)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(tintColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(attachment.fileName)
-                        .font(.caption.weight(.semibold))
-                        .lineLimit(1)
+                    .lineLimit(1)
+                if showsDetailText {
                     Text(detailText)
                         .font(detailFont)
                         .foregroundStyle(detailColor)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
-                Button {
-                    onRemove()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove \(attachment.fileName)")
-                .disabled(isBusy)
             }
-
             if let progress = transferState.progressValue {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(tintColor)
-                    .frame(width: 120)
+                    .frame(width: 44)
             }
+            Button {
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove \(attachment.fileName)")
+            .disabled(isBusy)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 9)
         .background(backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
@@ -1633,11 +1830,20 @@ private struct DraftAttachmentChip: View {
     private var detailText: String {
         switch transferState {
         case .idle:
-            return humanReadableAttachmentSize(attachment.sizeBytes)
+            return ""
         case let .uploading(progress):
             return "Uploading \(Int((min(1, max(0, progress)) * 100).rounded()))%"
         case let .failed(message):
             return message
+        }
+    }
+
+    private var showsDetailText: Bool {
+        switch transferState {
+        case .idle:
+            return false
+        case .uploading, .failed:
+            return true
         }
     }
 
@@ -1691,6 +1897,17 @@ private struct PairingConfirmationSheet: View {
                     LabeledContent("URL", value: pending.serverURL)
                         .font(.footnote.monospaced())
                     LabeledContent("Security", value: pending.badgeText)
+                }
+
+                if let warning = pending.localNetworkWarning {
+                    Section("Network") {
+                        Label("Local network HTTP detected", systemImage: "wifi.exclamationmark")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text(warning)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Session") {

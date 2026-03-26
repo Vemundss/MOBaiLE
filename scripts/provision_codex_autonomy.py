@@ -13,7 +13,7 @@ import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = REPO_ROOT / "backend"
-SKILLS_SOURCE_DIR = BACKEND_DIR / "agent_skills"
+SKILLS_SOURCE_DIR = REPO_ROOT / ".mobaile" / "skills"
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 DEFAULT_PLAYWRIGHT_OUTPUT_DIR = BACKEND_DIR / "data" / "playwright"
 DEFAULT_PLAYWRIGHT_USER_DATA_DIR = BACKEND_DIR / "data" / "playwright-profile"

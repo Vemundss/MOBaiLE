@@ -104,7 +104,7 @@ main() {
     if [[ -n "${mode}" ]]; then
       ok "VOICE_AGENT_SECURITY_MODE=${mode}"
     else
-      warn "VOICE_AGENT_SECURITY_MODE not set (defaults to safe)"
+      warn "VOICE_AGENT_SECURITY_MODE not set (defaults to full-access)"
     fi
     local codex_home
     codex_home="$(read_env_value "VOICE_AGENT_CODEX_HOME" "~/.codex")"

@@ -1,5 +1,8 @@
 # Usage
 
+This is the canonical operator/setup document for the repo. If another document disagrees on
+installation, service management, or runtime configuration, prefer this file.
+
 This document explains how to run the current backend MVP locally.
 
 ## Quick Setup (recommended)
@@ -182,7 +185,7 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
 - `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
 - `VOICE_AGENT_CODEX_USE_CONTEXT=true` prepends MOBaiLE context to Codex prompts.
-- `VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md` points to context file under `backend/`.
+- `VOICE_AGENT_CODEX_CONTEXT_FILE=../.mobaile/AGENT_CONTEXT.md` points to the repo-local hidden agent context file.
 - `VOICE_AGENT_CLAUDE_BINARY=claude` selects the Claude Code CLI binary.
 - `VOICE_AGENT_CLAUDE_MODEL=<model-id>` optionally forces a Claude model.
 - `VOICE_AGENT_CLAUDE_TIMEOUT_SEC=900` sets max runtime per Claude run before backend fails it.
@@ -323,11 +326,11 @@ bash ./scripts/phone_connectivity_smoke.sh
 
 This script reads `backend/pairing.json`, validates auth behavior, uploads audio to `/v1/audio`, and waits for terminal run status.
 
-## 8) iPhone voice testing (no app code)
+## 8) Legacy no-app voice testing
 
-Use the Shortcuts-based workflow in:
+If you still need the old Shortcuts-only workflow, see the archived note:
 
-`docs/PHONE_SHORTCUT_MVP.md`
+`docs/archive/PHONE_SHORTCUT_MVP.md`
 
 ## 9) Pairing QR (optional)
 

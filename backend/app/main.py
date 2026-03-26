@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
@@ -40,6 +41,8 @@ from app.models.schemas import (
     RunRecord,
     RunSummary,
     RuntimeConfigResponse,
+    SessionContextResponse,
+    SessionContextUpdateRequest,
     UploadResponse,
     UtteranceRequest,
     UtteranceResponse,
@@ -79,6 +82,8 @@ EXECUTION_SERVICE = ExecutionService(
 PAIR_ATTEMPTS_LOCK = threading.Lock()
 PAIR_ATTEMPTS: dict[str, list[float]] = {}
 PAIR_EXCHANGE_LOCK = threading.Lock()
+MAX_PAIRED_CLIENT_TOKENS = 12
+_UNSET = object()
 
 
 @app.get("/health")
@@ -93,15 +98,15 @@ async def require_api_token(request: Request, call_next):
     if request.url.path == "/v1/pair/exchange":
         return await call_next(request)
 
-    if not ENV.api_token:
+    pairing = _read_pairing_file()
+    if not ENV.api_token and not _paired_client_records(pairing):
         return JSONResponse(
             status_code=503,
             content={"detail": "server auth token is not configured"},
         )
 
     auth_header = request.headers.get("Authorization", "")
-    expected = f"Bearer {ENV.api_token}"
-    if not secrets.compare_digest(auth_header, expected):
+    if not _is_authorized_api_token(auth_header, pairing):
         return JSONResponse(
             status_code=401,
             content={"detail": "missing or invalid bearer token"},
@@ -128,10 +133,8 @@ def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchang
             raise HTTPException(status_code=401, detail="pairing code expired")
 
         _rotate_pair_code(pairing)
-        api_token = str(pairing.get("api_token", "")).strip() or ENV.api_token
-        if not api_token:
-            raise HTTPException(status_code=503, detail="server auth token is not configured")
         session_id = payload.session_id or str(pairing.get("session_id", "iphone-app")).strip() or "iphone-app"
+        api_token = _issue_paired_client_token(pairing, session_id=session_id)
         return PairExchangeResponse(
             api_token=api_token,
             session_id=session_id,
@@ -142,9 +145,13 @@ def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchang
 @app.post("/v1/utterances", response_model=UtteranceResponse)
 def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
     run_id = str(uuid.uuid4())
-    executor = ENV.resolve_request_executor(request.executor)
+    session_context = _session_context_response(request.session_id)
+    executor = ENV.resolve_request_executor(request.executor if request.executor is not None else session_context.executor)
+    requested_working_directory = request.working_directory
+    if requested_working_directory is None:
+        requested_working_directory = session_context.working_directory
     try:
-        workdir = ENV.resolve_workdir(request.working_directory)
+        workdir = ENV.resolve_workdir(requested_working_directory)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     display_utterance_text = _display_utterance_text(request.utterance_text, request.attachments)
@@ -419,6 +426,36 @@ def list_session_runs(session_id: str, limit: int = Query(20, ge=1, le=100)) -> 
     return RUN_STATE.list_session_runs(session_id, limit=limit)
 
 
+@app.get("/v1/sessions/{session_id}/context", response_model=SessionContextResponse)
+def get_session_context(session_id: str) -> SessionContextResponse:
+    return _session_context_response(session_id)
+
+
+@app.patch("/v1/sessions/{session_id}/context", response_model=SessionContextResponse)
+def update_session_context(session_id: str, payload: SessionContextUpdateRequest) -> SessionContextResponse:
+    executor = _UNSET
+    working_directory = _UNSET
+
+    if "executor" in payload.model_fields_set:
+        executor = None if payload.executor is None else _validated_session_context_executor(payload.executor)
+
+    if "working_directory" in payload.model_fields_set:
+        raw_path = (payload.working_directory or "").strip()
+        if raw_path:
+            try:
+                working_directory = str(ENV.resolve_workdir(raw_path))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            working_directory = None
+
+    return _update_session_context(
+        session_id,
+        executor=executor,
+        working_directory=working_directory,
+    )
+
+
 @app.get("/v1/runs/{run_id}/diagnostics", response_model=RunDiagnostics)
 def get_run_diagnostics(run_id: str) -> RunDiagnostics:
     diagnostics = RUN_STATE.diagnostics_for(run_id)
@@ -531,6 +568,63 @@ def stream_run_events(run_id: str) -> StreamingResponse:
     if RUN_STATE.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="run not found")
     return StreamingResponse(RUN_STATE.event_stream(run_id), media_type="text/event-stream")
+
+
+def _session_context_response(session_id: str) -> SessionContextResponse:
+    row = RUN_STORE.get_session_context(session_id)
+    raw_executor = str(row["executor"]).strip() if row is not None and row["executor"] else ""
+    raw_working_directory = str(row["working_directory"]).strip() if row is not None and row["working_directory"] else ""
+
+    effective_executor = raw_executor if raw_executor in {"local", "codex", "claude"} else ENV.default_executor
+    effective_working_directory = raw_working_directory or None
+    try:
+        resolved_working_directory = str(ENV.resolve_workdir(effective_working_directory))
+    except ValueError:
+        effective_working_directory = None
+        resolved_working_directory = str(ENV.default_workdir)
+
+    return SessionContextResponse(
+        session_id=session_id,
+        executor=effective_executor,  # type: ignore[arg-type]
+        working_directory=effective_working_directory,
+        resolved_working_directory=resolved_working_directory,
+        updated_at=str(row["updated_at"]).strip() if row is not None and row["updated_at"] else None,
+    )
+
+
+def _update_session_context(
+    session_id: str,
+    *,
+    executor=_UNSET,
+    working_directory=_UNSET,
+) -> SessionContextResponse:
+    current = RUN_STORE.get_session_context(session_id)
+    next_executor = str(current["executor"]).strip() if current is not None and current["executor"] else None
+    next_working_directory = (
+        str(current["working_directory"]).strip()
+        if current is not None and current["working_directory"]
+        else None
+    )
+
+    if executor is not _UNSET:
+        next_executor = executor
+    if working_directory is not _UNSET:
+        next_working_directory = working_directory
+
+    RUN_STORE.upsert_session_context(
+        session_id,
+        executor=next_executor,
+        working_directory=next_working_directory,
+    )
+    return _session_context_response(session_id)
+
+
+def _validated_session_context_executor(executor: RunExecutorName) -> RunExecutorName:
+    if executor == "local":
+        return "local"
+    if executor in ENV.available_agent_executors():
+        return executor
+    raise HTTPException(status_code=400, detail=f"executor {executor} is not available on this backend")
 
 
 def _fetch_today_calendar_events() -> list[AgendaItem]:
@@ -718,6 +812,71 @@ def _rotate_pair_code(payload: dict[str, object]) -> None:
         datetime.now(timezone.utc) + timedelta(minutes=ENV.pair_code_ttl_min)
     ).isoformat().replace("+00:00", "Z")
     _write_pairing_file(payload)
+
+
+def _extract_bearer_token(auth_header: str) -> str:
+    prefix = "Bearer "
+    if not auth_header.startswith(prefix):
+        return ""
+    return auth_header[len(prefix):].strip()
+
+
+def _hash_api_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _paired_client_records(payload: dict[str, object]) -> list[dict[str, str]]:
+    raw = payload.get("paired_clients")
+    if not isinstance(raw, list):
+        return []
+
+    records: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        token_hash = str(item.get("token_sha256", "")).strip()
+        if not token_hash:
+            continue
+        records.append(
+            {
+                "token_sha256": token_hash,
+                "session_id": str(item.get("session_id", "")).strip(),
+                "issued_at": str(item.get("issued_at", "")).strip(),
+            }
+        )
+    return records
+
+
+def _pairing_token_matches(payload: dict[str, object], token: str) -> bool:
+    token_hash = _hash_api_token(token)
+    return any(
+        secrets.compare_digest(record["token_sha256"], token_hash)
+        for record in _paired_client_records(payload)
+    )
+
+
+def _is_authorized_api_token(auth_header: str, pairing: dict[str, object]) -> bool:
+    token = _extract_bearer_token(auth_header)
+    if not token:
+        return False
+    if ENV.api_token and secrets.compare_digest(token, ENV.api_token):
+        return True
+    return _pairing_token_matches(pairing, token)
+
+
+def _issue_paired_client_token(payload: dict[str, object], *, session_id: str) -> str:
+    token = secrets.token_urlsafe(32)
+    records = _paired_client_records(payload)
+    records.append(
+        {
+            "token_sha256": _hash_api_token(token),
+            "session_id": session_id,
+            "issued_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+    )
+    payload["paired_clients"] = records[-MAX_PAIRED_CLIENT_TOKENS:]
+    _write_pairing_file(payload)
+    return token
 
 
 def _enforce_pair_rate_limit(client_id: str) -> None:

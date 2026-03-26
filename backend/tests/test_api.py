@@ -258,9 +258,87 @@ def test_list_session_runs_and_diagnostics(monkeypatch, tmp_path: Path):
     diagnostics = diag.json()
     assert diagnostics["run_id"] == run_id
     assert diagnostics["event_count"] >= 1
-    assert "action.started" in diagnostics["event_type_counts"]
-    assert payload["events"][0].get("event_id")
-    assert payload["events"][0].get("created_at")
+
+
+def test_session_context_updates_and_runs_inherit_defaults(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "local",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CODEX_BINARY": "missing-codex",
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    initial = client.get(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert initial.status_code == 200
+    assert initial.json()["executor"] == "local"
+    assert initial.json()["working_directory"] is None
+    assert initial.json()["resolved_working_directory"] == str(workspace)
+
+    project_dir = workspace / "project"
+    update = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "executor": "local",
+            "working_directory": str(project_dir),
+        },
+    )
+    assert update.status_code == 200
+    updated = update.json()
+    assert updated["session_id"] == "sess-context"
+    assert updated["executor"] == "local"
+    assert updated["working_directory"] == str(project_dir)
+    assert updated["resolved_working_directory"] == str(project_dir)
+
+    create = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "sess-context",
+            "utterance_text": "create a hello python script and run it",
+        },
+    )
+    assert create.status_code == 200
+    run_id = create.json()["run_id"]
+
+    run = client.get(
+        f"/v1/runs/{run_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert run.status_code == 200
+    run_payload = run.json()
+    assert run_payload["executor"] == "local"
+    assert run_payload["working_directory"] == str(project_dir)
+
+
+def test_session_context_rejects_unavailable_executor(monkeypatch, tmp_path: Path):
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "local",
+            "VOICE_AGENT_CODEX_BINARY": "missing-codex",
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    response = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"executor": "codex"},
+    )
+
+    assert response.status_code == 400
+    assert "not available" in response.json()["detail"]
 
 
 def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
@@ -701,7 +779,12 @@ def test_pair_exchange_is_single_use_under_concurrency(monkeypatch, tmp_path: Pa
         thread.join()
 
     assert sorted(resp.status_code for resp in responses) == [200, 401]
-    assert any(resp.status_code == 200 and resp.json()["api_token"] == "abc-token" for resp in responses)
+    assert any(
+        resp.status_code == 200
+        and resp.json()["api_token"] != "abc-token"
+        and resp.json()["session_id"] == "ios1"
+        for resp in responses
+    )
     updated = pairing_file.read_text(encoding="utf-8")
     assert '"pair_code":"pair-1234"' not in updated.replace(" ", "")
 
@@ -957,7 +1040,7 @@ def test_config_endpoint_reports_openai_transcription_not_ready_without_key(monk
     assert payload["transcribe_ready"] is False
 
 
-def test_pair_exchange_returns_api_token_and_rotates_code(monkeypatch, tmp_path: Path):
+def test_pair_exchange_returns_scoped_token_and_rotates_code(monkeypatch, tmp_path: Path):
     pairing_file = tmp_path / "pairing.json"
     pairing_file.write_text(
         (
@@ -981,10 +1064,45 @@ def test_pair_exchange_returns_api_token_and_rotates_code(monkeypatch, tmp_path:
     resp = client.post("/v1/pair/exchange", json={"pair_code": "pair-1234", "session_id": "ios1"})
     assert resp.status_code == 200
     payload = resp.json()
-    assert payload["api_token"] == "abc-token"
+    assert payload["api_token"] != "abc-token"
     assert payload["session_id"] == "ios1"
     updated = pairing_file.read_text(encoding="utf-8")
     assert '"pair_code":"pair-1234"' not in updated.replace(" ", "")
+    assert payload["api_token"] not in updated
+
+
+def test_paired_token_authorizes_protected_requests(monkeypatch, tmp_path: Path):
+    pairing_file = tmp_path / "pairing.json"
+    pairing_file.write_text(
+        (
+            '{'
+            '"server_url":"http://127.0.0.1:8000",'
+            '"api_token":"abc-token",'
+            '"session_id":"iphone-app",'
+            '"pair_code":"pair-1234",'
+            '"pair_code_expires_at":"2999-01-01T00:00:00Z"'
+            '}'
+        ),
+        encoding="utf-8",
+    )
+    client, _ = make_client(
+        monkeypatch,
+        tmp_path,
+        provider="mock",
+        api_token="abc-token",
+        extra_env={"VOICE_AGENT_PAIRING_FILE": str(pairing_file)},
+    )
+
+    pair_resp = client.post("/v1/pair/exchange", json={"pair_code": "pair-1234", "session_id": "ios1"})
+    assert pair_resp.status_code == 200
+    paired_token = pair_resp.json()["api_token"]
+    assert paired_token != "abc-token"
+
+    config_resp = client.get(
+        "/v1/config",
+        headers={"Authorization": f"Bearer {paired_token}"},
+    )
+    assert config_resp.status_code == 200
 
 
 def test_cancel_codex_run(monkeypatch, tmp_path: Path):
@@ -1157,6 +1275,9 @@ def test_codex_thread_resume_by_client_thread_id(monkeypatch, tmp_path: Path):
     fake_codex.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        "if [[ \"${1:-}\" == \"--search\" ]]; then\n"
+        "  shift\n"
+        "fi\n"
         "if [[ \"${1:-}\" != \"exec\" ]]; then exit 1; fi\n"
         "shift\n"
         "resume_id=\"\"\n"

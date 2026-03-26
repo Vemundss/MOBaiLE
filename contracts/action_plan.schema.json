@@ -39,7 +39,8 @@
           "title": "Path"
         },
         "timeout_sec": {
-          "default": 30,
+          "default": 0,
+          "minimum": 0,
           "title": "Timeout Sec",
           "type": "integer"
         },

@@ -324,7 +324,7 @@ bash ./scripts/pairing_qr.sh
 - iOS details: [`ios/README.md`](ios/README.md)
 - Scripts reference: [`scripts/README.md`](scripts/README.md)
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- Current status: [`STATUS.md`](STATUS.md)
+- Documentation policy: [`docs/POLICY.md`](docs/POLICY.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
 - Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)

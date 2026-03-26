@@ -11,11 +11,10 @@ struct MessageBubble: View {
     @State private var artifactOpenError: String = ""
     @State private var openingArtifactID: String?
     @State private var previewDocument: PreviewDocument?
-    @State private var copiedMessage = false
     private let client = APIClient()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             bubbleHeader
 
             ForEach(segments) { segment in
@@ -113,28 +112,10 @@ struct MessageBubble: View {
     }
 
     private var bubbleHeader: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Label(isUser ? "You" : "MOBaiLE", systemImage: isUser ? "person.fill" : "sparkles")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(isUser ? Color.white.opacity(0.92) : Color.secondary)
-
-            Spacer()
-
-            if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button {
-                    UIPasteboard.general.string = message.text
-                    copiedMessage = true
-                    Task {
-                        try? await Task.sleep(nanoseconds: 1_100_000_000)
-                        copiedMessage = false
-                    }
-                } label: {
-                    Label(copiedMessage ? "Copied" : "Copy", systemImage: copiedMessage ? "checkmark" : "doc.on.doc")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(isUser ? Color.white.opacity(0.88) : Color.secondary)
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 
@@ -144,7 +125,7 @@ struct MessageBubble: View {
 
         if let rawURL = artifact.url,
            let parsed = URL(string: rawURL),
-           !isBackendProtectedURL(parsed) {
+           !isProtectedBackendURL(parsed, serverURL: serverURL) {
             await MainActor.run {
                 UIApplication.shared.open(parsed)
             }
@@ -168,13 +149,7 @@ struct MessageBubble: View {
     }
 
     private func isBackendProtectedURL(_ url: URL) -> Bool {
-        guard let backend = URL(string: serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else {
-            return false
-        }
-        return url.host == backend.host &&
-            (url.port ?? defaultPort(for: url.scheme)) == (backend.port ?? defaultPort(for: backend.scheme)) &&
-            url.scheme == backend.scheme &&
-            url.path.hasPrefix("/v1/")
+        isProtectedBackendURL(url, serverURL: serverURL)
     }
 
     private func defaultPort(for scheme: String?) -> Int {
@@ -413,7 +388,11 @@ private struct SectionCard: View {
             }
         }
         .padding(10)
-        .background(isUser ? Color.white.opacity(0.08) : style.background)
+        .background(isUser ? Color.white.opacity(0.08) : Color(.tertiarySystemBackground))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.16), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -427,16 +406,16 @@ private struct SectionCard: View {
         }
     }
 
-    private var sectionStyle: (icon: String, tint: Color, background: Color) {
+    private var sectionStyle: (icon: String, tint: Color) {
         switch title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "what i did":
-            return ("wrench.and.screwdriver", Color.gray, Color(.tertiarySystemBackground))
+            return ("wrench.and.screwdriver", Color.gray)
         case "result", "output":
-            return ("checkmark.circle", Color.green, Color(red: 0.90, green: 0.97, blue: 0.92))
+            return ("checkmark.circle", Color.green)
         case "next step":
-            return ("arrow.right.circle", Color.blue, Color(red: 0.90, green: 0.95, blue: 1.0))
+            return ("arrow.right.circle", Color.blue)
         default:
-            return ("text.alignleft", Color.secondary, Color(.tertiarySystemBackground))
+            return ("text.alignleft", Color.secondary)
         }
     }
 }
@@ -1275,6 +1254,10 @@ private func resolveImageURL(from raw: String, serverURL: String) -> String? {
         return nil
     }
     if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+        guard let url = URL(string: trimmed),
+              isProtectedBackendURL(url, serverURL: serverURL) else {
+            return nil
+        }
         return trimmed
     }
     let imagePath = extractImagePath(from: trimmed)
@@ -1351,6 +1334,16 @@ private func isBackendFileURL(_ url: URL, serverURL: String) -> Bool {
         (url.port ?? defaultPort(for: url.scheme)) == (backend.port ?? defaultPort(for: backend.scheme)) &&
         url.scheme == backend.scheme &&
         url.path.hasPrefix("/v1/files")
+}
+
+private func isProtectedBackendURL(_ url: URL, serverURL: String) -> Bool {
+    guard let backend = URL(string: serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else {
+        return false
+    }
+    return url.host == backend.host &&
+        (url.port ?? defaultPort(for: url.scheme)) == (backend.port ?? defaultPort(for: backend.scheme)) &&
+        url.scheme == backend.scheme &&
+        url.path.hasPrefix("/v1/")
 }
 
 private func defaultPort(for scheme: String?) -> Int {

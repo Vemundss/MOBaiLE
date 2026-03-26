@@ -41,13 +41,14 @@ class LocalExecutor:
         binary = tokens[0]
         if binary not in ALLOWED_BINARIES:
             return ActionResult(success=False, details=f"binary '{binary}' is not allowed")
+        resolved_timeout = timeout_sec if timeout_sec > 0 else None
         try:
             proc = subprocess.run(
                 tokens,
                 cwd=str(self.sandbox_root),
                 capture_output=True,
                 text=True,
-                timeout=timeout_sec,
+                timeout=resolved_timeout,
                 check=False,
             )
         except subprocess.TimeoutExpired:

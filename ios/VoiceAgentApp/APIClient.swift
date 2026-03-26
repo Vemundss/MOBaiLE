@@ -141,6 +141,45 @@ final class APIClient {
         return try jsonDecoder.decode(RuntimeConfig.self, from: data)
     }
 
+    func fetchSessionContext(
+        serverURL: String,
+        token: String,
+        sessionID: String
+    ) async throws -> SessionContext {
+        guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: serverURL + "/v1/sessions/\(encoded)/context") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(SessionContext.self, from: data)
+    }
+
+    func updateSessionContext(
+        serverURL: String,
+        token: String,
+        sessionID: String,
+        requestBody: SessionContextUpdateRequest
+    ) async throws -> SessionContext {
+        guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: serverURL + "/v1/sessions/\(encoded)/context") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.timeoutInterval = 15
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try jsonEncoder.encode(requestBody)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try jsonDecoder.decode(SessionContext.self, from: data)
+    }
+
     func fetchDirectoryListing(
         serverURL: String,
         token: String,
@@ -191,7 +230,7 @@ final class APIClient {
         token: String,
         sessionID: String,
         threadID: String?,
-        executor: String,
+        executor: String?,
         workingDirectory: String?,
         responseMode: String?,
         responseProfile: String?,
@@ -211,11 +250,17 @@ final class APIClient {
         let audioData = try Data(contentsOf: audioFileURL)
         var fields: [String: String] = [
             "session_id": sessionID,
-            "executor": executor,
-            "working_directory": workingDirectory ?? "",
             "response_mode": responseMode ?? "",
             "response_profile": responseProfile ?? ""
         ]
+        let trimmedExecutor = (executor ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedExecutor.isEmpty {
+            fields["executor"] = trimmedExecutor
+        }
+        let trimmedWorkingDirectory = (workingDirectory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedWorkingDirectory.isEmpty {
+            fields["working_directory"] = trimmedWorkingDirectory
+        }
         let trimmedThreadID = (threadID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedThreadID.isEmpty {
             fields["thread_id"] = trimmedThreadID

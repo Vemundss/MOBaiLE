@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PAIRING_FILE="${REPO_ROOT}/backend/pairing.json"
+ENV_FILE="${REPO_ROOT}/backend/.env"
 
 SERVER_URL="${VOICE_AGENT_SERVER_URL:-}"
 TOKEN="${VOICE_AGENT_API_TOKEN:-}"
@@ -21,12 +22,13 @@ load_pairing() {
   if [[ -n "${SERVER_URL}" && -n "${TOKEN}" ]]; then
     return
   fi
-  if [[ ! -f "${PAIRING_FILE}" ]]; then
+  if [[ -z "${SERVER_URL}" && ! -f "${PAIRING_FILE}" ]]; then
     echo "Missing pairing file: ${PAIRING_FILE}" >&2
     echo "Run: bash ./scripts/install_backend.sh" >&2
     exit 1
   fi
-  SERVER_URL="$(PAIRING_FILE_PATH="${PAIRING_FILE}" python3 - <<'PY'
+  if [[ -z "${SERVER_URL}" ]]; then
+    SERVER_URL="$(PAIRING_FILE_PATH="${PAIRING_FILE}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -35,15 +37,10 @@ d = json.loads(p.read_text(encoding='utf-8'))
 print(d.get('server_url', ''))
 PY
 )"
-  TOKEN="$(PAIRING_FILE_PATH="${PAIRING_FILE}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-p = Path(os.environ["PAIRING_FILE_PATH"])
-d = json.loads(p.read_text(encoding='utf-8'))
-print(d.get('api_token', ''))
-PY
-)"
+  fi
+  if [[ -z "${TOKEN}" && -f "${ENV_FILE}" ]]; then
+    TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2; exit}' "${ENV_FILE}")"
+  fi
 }
 
 wait_for_terminal_status() {
@@ -66,7 +63,7 @@ main() {
   load_pairing
 
   if [[ -z "${SERVER_URL}" || -z "${TOKEN}" ]]; then
-    echo "Pairing values are missing (server_url/api_token)." >&2
+    echo "Connection values are missing (server_url from pairing.json, api_token from backend/.env or env vars)." >&2
     exit 1
   fi
 

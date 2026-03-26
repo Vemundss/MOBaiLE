@@ -16,8 +16,13 @@ backend/logs/
 *.xcworkspace/xcuserdata/
 .bundle/
 vendor/bundle/
-build/ios/
-build/archives/
+build/
+error.log
+ios/VoiceAgentApp 2.xcodeproj/
+.mobaile/AGENTS.md
+.mobaile/MEMORY.md
+.mobaile/memory.md
+.mobaile/.venv/
 artifacts/app-store-screenshots/
 fastlane/report.xml
 fastlane/Preview.html

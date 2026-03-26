@@ -34,7 +34,7 @@ class Action(BaseModel):
     path: str | None = None
     content: str | None = None
     command: str | None = None
-    timeout_sec: int = 30
+    timeout_sec: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def validate_fields(self) -> "Action":
@@ -220,6 +220,19 @@ class RuntimeConfigResponse(BaseModel):
     workdir_root: str | None = None
     allow_absolute_file_reads: bool
     file_roots: list[str] = Field(default_factory=list)
+
+
+class SessionContextResponse(BaseModel):
+    session_id: str
+    executor: RunExecutorName
+    working_directory: str | None = None
+    resolved_working_directory: str
+    updated_at: str | None = None
+
+
+class SessionContextUpdateRequest(BaseModel):
+    executor: RunExecutorName | None = None
+    working_directory: str | None = None
 
 
 class CapabilityProbe(BaseModel):

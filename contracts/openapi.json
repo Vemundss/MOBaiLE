@@ -37,7 +37,8 @@
             "title": "Path"
           },
           "timeout_sec": {
-            "default": 30,
+            "default": 0,
+            "minimum": 0.0,
             "title": "Timeout Sec",
             "type": "integer"
           },
@@ -996,6 +997,89 @@
         "title": "RuntimeExecutorDescriptor",
         "type": "object"
       },
+      "SessionContextResponse": {
+        "properties": {
+          "executor": {
+            "enum": [
+              "local",
+              "codex",
+              "claude"
+            ],
+            "title": "Executor",
+            "type": "string"
+          },
+          "resolved_working_directory": {
+            "title": "Resolved Working Directory",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "working_directory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Working Directory"
+          }
+        },
+        "required": [
+          "session_id",
+          "executor",
+          "resolved_working_directory"
+        ],
+        "title": "SessionContextResponse",
+        "type": "object"
+      },
+      "SessionContextUpdateRequest": {
+        "properties": {
+          "executor": {
+            "anyOf": [
+              {
+                "enum": [
+                  "local",
+                  "codex",
+                  "claude"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executor"
+          },
+          "working_directory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Working Directory"
+          }
+        },
+        "title": "SessionContextUpdateRequest",
+        "type": "object"
+      },
       "UploadResponse": {
         "properties": {
           "artifact": {
@@ -1622,6 +1706,92 @@
           }
         },
         "summary": "Stream Run Events"
+      }
+    },
+    "/v1/sessions/{session_id}/context": {
+      "get": {
+        "operationId": "get_session_context_v1_sessions__session_id__context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session Context"
+      },
+      "patch": {
+        "operationId": "update_session_context_v1_sessions__session_id__context_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionContextUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Session Context"
       }
     },
     "/v1/sessions/{session_id}/runs": {

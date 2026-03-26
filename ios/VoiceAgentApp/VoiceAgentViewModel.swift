@@ -44,6 +44,14 @@ final class VoiceAgentViewModel: ObservableObject {
             URL(string: serverURL)?.host?.lowercased() ?? ""
         }
 
+        var localNetworkWarning: String? {
+            guard serverURL.lowercased().hasPrefix("http://"),
+                  Self.isRFC1918LANHost(serverHost) else {
+                return nil
+            }
+            return "This pairing link uses plain HTTP over your local network. It keeps setup simple, but anyone who can observe this Wi-Fi could capture the pairing exchange. Prefer Tailscale or HTTPS when possible."
+        }
+
         var badgeText: String {
             if serverURL.lowercased().hasPrefix("https://") {
                 return "HTTPS"
@@ -56,21 +64,33 @@ final class VoiceAgentViewModel: ObservableObject {
 
         private static func isLocalOrPrivateHost(_ host: String) -> Bool {
             if host.isEmpty { return false }
-            if host == "localhost" || host == "::1" || host.hasSuffix(".local") {
+            return isLoopbackOrBonjourHost(host) || isRFC1918LANHost(host) || isTailscaleHost(host)
+        }
+
+        private static func isLoopbackOrBonjourHost(_ host: String) -> Bool {
+            host == "localhost" || host == "::1" || host.hasSuffix(".local") || host.hasPrefix("127.")
+        }
+
+        private static func isRFC1918LANHost(_ host: String) -> Bool {
+            if host.hasPrefix("10.") || host.hasPrefix("192.168.") {
                 return true
             }
-            if host.hasPrefix("127.") || host.hasPrefix("10.") || host.hasPrefix("192.168.") {
+            if host.hasPrefix("172.") {
+                let parts = host.split(separator: ".")
+                if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        private static func isTailscaleHost(_ host: String) -> Bool {
+            if host.hasSuffix(".ts.net") {
                 return true
             }
             if host.hasPrefix("100.") {
                 let parts = host.split(separator: ".")
                 if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
-                    return true
-                }
-            }
-            if host.hasPrefix("172.") {
-                let parts = host.split(separator: ".")
-                if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
                     return true
                 }
             }
@@ -92,11 +112,19 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
+    private struct ObservedRunContext {
+        let runID: String
+        let threadID: UUID
+        var seenEventIDs: Set<String> = []
+        var seenEventFingerprints: Set<String> = []
+        var events: [ExecutionEvent] = []
+    }
+
     @Published var serverURL: String = ""
     @Published var apiToken: String = ""
     @Published var sessionID: String = "iphone-app"
     @Published var workingDirectory: String = "~"
-    @Published var runTimeoutSeconds: String = "300"
+    @Published var runTimeoutSeconds: String = "0"
     @Published var executor: String = "codex"
     @Published var responseMode: String = "concise"
     @Published var agentGuidanceMode: String = "guided"
@@ -157,8 +185,6 @@ final class VoiceAgentViewModel: ObservableObject {
     private let threadStore = ChatThreadStore()
     private let defaults = UserDefaults.standard
     private let draftAttachmentDirectory: URL
-    private var seenEventIDs: Set<String> = []
-    private var seenEventFingerprints: Set<String> = []
     private var lastSubmittedUserMessage: ConversationMessage?
     private var hasSeenMicrophonePrimer = false
     private var didBootstrapSession = false
@@ -168,6 +194,9 @@ final class VoiceAgentViewModel: ObservableObject {
     private var activeAttachmentUploadCancellation: (() -> Void)?
     private var backendTranscribeProvider: String = "unknown"
     private var backendTranscribeReady = false
+    private var observedRunContexts: [String: ObservedRunContext] = [:]
+    private var lastHydratedSessionContextID: String?
+    private var lastHydratedSessionContextServerURL: String?
 
     private enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
@@ -175,6 +204,7 @@ final class VoiceAgentViewModel: ObservableObject {
         static let sessionID = "mobaile.session_id"
         static let workingDirectory = "mobaile.working_directory"
         static let runTimeoutSeconds = "mobaile.run_timeout_seconds"
+        static let runTimeoutMigratedToZeroDefault = "mobaile.run_timeout_migrated_to_zero_default"
         static let executor = "mobaile.executor"
         static let responseMode = "mobaile.response_mode"
         static let agentGuidanceMode = "mobaile.agent_guidance_mode"
@@ -568,7 +598,9 @@ final class VoiceAgentViewModel: ObservableObject {
                             token: apiToken,
                             runID: activeRun
                         )
-                        applyTerminalRunStateIfNeeded(run)
+                        if let activeThreadID {
+                            applyTerminalRunStateIfNeeded(run, threadID: activeThreadID)
+                        }
                         return
                     } catch {
                         errorText = error.localizedDescription
@@ -595,6 +627,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func stopRecordingAndSend() async {
         guard isRecording else { return }
+        let originThreadID = activeThreadID
         didCompleteRun = false
         isRecording = false
         recordingStartedAt = nil
@@ -604,8 +637,7 @@ final class VoiceAgentViewModel: ObservableObject {
         summaryText = ""
         transcriptText = ""
         events = []
-        seenEventIDs = []
-        seenEventFingerprints = []
+        clearObservedRunContext(for: originThreadID)
         resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
         runPhaseText = "Planning"
@@ -623,6 +655,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
         do {
             let localTranscription: SpeechTranscriptionResult?
+            var startedRunID = ""
             do {
                 runPhaseText = "Transcribing"
                 statusText = "Transcribing on iPhone..."
@@ -636,53 +669,123 @@ final class VoiceAgentViewModel: ObservableObject {
             }
 
             if let localTranscription {
-                transcriptText = localTranscription.text
+                if let originThreadID {
+                    updateThreadMetadata(
+                        threadID: originThreadID,
+                        transcriptText: localTranscription.text,
+                        persist: false
+                    )
+                } else {
+                    transcriptText = localTranscription.text
+                }
                 appendConversation(
-                    ConversationMessage(role: "user", text: localTranscription.text, attachments: [])
+                    ConversationMessage(role: "user", text: localTranscription.text, attachments: []),
+                    to: originThreadID
                 )
-                runPhaseText = "Planning"
-                statusText = "Starting run..."
+                if activeThreadID == originThreadID {
+                    runPhaseText = "Planning"
+                }
+                if let originThreadID {
+                    updateThreadMetadata(
+                        threadID: originThreadID,
+                        statusText: "Starting run...",
+                        activeRunExecutor: effectiveExecutor,
+                        persist: false
+                    )
+                } else {
+                    statusText = "Starting run..."
+                }
                 let response = try await createUtteranceRun(
+                    threadID: originThreadID,
                     utteranceText: localTranscription.text,
                     attachments: []
                 )
-                runID = response.runId
-                activeRunExecutor = effectiveExecutor
-                statusText = "Voice run started (\(response.runId))"
+                startedRunID = response.runId
+                if let originThreadID {
+                    ensureObservedRunContext(runID: response.runId, threadID: originThreadID)
+                    updateThreadMetadata(
+                        threadID: originThreadID,
+                        runID: response.runId,
+                        statusText: "Voice run started (\(response.runId))",
+                        activeRunExecutor: effectiveExecutor,
+                        persist: true
+                    )
+                } else {
+                    runID = response.runId
+                    activeRunExecutor = effectiveExecutor
+                    statusText = "Voice run started (\(response.runId))"
+                }
             } else {
-                runPhaseText = "Uploading"
-                statusText = "Uploading audio to backend..."
+                if activeThreadID == originThreadID {
+                    runPhaseText = "Uploading"
+                }
+                if let originThreadID {
+                    updateThreadMetadata(
+                        threadID: originThreadID,
+                        statusText: "Uploading audio to backend...",
+                        activeRunExecutor: effectiveExecutor,
+                        persist: false
+                    )
+                } else {
+                    statusText = "Uploading audio to backend..."
+                }
                 let response = try await client.createAudioRun(
                     serverURL: normalizedServerURL,
                     token: apiToken,
                     sessionID: sessionID,
-                    threadID: activeThreadID?.uuidString,
-                    executor: effectiveExecutor,
-                    workingDirectory: normalizedWorkingDirectory,
+                    threadID: originThreadID?.uuidString,
+                    executor: nil,
+                    workingDirectory: nil,
                     responseMode: effectiveResponseMode,
                     responseProfile: effectiveAgentGuidanceMode,
                     audioFileURL: audioFile
                 )
-                runID = response.runId
-                transcriptText = response.transcriptText
+                startedRunID = response.runId
+                if let originThreadID {
+                    ensureObservedRunContext(runID: response.runId, threadID: originThreadID)
+                    updateThreadMetadata(
+                        threadID: originThreadID,
+                        runID: response.runId,
+                        transcriptText: response.transcriptText,
+                        statusText: "Audio run started (\(response.runId))",
+                        activeRunExecutor: effectiveExecutor,
+                        persist: false
+                    )
+                } else {
+                    runID = response.runId
+                    transcriptText = response.transcriptText
+                    activeRunExecutor = effectiveExecutor
+                    statusText = "Audio run started (\(response.runId))"
+                }
                 appendConversation(
-                    ConversationMessage(role: "user", text: response.transcriptText, attachments: [])
+                    ConversationMessage(role: "user", text: response.transcriptText, attachments: []),
+                    to: originThreadID
                 )
-                activeRunExecutor = effectiveExecutor
-                statusText = "Audio run started (\(response.runId))"
             }
             emitRecordingSentFeedback()
-            persistActiveThreadSnapshot()
-            try await observeRun(runID: runID)
+            if let originThreadID {
+                persistThreadSnapshot(threadID: originThreadID)
+            } else {
+                persistActiveThreadSnapshot()
+            }
+            try await observeRun(runID: startedRunID, threadID: originThreadID)
         } catch {
             maybeAutoFixWorkingDirectory(from: error)
-            errorText = error.localizedDescription
-            statusText = "Failed"
-            isLoading = false
-            runPhaseText = "Failed"
-            runEndedAt = Date()
+            if activeThreadID == originThreadID {
+                errorText = error.localizedDescription
+                statusText = "Failed"
+                isLoading = false
+                runPhaseText = "Failed"
+                runEndedAt = Date()
+            } else if let originThreadID {
+                updateThreadMetadata(threadID: originThreadID, statusText: "Failed")
+            }
             emitFailureFeedback()
-            persistActiveThreadSnapshot()
+            if let originThreadID {
+                persistThreadSnapshot(threadID: originThreadID)
+            } else {
+                persistActiveThreadSnapshot()
+            }
         }
     }
 
@@ -776,6 +879,37 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
+    func pasteClipboardContentIntoDraft() async {
+        let pasteboard = UIPasteboard.general
+
+        if let image = pasteboard.image {
+            guard let data = image.pngData() else {
+                errorText = "Couldn't read the clipboard image."
+                return
+            }
+            let timestamp = Int(Date().timeIntervalSince1970)
+            await addDraftAttachment(
+                data: data,
+                fileName: "clipboard-image-\(timestamp).png",
+                mimeType: "image/png"
+            )
+            return
+        }
+
+        let text = pasteboard.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !text.isEmpty {
+            if promptText.isEmpty {
+                promptText = text
+            } else {
+                promptText += promptText.hasSuffix("\n") ? text : "\n\(text)"
+            }
+            errorText = ""
+            return
+        }
+
+        errorText = "Clipboard doesn't contain a supported image or text item."
+    }
+
     func removeDraftAttachment(_ attachment: DraftAttachment) {
         draftAttachments.removeAll { $0.id == attachment.id }
         clearDraftAttachmentTransferState(for: attachment.id)
@@ -786,25 +920,33 @@ final class VoiceAgentViewModel: ObservableObject {
         draftAttachmentTransferStates[attachment.id] ?? .idle
     }
 
-    private func observeRun(runID: String) async throws {
-        statusText = "Running..."
-        if runPhaseText == "Idle" {
-            runPhaseText = "Planning"
+    private func observeRun(runID: String, threadID: UUID?) async throws {
+        guard let threadID else { return }
+        ensureObservedRunContext(runID: runID, threadID: threadID)
+        updateThreadMetadata(threadID: threadID, runID: runID, statusText: "Running...", persist: true)
+        if activeThreadID == threadID {
+            isLoading = true
+            if runPhaseText == "Idle" {
+                runPhaseText = "Planning"
+            }
         }
         let timeoutSec = normalizedRunTimeoutSeconds
         let streamTask = Task {
-            try? await streamRunUntilDone(runID: runID, timeoutSec: timeoutSec)
+            try? await streamRunUntilDone(runID: runID, threadID: threadID, timeoutSec: timeoutSec)
         }
         defer { streamTask.cancel() }
 
         // Keep polling as a watchdog so terminal state is reflected even if SSE stalls.
-        try await pollRunUntilDone(runID: runID, timeoutSec: timeoutSec)
+        try await pollRunUntilDone(runID: runID, threadID: threadID, timeoutSec: timeoutSec)
     }
 
-    private func pollRunUntilDone(runID: String, timeoutSec: TimeInterval) async throws {
-        let deadline = Date().addingTimeInterval(timeoutSec)
-        while Date() < deadline {
-            if didCompleteRun {
+    private func pollRunUntilDone(runID: String, threadID: UUID, timeoutSec: TimeInterval?) async throws {
+        let deadline = timeoutSec.map { Date().addingTimeInterval($0) }
+        while true {
+            if let deadline, Date() >= deadline {
+                break
+            }
+            if isTerminalStatusText(statusText(for: threadID)) {
                 return
             }
             do {
@@ -813,48 +955,56 @@ final class VoiceAgentViewModel: ObservableObject {
                     token: apiToken,
                     runID: runID
                 )
-                statusText = "Run status: \(run.status)"
-                summaryText = run.summary
-                resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
-                if run.status == "running", runPhaseText == "Planning" || runPhaseText == "Idle" {
+                updateThreadMetadata(
+                    threadID: threadID,
+                    summaryText: run.summary,
+                    statusText: "Run status: \(run.status)",
+                    resolvedWorkingDirectory: run.workingDirectory,
+                    persist: false
+                )
+                if activeThreadID == threadID, run.status == "running", runPhaseText == "Planning" || runPhaseText == "Idle" {
                     runPhaseText = "Executing"
                 }
-                ingestEvents(run.events)
+                ingestEvents(run.events, runID: runID, threadID: threadID)
 
                 if isTerminalStatus(run.status) {
-                    applyTerminalRunStateIfNeeded(run)
+                    applyTerminalRunStateIfNeeded(run, threadID: threadID)
                     return
                 }
             } catch {
-                if didCompleteRun {
+                if isTerminalStatusText(statusText(for: threadID)) {
                     return
                 }
             }
-            if didCompleteRun {
+            if isTerminalStatusText(statusText(for: threadID)) {
                 return
             }
             try await Task.sleep(nanoseconds: 500_000_000)
         }
-        if didCompleteRun {
+        if isTerminalStatusText(statusText(for: threadID)) {
             return
         }
-        isLoading = false
-        errorText = "Timed out waiting for run completion."
-        runPhaseText = "Timed out"
-        runEndedAt = Date()
-        appendConversation(role: "assistant", text: "Timed out waiting for run completion.")
+        if activeThreadID == threadID {
+            isLoading = false
+            errorText = "Timed out waiting for run completion."
+            runPhaseText = "Timed out"
+            runEndedAt = Date()
+        }
+        updateThreadMetadata(threadID: threadID, statusText: "Timed out")
+        appendConversation(role: "assistant", text: "Timed out waiting for run completion.", to: threadID)
+        removeObservedRunContext(runID: runID)
     }
 
-    private func streamRunUntilDone(runID: String, timeoutSec: TimeInterval) async throws {
-        let deadline = Date().addingTimeInterval(timeoutSec)
+    private func streamRunUntilDone(runID: String, threadID: UUID, timeoutSec: TimeInterval?) async throws {
+        let deadline = timeoutSec.map { Date().addingTimeInterval($0) }
         let stream = client.streamRunEvents(
             serverURL: normalizedServerURL,
             token: apiToken,
             runID: runID
         )
         for try await event in stream {
-            ingestEvents([event])
-            if Date() > deadline {
+            ingestEvents([event], runID: runID, threadID: threadID)
+            if let deadline, Date() > deadline {
                 throw NSError(
                     domain: "VoiceAgentApp",
                     code: 1,
@@ -867,7 +1017,7 @@ final class VoiceAgentViewModel: ObservableObject {
                     token: apiToken,
                     runID: runID
                 )
-                applyTerminalRunStateIfNeeded(run)
+                applyTerminalRunStateIfNeeded(run, threadID: threadID)
                 return
             }
         }
@@ -1094,6 +1244,10 @@ final class VoiceAgentViewModel: ObservableObject {
             !lastSubmittedUserMessage.attachments.isEmpty
     }
 
+    var composerSlashCommandState: ComposerSlashCommandState? {
+        resolveComposerSlashCommandState(from: promptText)
+    }
+
     var pendingHumanUnblockRequest: HumanUnblockRequest? {
         for message in conversation.reversed() {
             if message.role == "user" {
@@ -1128,6 +1282,174 @@ final class VoiceAgentViewModel: ObservableObject {
         let suggested = pendingHumanUnblockRequest?.suggestedReply
             ?? "I completed the requested unblock step. Continue from the preserved state."
         promptText = suggested
+    }
+
+    func prepareSlashCommand(_ command: ComposerSlashCommand) {
+        promptText = command.insertionText
+    }
+
+    func clearComposerText() {
+        promptText = ""
+        errorText = ""
+    }
+
+    func clearComposerDraft() {
+        promptText = ""
+        clearDraftAttachments()
+        errorText = ""
+    }
+
+    func workingDirectorySlashSummary() -> String {
+        let current = slashWorkingDirectoryDisplayPath()
+        if current.isEmpty {
+            return "Working directory follows the backend default."
+        }
+        return "Working directory: \(current)"
+    }
+
+    func setWorkingDirectoryFromSlashCommand(_ rawPath: String) async -> String {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return workingDirectorySlashSummary()
+        }
+        workingDirectory = trimmed
+        if let normalized = normalizedWorkingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !normalized.isEmpty {
+            resolvedWorkingDirectory = normalized
+        } else {
+            resolvedWorkingDirectory = trimmed
+        }
+        persistSettings()
+        errorText = ""
+        let fallback = "Working directory set to \(slashWorkingDirectoryDisplayPath())."
+        guard hasConfiguredConnection else { return fallback }
+        do {
+            let context = try await syncSessionContextToBackend()
+            return "Working directory set to \(context.resolvedWorkingDirectory)."
+        } catch {
+            errorText = error.localizedDescription
+            return fallback
+        }
+    }
+
+    func executorSlashSummary() -> String {
+        let options = selectableExecutors.joined(separator: ", ")
+        let model = currentBackendModelLabel
+        return "Executor: \(effectiveExecutor.uppercased()) (\(model)). Available: \(options)."
+    }
+
+    func setExecutorFromSlashCommand(_ rawExecutor: String) async -> String {
+        let normalized = rawExecutor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else {
+            return executorSlashSummary()
+        }
+        guard selectableExecutors.contains(normalized) else {
+            return "Executor \(normalized) isn't available. Options: \(selectableExecutors.joined(separator: ", "))."
+        }
+        executor = normalized
+        persistSettings()
+        errorText = ""
+        let fallback = "Executor set to \(effectiveExecutor.uppercased()) (\(currentBackendModelLabel))."
+        guard hasConfiguredConnection else { return fallback }
+        do {
+            _ = try await syncSessionContextToBackend()
+            return "Executor set to \(effectiveExecutor.uppercased()) (\(currentBackendModelLabel))."
+        } catch {
+            errorText = error.localizedDescription
+            return fallback
+        }
+    }
+
+    @discardableResult
+    func refreshSessionContextFromBackend() async throws -> SessionContext {
+        guard hasConfiguredConnection else {
+            throw APIError.missingCredentials
+        }
+        let context = try await client.fetchSessionContext(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            sessionID: sessionID
+        )
+        applySessionContext(context)
+        return context
+    }
+
+    @discardableResult
+    func syncSessionContextToBackend() async throws -> SessionContext {
+        guard hasConfiguredConnection else {
+            throw APIError.missingCredentials
+        }
+
+        let executorOverride: String? = {
+            let current = effectiveExecutor
+            let backendDefault = normalizedExecutor(from: backendDefaultExecutor) ?? current
+            return current == backendDefault ? nil : current
+        }()
+
+        let workingDirectoryOverride: String? = {
+            let normalized = normalizedWorkingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !normalized.isEmpty else { return nil }
+            let root = backendWorkdirRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !root.isEmpty && normalized == root {
+                return nil
+            }
+            return normalized
+        }()
+
+        let context = try await client.updateSessionContext(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            sessionID: sessionID,
+            requestBody: SessionContextUpdateRequest(
+                executor: executorOverride,
+                workingDirectory: workingDirectoryOverride
+            )
+        )
+        applySessionContext(context)
+        return context
+    }
+
+    func persistAndSyncRuntimeSettings() async {
+        persistSettings()
+        guard hasConfiguredConnection else { return }
+        do {
+            let normalizedSession = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedSession.isEmpty else { return }
+            let sameBackend = lastHydratedSessionContextServerURL == normalizedServerURL
+            if sameBackend, lastHydratedSessionContextID == normalizedSession {
+                _ = try await syncSessionContextToBackend()
+            } else {
+                _ = try await refreshSessionContextFromBackend()
+            }
+            errorText = ""
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func applySessionContext(_ context: SessionContext) {
+        let normalizedSession = context.sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedSession.isEmpty {
+            sessionID = normalizedSession
+        }
+        if let normalizedExecutorValue = normalizedExecutor(from: context.executor) {
+            executor = normalizedExecutorValue
+        }
+        let rawWorkingDirectory = context.workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolved = context.resolvedWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rawWorkingDirectory.isEmpty {
+            workingDirectory = rawWorkingDirectory
+        } else if !backendWorkdirRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            workingDirectory = backendWorkdirRoot
+        } else if !resolved.isEmpty {
+            workingDirectory = resolved
+        }
+        if !resolved.isEmpty {
+            resolvedWorkingDirectory = resolved
+        }
+        lastHydratedSessionContextID = normalizedSession.isEmpty ? lastHydratedSessionContextID : normalizedSession
+        lastHydratedSessionContextServerURL = normalizedServerURL
+        persistSettings()
     }
 
     private func uploadDraftAttachmentsIfNeeded(_ attachments: [DraftAttachment]) async throws -> [UploadResponse] {
@@ -1191,13 +1513,13 @@ final class VoiceAgentViewModel: ObservableObject {
     ) async {
         let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !stagedAttachments.isEmpty || !existingAttachments.isEmpty else { return }
+        let originThreadID = activeThreadID
 
         didCompleteRun = false
         errorText = ""
         summaryText = ""
         events = []
-        seenEventIDs = []
-        seenEventFingerprints = []
+        clearObservedRunContext(for: originThreadID)
         resolvedWorkingDirectory = normalizedWorkingDirectory ?? ""
         isLoading = true
         runPhaseText = stagedAttachments.isEmpty ? "Planning" : "Preparing"
@@ -1208,49 +1530,90 @@ final class VoiceAgentViewModel: ObservableObject {
         do {
             let uploadedAttachments = try await uploadDraftAttachmentsIfNeeded(stagedAttachments)
             let explicitAttachments = existingAttachments + uploadedAttachments.map(\.artifact)
-            statusText = "Starting run..."
-            runPhaseText = "Planning"
+            if let originThreadID {
+                updateThreadMetadata(
+                    threadID: originThreadID,
+                    statusText: "Starting run...",
+                    activeRunExecutor: effectiveExecutor,
+                    persist: false
+                )
+            } else {
+                statusText = "Starting run..."
+            }
+            if activeThreadID == originThreadID {
+                runPhaseText = "Planning"
+            }
 
             let message = ConversationMessage(
                 role: "user",
                 text: trimmedText,
                 attachments: explicitAttachments
             )
-            appendConversation(message)
-            promptText = ""
-            clearDraftAttachments()
+            appendConversation(message, to: originThreadID)
+            clearDraftState(for: originThreadID, removing: stagedAttachments)
 
             let response = try await createUtteranceRun(
+                threadID: originThreadID,
                 utteranceText: trimmedText,
                 attachments: explicitAttachments
             )
-            runID = response.runId
-            statusText = "Run started (\(response.runId))"
-            persistActiveThreadSnapshot()
-            try await observeRun(runID: response.runId)
+            if let originThreadID {
+                ensureObservedRunContext(runID: response.runId, threadID: originThreadID)
+                updateThreadMetadata(
+                    threadID: originThreadID,
+                    runID: response.runId,
+                    statusText: "Run started (\(response.runId))",
+                    activeRunExecutor: effectiveExecutor
+                )
+            } else {
+                runID = response.runId
+                statusText = "Run started (\(response.runId))"
+                persistActiveThreadSnapshot()
+            }
+            try await observeRun(runID: response.runId, threadID: originThreadID)
         } catch {
             activeAttachmentUploadCancellation = nil
             if error is CancellationError || isAttachmentTransferCancellation(error) {
-                errorText = ""
-                statusText = "Cancelled"
-                isLoading = false
-                runPhaseText = "Cancelled"
-                runEndedAt = Date()
-                persistActiveThreadSnapshot()
+                if activeThreadID == originThreadID {
+                    errorText = ""
+                    statusText = "Cancelled"
+                    isLoading = false
+                    runPhaseText = "Cancelled"
+                    runEndedAt = Date()
+                } else if let originThreadID {
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Cancelled")
+                }
+                if let originThreadID {
+                    persistThreadSnapshot(threadID: originThreadID)
+                } else {
+                    persistActiveThreadSnapshot()
+                }
                 return
             }
             maybeAutoFixWorkingDirectory(from: error)
-            errorText = error.localizedDescription
-            statusText = hasFailedDraftAttachments ? "Upload failed" : "Failed"
-            isLoading = false
-            runPhaseText = "Failed"
-            runEndedAt = Date()
+            if activeThreadID == originThreadID {
+                errorText = error.localizedDescription
+                statusText = hasFailedDraftAttachments ? "Upload failed" : "Failed"
+                isLoading = false
+                runPhaseText = "Failed"
+                runEndedAt = Date()
+            } else if let originThreadID {
+                updateThreadMetadata(
+                    threadID: originThreadID,
+                    statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed"
+                )
+            }
             emitFailureFeedback()
-            persistActiveThreadSnapshot()
+            if let originThreadID {
+                persistThreadSnapshot(threadID: originThreadID)
+            } else {
+                persistActiveThreadSnapshot()
+            }
         }
     }
 
     private func createUtteranceRun(
+        threadID: UUID?,
         utteranceText: String,
         attachments: [ChatArtifact]
     ) async throws -> UtteranceResponse {
@@ -1259,12 +1622,12 @@ final class VoiceAgentViewModel: ObservableObject {
             token: apiToken,
             requestBody: UtteranceRequest(
                 sessionId: sessionID,
-                threadID: activeThreadID?.uuidString,
+                threadID: threadID?.uuidString,
                 utteranceText: utteranceText,
                 attachments: attachments,
                 mode: "execute",
-                executor: effectiveExecutor,
-                workingDirectory: normalizedWorkingDirectory,
+                executor: nil,
+                workingDirectory: nil,
                 responseMode: effectiveResponseMode,
                 responseProfile: effectiveAgentGuidanceMode
             )
@@ -1345,6 +1708,25 @@ final class VoiceAgentViewModel: ObservableObject {
         for attachment in existing {
             try? FileManager.default.removeItem(at: attachment.localFileURL)
         }
+    }
+
+    private func clearDraftState(for threadID: UUID?, removing attachments: [DraftAttachment]) {
+        guard let threadID else {
+            promptText = ""
+            clearDraftAttachments()
+            return
+        }
+        if activeThreadID == threadID {
+            promptText = ""
+            clearDraftAttachments()
+            return
+        }
+        guard let idx = threadIndex(for: threadID) else { return }
+        threads[idx].draftText = ""
+        clearDraftAttachmentTransferStates(for: attachments)
+        deleteDraftAttachments(attachments)
+        threads[idx].draftAttachments = []
+        persistThreadSnapshot(threadID: threadID)
     }
 
     private func sanitizeAttachmentFileName(_ rawName: String) -> String {
@@ -1437,9 +1819,6 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func persistSettings() {
-        if !developerMode, executor == "local", backendDefaultExecutor != "local" {
-            executor = backendDefaultExecutor
-        }
         if responseMode != "concise" {
             responseMode = "concise"
         }
@@ -1473,6 +1852,7 @@ final class VoiceAgentViewModel: ObservableObject {
         didBootstrapSession = true
         do {
             _ = try? await refreshRuntimeConfiguration()
+            _ = try? await refreshSessionContextFromBackend()
             let runs = try await client.fetchSessionRuns(
                 serverURL: normalizedServerURL,
                 token: apiToken,
@@ -1480,20 +1860,33 @@ final class VoiceAgentViewModel: ObservableObject {
                 limit: 1
             )
             guard let latest = runs.first else { return }
-            runID = latest.runId
-            statusText = "Run status: \(latest.status)"
-            runPhaseText = phaseText(forRunStatus: latest.status)
-            if latest.status == "running" {
-                isLoading = true
-                runPhaseText = "Executing"
-                runStartedAt = Date()
-                runEndedAt = nil
-                activeRunExecutor = latest.executor ?? executor
-                try await observeRun(runID: latest.runId)
-            } else if isTerminalStatus(latest.status) {
-                runEndedAt = Date()
+            guard let targetThreadID = threads.first(where: { $0.runID == latest.runId })?.id else {
+                return
             }
-            persistActiveThreadSnapshot()
+            updateThreadMetadata(
+                threadID: targetThreadID,
+                runID: latest.runId,
+                statusText: "Run status: \(latest.status)",
+                activeRunExecutor: latest.executor ?? executor,
+                persist: false
+            )
+            if activeThreadID == targetThreadID {
+                runPhaseText = phaseText(forRunStatus: latest.status)
+            }
+            if latest.status == "running" {
+                if activeThreadID == targetThreadID {
+                    isLoading = true
+                    runPhaseText = "Executing"
+                    runStartedAt = Date()
+                    runEndedAt = nil
+                }
+                try await observeRun(runID: latest.runId, threadID: targetThreadID)
+            } else if isTerminalStatus(latest.status) {
+                if activeThreadID == targetThreadID {
+                    runEndedAt = Date()
+                }
+            }
+            persistThreadSnapshot(threadID: targetThreadID)
         } catch {
             // Ignore bootstrap errors to avoid blocking first render.
         }
@@ -1629,12 +2022,19 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func switchToThread(_ threadID: UUID) {
-        guard let thread = threads.first(where: { $0.id == threadID }) else { return }
+        guard let idx = threadIndex(for: threadID) else { return }
         persistActiveThreadSnapshot()
+        let thread = threads[idx]
         let restoredAttachments = availableDraftAttachments(from: thread.draftAttachments)
+        let restoredConversation = threadStore.loadMessages(threadID: threadID)
+        let restoredEvents: [ExecutionEvent]
+        restoredEvents = observedRunContext(for: threadID, runID: thread.runID)?.events ?? []
+        let hasObservedRun = observedRunContext(for: threadID, runID: thread.runID) != nil &&
+            !isTerminalStatusText(thread.statusText)
         performThreadStateRestore {
             activeThreadID = threadID
-            conversation = threadStore.loadMessages(threadID: threadID)
+            threads[idx].conversation = restoredConversation
+            conversation = restoredConversation
             lastSubmittedUserMessage = conversation.last(where: { $0.role == "user" })
             promptText = thread.draftText
             draftAttachments = restoredAttachments
@@ -1646,13 +2046,11 @@ final class VoiceAgentViewModel: ObservableObject {
             runPhaseText = phaseText(forStatusText: thread.statusText)
             runStartedAt = nil
             runEndedAt = nil
-            isLoading = thread.statusText.lowercased().contains("running")
+            isLoading = hasObservedRun || thread.statusText.lowercased().contains("running")
             resolvedWorkingDirectory = thread.resolvedWorkingDirectory
             activeRunExecutor = thread.activeRunExecutor
             errorText = ""
-            events = []
-            seenEventIDs = []
-            seenEventFingerprints = []
+            events = restoredEvents
             didCompleteRun = isTerminalStatusText(thread.statusText)
         }
         defaults.set(threadID.uuidString, forKey: DefaultsKey.activeThreadID)
@@ -1693,8 +2091,6 @@ final class VoiceAgentViewModel: ObservableObject {
             isLoading = false
             errorText = ""
             events = []
-            seenEventIDs = []
-            seenEventFingerprints = []
             didCompleteRun = false
             activeRunExecutor = effectiveExecutor
         }
@@ -1715,6 +2111,7 @@ final class VoiceAgentViewModel: ObservableObject {
         if activeThreadID == threadID {
             persistActiveThreadSnapshot()
         }
+        clearObservedRunContext(for: threadID)
         guard let thread = threads.first(where: { $0.id == threadID }) else { return }
         deleteDraftAttachments(thread.draftAttachments)
         threads.removeAll { $0.id == threadID }
@@ -1755,20 +2152,25 @@ final class VoiceAgentViewModel: ObservableObject {
         backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
         backendTranscribeReady = cfg.transcribeReady ?? false
         backendWorkdirRoot = cfg.workdirRoot ?? ""
-        if !developerMode, executor == "local", backendDefaultExecutor != "local" {
-            executor = backendDefaultExecutor
-        } else if !selectableExecutors.contains(executor) {
+        if normalizedExecutor(from: executor) == nil {
             executor = backendDefaultExecutor
         }
         return cfg
     }
 
-    func useCurrentBrowserDirectoryAsWorkingDirectory() {
+    func useCurrentBrowserDirectoryAsWorkingDirectory() async {
         let path = directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return }
         workingDirectory = path
         resolvedWorkingDirectory = path
         persistSettings()
+        guard hasConfiguredConnection else { return }
+        do {
+            _ = try await syncSessionContextToBackend()
+            errorText = ""
+        } catch {
+            errorText = error.localizedDescription
+        }
     }
 
     private func speak(_ text: String) {
@@ -1804,6 +2206,18 @@ final class VoiceAgentViewModel: ObservableObject {
         return value
     }
 
+    private func slashWorkingDirectoryDisplayPath() -> String {
+        let normalized = normalizedWorkingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !normalized.isEmpty {
+            return normalized
+        }
+        let resolved = resolvedWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !resolved.isEmpty {
+            return resolved
+        }
+        return workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var selectableExecutors: [String] {
         var values = backendAvailableExecutors.filter { $0 == "local" || $0 == "codex" || $0 == "claude" }
         if values.isEmpty {
@@ -1819,10 +2233,16 @@ final class VoiceAgentViewModel: ObservableObject {
             }
             return values
         }
+        if effectiveExecutor == "local" && !values.contains("local") {
+            values.insert("local", at: 0)
+        }
         if backendDefaultExecutor == "local", values.contains("local") {
             return ["local"]
         }
         let agentExecutors = values.filter { $0 == "codex" || $0 == "claude" }
+        if effectiveExecutor == "local" && values.contains("local") {
+            return ["local"] + agentExecutors
+        }
         if !agentExecutors.isEmpty {
             return agentExecutors
         }
@@ -1882,10 +2302,10 @@ final class VoiceAgentViewModel: ObservableObject {
         return requested
     }
 
-    private var normalizedRunTimeoutSeconds: TimeInterval {
+    private var normalizedRunTimeoutSeconds: TimeInterval? {
         let value = runTimeoutSeconds.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let parsed = Double(value), parsed >= 10 else { return 300 }
-        return parsed
+        guard let parsed = Double(value), parsed > 0 else { return nil }
+        return max(10, parsed)
     }
 
     private var normalizedAutoSendAfterSilenceSeconds: TimeInterval {
@@ -1909,47 +2329,65 @@ final class VoiceAgentViewModel: ObservableObject {
         status == "completed" || status == "failed" || status == "rejected" || status == "blocked" || status == "cancelled"
     }
 
-    private func applyTerminalRunStateIfNeeded(_ run: RunRecord) {
-        if didCompleteRun && summaryText == run.summary {
+    private func applyTerminalRunStateIfNeeded(_ run: RunRecord, threadID: UUID) {
+        if activeThreadID == threadID, didCompleteRun && summaryText == run.summary {
             return
         }
-        summaryText = run.summary
-        resolvedWorkingDirectory = run.workingDirectory ?? resolvedWorkingDirectory
-        isLoading = false
-        didCompleteRun = true
-        statusText = "Run status: \(run.status)"
-        runPhaseText = phaseText(forRunStatus: run.status)
-        if runEndedAt == nil {
-            runEndedAt = Date()
+
+        updateThreadMetadata(
+            threadID: threadID,
+            summaryText: run.summary,
+            statusText: "Run status: \(run.status)",
+            resolvedWorkingDirectory: run.workingDirectory,
+            persist: false
+        )
+
+        if activeThreadID == threadID {
+            isLoading = false
+            didCompleteRun = true
+            runPhaseText = phaseText(forRunStatus: run.status)
+            if runEndedAt == nil {
+                runEndedAt = Date()
+            }
+            speak(run.summary)
         }
-        speak(run.summary)
-        persistActiveThreadSnapshot()
+
+        removeObservedRunContext(runID: run.runId)
+
+        persistThreadSnapshot(threadID: threadID)
     }
 
-    private func ingestEvents(_ runEvents: [ExecutionEvent]) {
+    private func ingestEvents(_ runEvents: [ExecutionEvent], runID: String, threadID: UUID) {
+        ensureObservedRunContext(runID: runID, threadID: threadID)
         for event in runEvents {
+            guard var context = observedRunContexts[runID] else { continue }
             let eventID = event.eventID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !eventID.isEmpty {
-                if seenEventIDs.contains(eventID) {
+                if context.seenEventIDs.contains(eventID) {
                     continue
                 }
-                seenEventIDs.insert(eventID)
+                context.seenEventIDs.insert(eventID)
             } else {
                 let fingerprint = "\(event.type)|\(event.actionIndex ?? -1)|\(event.message)"
-                if seenEventFingerprints.contains(fingerprint) {
+                if context.seenEventFingerprints.contains(fingerprint) {
                     continue
                 }
-                seenEventFingerprints.insert(fingerprint)
+                context.seenEventFingerprints.insert(fingerprint)
             }
-            events.append(event)
-            updateRunPhase(for: event)
-            if let text = conversationText(for: event) {
-                appendConversation(role: "assistant", text: text)
+            context.events.append(event)
+            observedRunContexts[runID] = context
+            if activeThreadID == threadID, self.runID == runID {
+                events = context.events
+            }
+            updateRunPhase(for: event, threadID: threadID)
+            if let text = conversationText(for: event, threadID: threadID) {
+                appendConversation(role: "assistant", text: text, to: threadID)
             }
         }
     }
 
-    private func updateRunPhase(for event: ExecutionEvent) {
+    private func updateRunPhase(for event: ExecutionEvent, threadID: UUID) {
+        guard activeThreadID == threadID else { return }
         switch event.type {
         case "run.started":
             if isLoading { runPhaseText = "Planning" }
@@ -1982,9 +2420,11 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
-    private func conversationText(for event: ExecutionEvent) -> String? {
+    private func conversationText(for event: ExecutionEvent, threadID: UUID) -> String? {
         let message = event.message.trimmingCharacters(in: .whitespacesAndNewlines)
         if isContextLeak(message) { return nil }
+        let lastSubmitted = lastSubmittedUserMessage(for: threadID)
+        let executor = runExecutor(for: threadID)
         switch event.type {
         case "chat.message":
             if message.isEmpty { return nil }
@@ -1997,12 +2437,12 @@ final class VoiceAgentViewModel: ObservableObject {
             return message
         case "assistant.message":
             if message.isEmpty { return nil }
-            if message == lastSubmittedUserMessage?.text { return nil }
+            if message == lastSubmitted?.text { return nil }
             return message
         case "log.message", "action.stdout", "action.stderr":
             return nil
         case "action.completed":
-            if activeRunExecutor != "local" { return nil }
+            if executor != "local" { return nil }
             if message.isEmpty { return nil }
             return message
         case "run.failed":
@@ -2016,11 +2456,14 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
-    private func appendConversation(role: String, text: String) {
-        appendConversation(ConversationMessage(role: role, text: text))
+    private func appendConversation(role: String, text: String, to threadID: UUID? = nil) {
+        appendConversation(ConversationMessage(role: role, text: text), to: threadID)
     }
 
-    private func appendConversation(_ message: ConversationMessage) {
+    private func appendConversation(_ message: ConversationMessage, to threadID: UUID? = nil) {
+        let targetThreadID = threadID ?? activeThreadID
+        guard let targetThreadID else { return }
+
         let preparedText = message.role == "assistant" ? normalizeAssistantText(message.text) : message.text
         let normalized = ConversationMessage(
             id: message.id,
@@ -2029,41 +2472,43 @@ final class VoiceAgentViewModel: ObservableObject {
             attachments: message.attachments
         )
         guard !normalized.text.isEmpty || !normalized.attachments.isEmpty else { return }
+        var threadConversation = cachedConversation(for: targetThreadID)
+        let threadStatus = statusText(for: targetThreadID)
 
         if normalized.role == "assistant",
            shouldCoalesceAssistantProgress(with: normalized.text),
-           let last = conversation.last,
+           let last = threadConversation.last,
            last.role == "assistant",
            isProgressAssistantMessage(last.text),
-           !isTerminalStatusText(statusText) {
-            conversation[conversation.count - 1] = normalized
-            persistConversationMessage(at: conversation.count - 1)
-            persistActiveThreadSnapshot()
+           !isTerminalStatusText(threadStatus) {
+            threadConversation[threadConversation.count - 1] = normalized
+            storeConversation(threadConversation, for: targetThreadID)
+            persistConversationMessage(normalized, at: threadConversation.count - 1, threadID: targetThreadID)
+            persistThreadSnapshot(threadID: targetThreadID)
             return
         }
-        if let last = conversation.last, last.role == normalized.role {
+        if let last = threadConversation.last, last.role == normalized.role {
             if last.text == normalized.text && last.attachments == normalized.attachments {
                 return
             }
             if normalized.role == "assistant" {
                 // Keep assistant updates as separate bubbles for readability.
-                conversation.append(normalized)
-                persistConversationMessage(at: conversation.count - 1)
-                persistActiveThreadSnapshot()
+                threadConversation.append(normalized)
+                storeConversation(threadConversation, for: targetThreadID)
+                persistConversationMessage(normalized, at: threadConversation.count - 1, threadID: targetThreadID)
+                persistThreadSnapshot(threadID: targetThreadID)
                 return
             }
         }
-        conversation.append(normalized)
-        persistConversationMessage(at: conversation.count - 1)
+        threadConversation.append(normalized)
+        storeConversation(threadConversation, for: targetThreadID)
+        persistConversationMessage(normalized, at: threadConversation.count - 1, threadID: targetThreadID)
         if normalized.role == "user",
-           let idx = activeThreadIndex(),
+           let idx = threadIndex(for: targetThreadID),
            threads[idx].title == "New Chat" {
             threads[idx].title = suggestThreadTitle(for: normalized)
-            lastSubmittedUserMessage = normalized
-        } else if normalized.role == "user" {
-            lastSubmittedUserMessage = normalized
         }
-        persistActiveThreadSnapshot()
+        persistThreadSnapshot(threadID: targetThreadID)
     }
 
     private func normalizeAssistantText(_ text: String) -> String {
@@ -2122,6 +2567,7 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func loadSettings() {
+        migrateLegacyRunTimeoutDefaultIfNeeded()
         if let value = defaults.string(forKey: DefaultsKey.serverURL), !value.isEmpty {
             serverURL = value
         }
@@ -2185,9 +2631,20 @@ final class VoiceAgentViewModel: ObservableObject {
         }
         hasSeenMicrophonePrimer = defaults.bool(forKey: DefaultsKey.microphonePrimerSeen)
         trustedPairHosts = Set(defaults.stringArray(forKey: DefaultsKey.trustedPairHosts) ?? [])
-        if !developerMode, executor == "local", backendDefaultExecutor != "local" {
-            executor = backendDefaultExecutor
+    }
+
+    private func migrateLegacyRunTimeoutDefaultIfNeeded() {
+        if defaults.bool(forKey: DefaultsKey.runTimeoutMigratedToZeroDefault) {
+            return
         }
+        defer {
+            defaults.set(true, forKey: DefaultsKey.runTimeoutMigratedToZeroDefault)
+        }
+
+        let storedTimeout = defaults.string(forKey: DefaultsKey.runTimeoutSeconds)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard storedTimeout == "300" else { return }
+        defaults.set("0", forKey: DefaultsKey.runTimeoutSeconds)
     }
 
     private func exchangePairCode(serverURL: String, pairCode: String, sessionID: String?) async {
@@ -2202,6 +2659,7 @@ final class VoiceAgentViewModel: ObservableObject {
             self.serverURL = serverURL
             self.backendSecurityMode = response.securityMode
             _ = try? await self.refreshRuntimeConfiguration()
+            _ = try? await self.refreshSessionContextFromBackend()
             self.persistSettings()
             self.errorText = ""
             self.statusText = "Paired successfully (\(response.securityMode))"
@@ -2375,16 +2833,23 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func persistActiveThreadSnapshot() {
-        guard !isRestoringThreadState, let idx = activeThreadIndex() else { return }
-        threads[idx].conversation = []
-        threads[idx].runID = runID
-        threads[idx].summaryText = summaryText
-        threads[idx].transcriptText = transcriptText
-        threads[idx].statusText = statusText
-        threads[idx].resolvedWorkingDirectory = resolvedWorkingDirectory
-        threads[idx].activeRunExecutor = activeRunExecutor
-        threads[idx].draftText = promptText
-        threads[idx].draftAttachments = draftAttachments
+        guard let threadID = activeThreadID else { return }
+        persistThreadSnapshot(threadID: threadID)
+    }
+
+    private func persistThreadSnapshot(threadID: UUID) {
+        guard !isRestoringThreadState, let idx = threadIndex(for: threadID) else { return }
+        if activeThreadID == threadID {
+            threads[idx].conversation = conversation
+            threads[idx].runID = runID
+            threads[idx].summaryText = summaryText
+            threads[idx].transcriptText = transcriptText
+            threads[idx].statusText = statusText
+            threads[idx].resolvedWorkingDirectory = resolvedWorkingDirectory
+            threads[idx].activeRunExecutor = activeRunExecutor
+            threads[idx].draftText = promptText
+            threads[idx].draftAttachments = draftAttachments
+        }
         threads[idx].updatedAt = Date()
         threadStore.upsertThread(threads[idx])
     }
@@ -2403,22 +2868,156 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
-    private func persistConversationMessage(at index: Int) {
-        guard let idx = activeThreadIndex(),
-              conversation.indices.contains(index) else {
-            return
+    private func activeThreadIndex() -> Int? {
+        guard let id = activeThreadID else { return nil }
+        return threadIndex(for: id)
+    }
+
+    private func threadIndex(for threadID: UUID) -> Int? {
+        threads.firstIndex(where: { $0.id == threadID })
+    }
+
+    private func cachedConversation(for threadID: UUID) -> [ConversationMessage] {
+        if activeThreadID == threadID {
+            return conversation
         }
-        let message = conversation[index]
+        if let idx = threadIndex(for: threadID), !threads[idx].conversation.isEmpty {
+            return threads[idx].conversation
+        }
+        let loaded = threadStore.loadMessages(threadID: threadID)
+        if let idx = threadIndex(for: threadID) {
+            threads[idx].conversation = loaded
+        }
+        return loaded
+    }
+
+    private func storeConversation(_ messages: [ConversationMessage], for threadID: UUID) {
+        guard let idx = threadIndex(for: threadID) else { return }
+        threads[idx].conversation = messages
+        if activeThreadID == threadID {
+            conversation = messages
+            lastSubmittedUserMessage = messages.last(where: { $0.role == "user" })
+        }
+    }
+
+    private func persistConversationMessage(_ message: ConversationMessage, at index: Int, threadID: UUID) {
         threadStore.upsertMessage(
-            threadID: threads[idx].id,
+            threadID: threadID,
             message: message,
             position: index
         )
     }
 
-    private func activeThreadIndex() -> Int? {
-        guard let id = activeThreadID else { return nil }
-        return threads.firstIndex(where: { $0.id == id })
+    private func updateThreadMetadata(
+        threadID: UUID,
+        runID: String? = nil,
+        summaryText: String? = nil,
+        transcriptText: String? = nil,
+        statusText: String? = nil,
+        resolvedWorkingDirectory: String? = nil,
+        activeRunExecutor: String? = nil,
+        persist: Bool = true
+    ) {
+        guard let idx = threadIndex(for: threadID) else { return }
+        if let runID {
+            threads[idx].runID = runID
+        }
+        if let summaryText {
+            threads[idx].summaryText = summaryText
+        }
+        if let transcriptText {
+            threads[idx].transcriptText = transcriptText
+        }
+        if let statusText {
+            threads[idx].statusText = statusText
+        }
+        if let resolvedWorkingDirectory {
+            threads[idx].resolvedWorkingDirectory = resolvedWorkingDirectory
+        }
+        if let activeRunExecutor {
+            threads[idx].activeRunExecutor = activeRunExecutor
+        }
+        if activeThreadID == threadID {
+            if let runID {
+                self.runID = runID
+            }
+            if let summaryText {
+                self.summaryText = summaryText
+            }
+            if let transcriptText {
+                self.transcriptText = transcriptText
+            }
+            if let statusText {
+                self.statusText = statusText
+            }
+            if let resolvedWorkingDirectory {
+                self.resolvedWorkingDirectory = resolvedWorkingDirectory
+            }
+            if let activeRunExecutor {
+                self.activeRunExecutor = activeRunExecutor
+            }
+        }
+        if persist {
+            persistThreadSnapshot(threadID: threadID)
+        }
+    }
+
+    private func statusText(for threadID: UUID) -> String {
+        if activeThreadID == threadID {
+            return statusText
+        }
+        return threads.first(where: { $0.id == threadID })?.statusText ?? "Idle"
+    }
+
+    private func runExecutor(for threadID: UUID) -> String {
+        if activeThreadID == threadID {
+            return activeRunExecutor
+        }
+        return threads.first(where: { $0.id == threadID })?.activeRunExecutor ?? effectiveExecutor
+    }
+
+    private func lastSubmittedUserMessage(for threadID: UUID) -> ConversationMessage? {
+        if activeThreadID == threadID {
+            return lastSubmittedUserMessage
+        }
+        return cachedConversation(for: threadID).last(where: { $0.role == "user" })
+    }
+
+    private func runID(for threadID: UUID) -> String {
+        if activeThreadID == threadID {
+            return runID
+        }
+        return threads.first(where: { $0.id == threadID })?.runID ?? ""
+    }
+
+    private func observedRunContext(for threadID: UUID, runID: String? = nil) -> ObservedRunContext? {
+        let resolvedRunID = (runID ?? self.runID(for: threadID)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !resolvedRunID.isEmpty else { return nil }
+        guard let context = observedRunContexts[resolvedRunID], context.threadID == threadID else {
+            return nil
+        }
+        return context
+    }
+
+    private func removeObservedRunContext(runID: String) {
+        let trimmedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRunID.isEmpty else { return }
+        observedRunContexts.removeValue(forKey: trimmedRunID)
+        if self.runID == trimmedRunID {
+            events = []
+        }
+    }
+
+    private func clearObservedRunContext(for threadID: UUID?) {
+        guard let threadID else { return }
+        removeObservedRunContext(runID: runID(for: threadID))
+    }
+
+    private func ensureObservedRunContext(runID: String, threadID: UUID) {
+        if observedRunContexts[runID]?.threadID == threadID {
+            return
+        }
+        observedRunContexts[runID] = ObservedRunContext(runID: runID, threadID: threadID)
     }
 
     private func performThreadStateRestore(_ updates: () -> Void) {
@@ -2603,5 +3202,27 @@ final class VoiceAgentViewModel: ObservableObject {
         backendWorkdirRoot = corrected
         workingDirectory = corrected
         persistSettings()
+    }
+
+    func _test_bindObservedRun(runID: String, threadID: UUID) {
+        ensureObservedRunContext(runID: runID, threadID: threadID)
+    }
+
+    func _test_updateThreadMetadata(
+        threadID: UUID,
+        runID: String? = nil,
+        statusText: String? = nil,
+        activeRunExecutor: String? = nil
+    ) {
+        updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: statusText,
+            activeRunExecutor: activeRunExecutor
+        )
+    }
+
+    func _test_ingestRunEvents(_ runEvents: [ExecutionEvent], runID: String, threadID: UUID) {
+        ingestEvents(runEvents, runID: runID, threadID: threadID)
     }
 }
