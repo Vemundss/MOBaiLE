@@ -49,10 +49,12 @@ final class AudioRecorderService: NSObject {
         guard allowed else { throw RecorderError.permissionDenied }
 
         let session = AVAudioSession.sharedInstance()
+        // `allowBluetoothHFP` is only present on newer SDKs. `allowBluetooth`
+        // keeps the recording route compatible with the older CI toolchain too.
         try session.setCategory(
             .playAndRecord,
             mode: .default,
-            options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP]
+            options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
         )
         try session.setActive(true)
 

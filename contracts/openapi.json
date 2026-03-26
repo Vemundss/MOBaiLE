@@ -550,6 +550,24 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HumanUnblockRequest": {
+        "properties": {
+          "instructions": {
+            "title": "Instructions",
+            "type": "string"
+          },
+          "suggested_reply": {
+            "default": "I completed the requested unblock step. Continue from the preserved state.",
+            "title": "Suggested Reply",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instructions"
+        ],
+        "title": "HumanUnblockRequest",
+        "type": "object"
+      },
       "PairExchangeRequest": {
         "properties": {
           "pair_code": {
@@ -705,6 +723,16 @@
             ],
             "title": "Executor",
             "type": "string"
+          },
+          "pending_human_unblock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HumanUnblockRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "plan": {
             "anyOf": [
