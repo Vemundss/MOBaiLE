@@ -30,6 +30,8 @@ bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
 ```
 
 `install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
+If Tailscale MagicDNS is available, pairing now prefers the stable `*.ts.net` hostname automatically before raw `100.x` or LAN IPs.
+For a stable public endpoint, set `VOICE_AGENT_PUBLIC_SERVER_URL` in `backend/.env` or pass `--public-url https://your-host` during install. MOBaiLE will prefer that URL and keep Tailscale/LAN fallbacks alongside it.
 Safe mode defaults:
 - restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
 - restricted file reads (`VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false`)
@@ -342,7 +344,7 @@ bash ./scripts/pairing_qr.sh
 
 By default this writes:
 - `backend/pairing-qr.png`
-- QR payload format is `mobaile://pair?server_url=...&pair_code=...&session_id=...`
+- QR payload format is `mobaile://pair?server_url=...&server_url=...&pair_code=...&session_id=...`
 
 Phone onboarding with QR:
 1. Open iPhone Camera and scan the generated QR.
@@ -351,6 +353,7 @@ Phone onboarding with QR:
 
 Notes:
 - App now confirms pairing details before applying server/session changes.
+- Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding.
 - Non-local servers must use `https://` for pairing.
 - Legacy `api_token` pairing links are disabled by default (developer-mode fallback only).
 

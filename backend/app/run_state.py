@@ -49,6 +49,13 @@ class RunState:
         with self._runs_lock:
             self._runs[run.run_id] = run
         self.run_store.upsert_run(run)
+        self.run_store.update_session_latest_run(
+            run.session_id,
+            run_id=run.run_id,
+            status=run.status,
+            summary=run.summary,
+            pending_human_unblock=run.pending_human_unblock,
+        )
 
     def append_event(self, run_id: str, event: ExecutionEvent) -> None:
         if not event.event_id:
@@ -141,6 +148,13 @@ class RunState:
                 run_id,
                 status,
                 summary,
+                pending_human_unblock=effective_pending_human_unblock,
+            )
+            self.run_store.update_session_latest_run(
+                run.session_id,
+                run_id=run.run_id,
+                status=status,
+                summary=summary,
                 pending_human_unblock=effective_pending_human_unblock,
             )
 

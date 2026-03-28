@@ -36,6 +36,7 @@ final class VoiceAgentViewModel: ObservableObject {
     struct PendingPairing: Identifiable, Equatable {
         let id = UUID()
         let serverURL: String
+        let serverURLs: [String]
         let sessionID: String?
         let pairCode: String?
         let legacyToken: String?
@@ -183,6 +184,7 @@ final class VoiceAgentViewModel: ObservableObject {
     private var hasSeenMicrophonePrimer = false
     private var didBootstrapSession = false
     private var trustedPairHosts: Set<String> = []
+    private var connectionCandidateServerURLs: [String] = []
     private var didConfigureRemoteCommands = false
     private var isRestoringThreadState = false
     private var activeAttachmentUploadCancellation: (() -> Void)?
@@ -194,6 +196,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
     private enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
+        static let serverURLCandidates = "mobaile.server_url_candidates"
         static let apiToken = "mobaile.api_token_legacy"
         static let sessionID = "mobaile.session_id"
         static let workingDirectory = "mobaile.working_directory"
@@ -227,6 +230,11 @@ final class VoiceAgentViewModel: ObservableObject {
             withIntermediateDirectories: true,
             attributes: nil
         )
+        client.onResolvedServerURL = { [weak self] resolvedURL in
+            Task { @MainActor in
+                self?.promoteResolvedServerURL(resolvedURL)
+            }
+        }
         loadSettings()
         loadThreads()
         if let previewScenario = PreviewScenario.current {
@@ -328,6 +336,7 @@ final class VoiceAgentViewModel: ObservableObject {
         ]
 
         serverURL = "https://demo.mobaile.app"
+        connectionCandidateServerURLs = ["https://demo.mobaile.app"]
         apiToken = "preview-token"
         sessionID = "app-preview"
         workingDirectory = workspace
@@ -354,6 +363,7 @@ final class VoiceAgentViewModel: ObservableObject {
         pendingPairing = nil
         didBootstrapSession = true
         draftAttachmentTransferStates = [:]
+        refreshClientConnectionCandidates()
 
         performThreadStateRestore {
             threads = previewThreads
@@ -656,6 +666,8 @@ final class VoiceAgentViewModel: ObservableObject {
     func stopRecordingAndSend() async {
         guard isRecording else { return }
         let originThreadID = activeThreadID
+        let stagedDraftText = promptText
+        let stagedDraftAttachments = draftAttachments
         didCompleteRun = false
         isRecording = false
         recordingStartedAt = nil
@@ -697,6 +709,12 @@ final class VoiceAgentViewModel: ObservableObject {
             }
 
             if let localTranscription {
+                let utteranceText = composeVoiceUtteranceText(
+                    draftText: stagedDraftText,
+                    transcriptText: localTranscription.text
+                )
+                let uploadedAttachments = try await uploadDraftAttachmentsIfNeeded(stagedDraftAttachments)
+                let explicitAttachments = uploadedAttachments.map(\.artifact)
                 if let originThreadID {
                     updateThreadMetadata(
                         threadID: originThreadID,
@@ -707,9 +725,10 @@ final class VoiceAgentViewModel: ObservableObject {
                     transcriptText = localTranscription.text
                 }
                 appendConversation(
-                    ConversationMessage(role: "user", text: localTranscription.text, attachments: []),
+                    ConversationMessage(role: "user", text: utteranceText, attachments: explicitAttachments),
                     to: originThreadID
                 )
+                clearDraftState(for: originThreadID, removing: stagedDraftAttachments)
                 if activeThreadID == originThreadID {
                     runPhaseText = "Planning"
                 }
@@ -725,8 +744,8 @@ final class VoiceAgentViewModel: ObservableObject {
                 }
                 let response = try await createUtteranceRun(
                     threadID: originThreadID,
-                    utteranceText: localTranscription.text,
-                    attachments: []
+                    utteranceText: utteranceText,
+                    attachments: explicitAttachments
                 )
                 startedRunID = response.runId
                 if let originThreadID {
@@ -757,6 +776,8 @@ final class VoiceAgentViewModel: ObservableObject {
                 } else {
                     statusText = "Uploading audio to backend..."
                 }
+                let uploadedAttachments = try await uploadDraftAttachmentsIfNeeded(stagedDraftAttachments)
+                let explicitAttachments = uploadedAttachments.map(\.artifact)
                 let response = try await client.createAudioRun(
                     serverURL: normalizedServerURL,
                     token: apiToken,
@@ -766,7 +787,13 @@ final class VoiceAgentViewModel: ObservableObject {
                     workingDirectory: nil,
                     responseMode: effectiveResponseMode,
                     responseProfile: effectiveAgentGuidanceMode,
+                    draftText: stagedDraftText,
+                    attachments: explicitAttachments,
                     audioFileURL: audioFile
+                )
+                let utteranceText = composeVoiceUtteranceText(
+                    draftText: stagedDraftText,
+                    transcriptText: response.transcriptText
                 )
                 startedRunID = response.runId
                 if let originThreadID {
@@ -786,9 +813,10 @@ final class VoiceAgentViewModel: ObservableObject {
                     statusText = "Audio run started (\(response.runId))"
                 }
                 appendConversation(
-                    ConversationMessage(role: "user", text: response.transcriptText, attachments: []),
+                    ConversationMessage(role: "user", text: utteranceText, attachments: explicitAttachments),
                     to: originThreadID
                 )
+                clearDraftState(for: originThreadID, removing: stagedDraftAttachments)
             }
             emitRecordingSentFeedback()
             if let originThreadID {
@@ -798,15 +826,36 @@ final class VoiceAgentViewModel: ObservableObject {
             }
             try await observeRun(runID: startedRunID, threadID: originThreadID)
         } catch {
+            activeAttachmentUploadCancellation = nil
+            if error is CancellationError || isAttachmentTransferCancellation(error) {
+                if activeThreadID == originThreadID {
+                    errorText = ""
+                    statusText = "Cancelled"
+                    isLoading = false
+                    runPhaseText = "Cancelled"
+                    runEndedAt = Date()
+                } else if let originThreadID {
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Cancelled")
+                }
+                if let originThreadID {
+                    persistThreadSnapshot(threadID: originThreadID)
+                } else {
+                    persistActiveThreadSnapshot()
+                }
+                return
+            }
             maybeAutoFixWorkingDirectory(from: error)
             if activeThreadID == originThreadID {
                 errorText = error.localizedDescription
-                statusText = "Failed"
+                statusText = hasFailedDraftAttachments ? "Upload failed" : "Failed"
                 isLoading = false
                 runPhaseText = "Failed"
                 runEndedAt = Date()
             } else if let originThreadID {
-                updateThreadMetadata(threadID: originThreadID, statusText: "Failed")
+                updateThreadMetadata(
+                    threadID: originThreadID,
+                    statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed"
+                )
             }
             emitFailureFeedback()
             if let originThreadID {
@@ -815,6 +864,22 @@ final class VoiceAgentViewModel: ObservableObject {
                 persistActiveThreadSnapshot()
             }
         }
+    }
+
+    func discardRecording() async {
+        guard isRecording else { return }
+        isRecording = false
+        recordingStartedAt = nil
+        updateRemoteCommandState()
+        if let audioFile = recorder.stop() {
+            try? FileManager.default.removeItem(at: audioFile)
+        }
+        errorText = ""
+        isLoading = false
+        runPhaseText = "Idle"
+        runStartedAt = nil
+        runEndedAt = nil
+        statusText = hasConfiguredConnection ? "Ready for prompts" : "Set server URL and token first."
     }
 
     func toggleRecordingFromHeadsetControl() async {
@@ -1541,6 +1606,55 @@ final class VoiceAgentViewModel: ObservableObject {
         persistSettings()
     }
 
+    private func restoreLatestRunFromSessionContext(_ context: SessionContext) async throws -> Bool {
+        let latestRunID = context.latestRunId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let latestStatus = context.latestRunStatus?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !latestRunID.isEmpty, !latestStatus.isEmpty else {
+            return false
+        }
+        guard let targetThreadID = threads.first(where: { $0.runID == latestRunID })?.id else {
+            return false
+        }
+
+        let latestSummary = context.latestRunSummary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        updateThreadMetadata(
+            threadID: targetThreadID,
+            runID: latestRunID,
+            summaryText: latestSummary.isEmpty ? nil : latestSummary,
+            statusText: "Run status: \(latestStatus)",
+            persist: false
+        )
+        setThreadPendingHumanUnblock(
+            threadID: targetThreadID,
+            request: latestStatus == "blocked" ? context.latestRunPendingHumanUnblock : nil,
+            persist: false
+        )
+
+        if latestStatus == "running" {
+            if activeThreadID == targetThreadID {
+                isLoading = true
+                didCompleteRun = false
+                runPhaseText = "Executing"
+                runEndedAt = nil
+            }
+            if observedRunContext(for: targetThreadID, runID: latestRunID) == nil {
+                try await observeRun(runID: latestRunID, threadID: targetThreadID)
+            }
+        } else if isTerminalStatus(latestStatus) {
+            if activeThreadID == targetThreadID {
+                isLoading = false
+                didCompleteRun = true
+                runPhaseText = phaseText(forRunStatus: latestStatus)
+                if runEndedAt == nil {
+                    runEndedAt = Date()
+                }
+            }
+        }
+
+        persistThreadSnapshot(threadID: targetThreadID)
+        return true
+    }
+
     private func uploadDraftAttachmentsIfNeeded(_ attachments: [DraftAttachment]) async throws -> [UploadResponse] {
         guard !attachments.isEmpty else { return [] }
         activeAttachmentUploadCancellation = nil
@@ -1721,6 +1835,13 @@ final class VoiceAgentViewModel: ObservableObject {
                 responseProfile: effectiveAgentGuidanceMode
             )
         )
+    }
+
+    private func composeVoiceUtteranceText(draftText: String, transcriptText: String) -> String {
+        let segments = [draftText, transcriptText]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return segments.joined(separator: "\n\n")
     }
 
     private func backendAudioUploadAvailable(forceRefresh: Bool) async -> Bool {
@@ -1907,11 +2028,83 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
+    private func refreshClientConnectionCandidates() {
+        client.fallbackServerURLs = Array(connectionCandidateServerURLs.dropFirst())
+    }
+
+    private func normalizedServerURLs(
+        preferredServerURL: String? = nil,
+        additionalServerURLs: [String] = []
+    ) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+
+        let candidates = [preferredServerURL] + additionalServerURLs
+        for raw in candidates {
+            let normalizedValue = normalized(raw ?? "")
+            guard !normalizedValue.isEmpty, !seen.contains(normalizedValue) else { continue }
+            seen.insert(normalizedValue)
+            ordered.append(normalizedValue)
+        }
+        return ordered
+    }
+
+    private func applyAdvertisedServerURLs(
+        primaryServerURL: String?,
+        advertisedServerURLs: [String],
+        persist: Bool = true
+    ) {
+        let resolved = normalizedServerURLs(
+            preferredServerURL: primaryServerURL,
+            additionalServerURLs: advertisedServerURLs
+        )
+        let finalCandidates = resolved.isEmpty
+            ? normalizedServerURLs(
+                preferredServerURL: normalizedServerURL,
+                additionalServerURLs: connectionCandidateServerURLs
+            )
+            : resolved
+        if let preferred = finalCandidates.first {
+            serverURL = preferred
+        }
+        connectionCandidateServerURLs = finalCandidates
+        refreshClientConnectionCandidates()
+        if persist {
+            persistSettings()
+        }
+    }
+
+    private func promoteResolvedServerURL(_ resolvedURL: String) {
+        let promoted = normalized(resolvedURL)
+        guard !promoted.isEmpty else { return }
+        if promoted == normalizedServerURL {
+            return
+        }
+        let currentCandidates = connectionCandidateServerURLs.isEmpty ? [normalizedServerURL] : connectionCandidateServerURLs
+        applyAdvertisedServerURLs(
+            primaryServerURL: promoted,
+            advertisedServerURLs: currentCandidates,
+            persist: true
+        )
+    }
+
     func persistSettings() {
         if responseMode != "concise" {
             responseMode = "concise"
         }
+        let normalizedServer = normalizedServerURL
+        if normalizedServer.isEmpty {
+            connectionCandidateServerURLs = []
+        } else if connectionCandidateServerURLs.contains(normalizedServer) {
+            connectionCandidateServerURLs = normalizedServerURLs(
+                preferredServerURL: normalizedServer,
+                additionalServerURLs: connectionCandidateServerURLs
+            )
+        } else {
+            connectionCandidateServerURLs = [normalizedServer]
+        }
         defaults.set(serverURL, forKey: DefaultsKey.serverURL)
+        defaults.set(connectionCandidateServerURLs, forKey: DefaultsKey.serverURLCandidates)
         if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             KeychainStore.save(value: apiToken, service: "MOBaiLE", account: "api_token")
             defaults.removeObject(forKey: DefaultsKey.apiToken)
@@ -1932,6 +2125,7 @@ final class VoiceAgentViewModel: ObservableObject {
         defaults.set(audioCuesEnabled, forKey: DefaultsKey.audioCuesEnabled)
         defaults.set(autoSendAfterSilenceEnabled, forKey: DefaultsKey.autoSendAfterSilenceEnabled)
         defaults.set(autoSendAfterSilenceSeconds, forKey: DefaultsKey.autoSendAfterSilenceSeconds)
+        refreshClientConnectionCandidates()
         updateRemoteCommandState()
     }
 
@@ -1941,7 +2135,11 @@ final class VoiceAgentViewModel: ObservableObject {
         didBootstrapSession = true
         do {
             _ = try? await refreshRuntimeConfiguration()
-            _ = try? await refreshSessionContextFromBackend()
+            let context = try await refreshSessionContextFromBackend()
+            let restoredFromContext = (try? await restoreLatestRunFromSessionContext(context)) ?? false
+            if restoredFromContext {
+                return
+            }
             let runs = try await client.fetchSessionRuns(
                 serverURL: normalizedServerURL,
                 token: apiToken,
@@ -1981,12 +2179,22 @@ final class VoiceAgentViewModel: ObservableObject {
         }
     }
 
+    func refreshSessionPresenceFromBackendIfPossible() async {
+        guard hasConfiguredConnection else { return }
+        do {
+            let context = try await refreshSessionContextFromBackend()
+            _ = try? await restoreLatestRunFromSessionContext(context)
+        } catch {
+            // Ignore foreground refresh failures to keep the UI responsive.
+        }
+    }
+
     func applyPairingURL(_ url: URL) {
         guard let scheme = url.scheme?.lowercased(), scheme == "mobaile" else { return }
         guard let host = url.host?.lowercased(), host == "pair" else { return }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
 
-        var updatedServer: String?
+        var advertisedServerURLs: [String] = []
         var updatedToken: String?
         var pairCode: String?
         var updatedSession: String?
@@ -1995,7 +2203,7 @@ final class VoiceAgentViewModel: ObservableObject {
             switch item.name {
             case "server_url":
                 if let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
-                    updatedServer = value
+                    advertisedServerURLs.append(value)
                 }
             case "api_token":
                 if let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
@@ -2014,21 +2222,23 @@ final class VoiceAgentViewModel: ObservableObject {
             }
         }
 
-        guard let server = updatedServer else {
+        let resolvedServerURLs = normalizedServerURLs(additionalServerURLs: advertisedServerURLs)
+        guard let normalizedServer = resolvedServerURLs.first else {
             errorText = "Invalid pairing QR. Missing server URL."
             return
         }
-        let normalizedServer = normalized(server)
-        guard let parsedServer = URL(string: normalizedServer),
-              let schemeValue = parsedServer.scheme?.lowercased(),
-              schemeValue == "http" || schemeValue == "https",
-              let hostValue = parsedServer.host?.lowercased() else {
-            errorText = "Invalid pairing QR. Server URL must be a valid http(s) URL."
-            return
-        }
-        if schemeValue != "https" && !isLocalOrPrivateHost(hostValue) {
-            errorText = "Pairing requires HTTPS for non-local servers."
-            return
+        for candidate in resolvedServerURLs {
+            guard let parsedServer = URL(string: candidate),
+                  let schemeValue = parsedServer.scheme?.lowercased(),
+                  schemeValue == "http" || schemeValue == "https",
+                  let hostValue = parsedServer.host?.lowercased() else {
+                errorText = "Invalid pairing QR. Server URL must be a valid http(s) URL."
+                return
+            }
+            if schemeValue != "https" && !isLocalOrPrivateHost(hostValue) {
+                errorText = "Pairing requires HTTPS for non-local servers."
+                return
+            }
         }
         if pairCode == nil, updatedToken != nil, !developerMode {
             errorText = "Legacy token pairing links are disabled. Use pair-code QR pairing."
@@ -2041,6 +2251,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
         pendingPairing = PendingPairing(
             serverURL: normalizedServer,
+            serverURLs: resolvedServerURLs,
             sessionID: updatedSession,
             pairCode: pairCode,
             legacyToken: developerMode ? updatedToken : nil
@@ -2079,7 +2290,7 @@ final class VoiceAgentViewModel: ObservableObject {
         if let oneTimeCode = pending.pairCode {
             Task {
                 await exchangePairCode(
-                    serverURL: pending.serverURL,
+                    serverURLs: pending.serverURLs,
                     pairCode: oneTimeCode,
                     sessionID: pending.sessionID
                 )
@@ -2088,7 +2299,11 @@ final class VoiceAgentViewModel: ObservableObject {
         }
         if let token = pending.legacyToken {
             pendingPairing = nil
-            serverURL = pending.serverURL
+            applyAdvertisedServerURLs(
+                primaryServerURL: pending.serverURL,
+                advertisedServerURLs: pending.serverURLs,
+                persist: false
+            )
             if let session = pending.sessionID, !session.isEmpty {
                 sessionID = session
             }
@@ -2225,6 +2440,11 @@ final class VoiceAgentViewModel: ObservableObject {
         let cfg = try await client.fetchRuntimeConfig(
             serverURL: normalizedServerURL,
             token: apiToken
+        )
+        applyAdvertisedServerURLs(
+            primaryServerURL: cfg.serverURL,
+            advertisedServerURLs: cfg.serverURLs ?? [],
+            persist: true
         )
         backendSecurityMode = cfg.securityMode
         backendDefaultExecutor = normalizedExecutor(from: cfg.defaultExecutor) ?? "codex"
@@ -2677,6 +2897,21 @@ final class VoiceAgentViewModel: ObservableObject {
         if let value = defaults.string(forKey: DefaultsKey.serverURL), !value.isEmpty {
             serverURL = value
         }
+        let storedServerCandidates = defaults.stringArray(forKey: DefaultsKey.serverURLCandidates) ?? []
+        let normalizedCurrentServer = normalized(serverURL)
+        if !normalizedCurrentServer.isEmpty && storedServerCandidates.contains(normalizedCurrentServer) {
+            connectionCandidateServerURLs = normalizedServerURLs(
+                preferredServerURL: normalizedCurrentServer,
+                additionalServerURLs: storedServerCandidates
+            )
+        } else if !normalizedCurrentServer.isEmpty {
+            connectionCandidateServerURLs = [normalizedCurrentServer]
+        } else {
+            connectionCandidateServerURLs = normalizedServerURLs(additionalServerURLs: storedServerCandidates)
+            if let preferred = connectionCandidateServerURLs.first {
+                serverURL = preferred
+            }
+        }
         if let keychainToken = KeychainStore.load(service: "MOBaiLE", account: "api_token"),
            !keychainToken.isEmpty {
             apiToken = keychainToken
@@ -2737,6 +2972,7 @@ final class VoiceAgentViewModel: ObservableObject {
         }
         hasSeenMicrophonePrimer = defaults.bool(forKey: DefaultsKey.microphonePrimerSeen)
         trustedPairHosts = Set(defaults.stringArray(forKey: DefaultsKey.trustedPairHosts) ?? [])
+        refreshClientConnectionCandidates()
     }
 
     private func migrateLegacyRunTimeoutDefaultIfNeeded() {
@@ -2753,16 +2989,32 @@ final class VoiceAgentViewModel: ObservableObject {
         defaults.set("0", forKey: DefaultsKey.runTimeoutSeconds)
     }
 
-    private func exchangePairCode(serverURL: String, pairCode: String, sessionID: String?) async {
+    private func exchangePairCode(serverURLs: [String], pairCode: String, sessionID: String?) async {
+        let resolvedServerURLs = normalizedServerURLs(additionalServerURLs: serverURLs)
+        guard let primaryServerURL = resolvedServerURLs.first else {
+            self.errorText = "Pairing failed"
+            self.statusText = "Missing pairing server URL"
+            return
+        }
+        let previousFallbacks = client.fallbackServerURLs
+        client.fallbackServerURLs = Array(resolvedServerURLs.dropFirst())
+        defer {
+            client.fallbackServerURLs = previousFallbacks
+            refreshClientConnectionCandidates()
+        }
         do {
             let response = try await client.exchangePairingCode(
-                serverURL: normalized(serverURL),
+                serverURL: primaryServerURL,
                 pairCode: pairCode,
                 sessionID: sessionID ?? self.sessionID
             )
             self.apiToken = response.apiToken
             self.sessionID = response.sessionId
-            self.serverURL = serverURL
+            self.applyAdvertisedServerURLs(
+                primaryServerURL: response.serverURL ?? primaryServerURL,
+                advertisedServerURLs: (response.serverURLs ?? []) + resolvedServerURLs,
+                persist: false
+            )
             self.backendSecurityMode = response.securityMode
             _ = try? await self.refreshRuntimeConfiguration()
             _ = try? await self.refreshSessionContextFromBackend()
@@ -3345,5 +3597,9 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func _test_ingestRunEvents(_ runEvents: [ExecutionEvent], runID: String, threadID: UUID) {
         ingestEvents(runEvents, runID: runID, threadID: threadID)
+    }
+
+    func _test_composeVoiceUtteranceText(draftText: String, transcriptText: String) -> String {
+        composeVoiceUtteranceText(draftText: draftText, transcriptText: transcriptText)
     }
 }

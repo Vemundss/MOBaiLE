@@ -14,7 +14,18 @@ final class ChatThreadStore {
             withIntermediateDirectories: true,
             attributes: nil
         )
-        dbURL = directory.appendingPathComponent("threads.sqlite3")
+        self.dbURL = directory.appendingPathComponent("threads.sqlite3")
+        setupSchema()
+    }
+
+    init(dbURL: URL) {
+        let directory = dbURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        self.dbURL = dbURL
         setupSchema()
     }
 
@@ -37,6 +48,7 @@ final class ChatThreadStore {
                 summaryText: thread.summaryText,
                 transcriptText: thread.transcriptText,
                 statusText: thread.statusText,
+                pendingHumanUnblock: thread.pendingHumanUnblock,
                 resolvedWorkingDirectory: thread.resolvedWorkingDirectory,
                 activeRunExecutor: thread.activeRunExecutor,
                 draftText: thread.draftText,
@@ -55,7 +67,7 @@ final class ChatThreadStore {
         defer { sqlite3_close(db) }
 
         let sql = """
-        SELECT id, title, updated_at, run_id, summary_text, transcript_text, status_text, resolved_working_directory, active_run_executor, draft_text, draft_attachments_json
+        SELECT id, title, updated_at, run_id, summary_text, transcript_text, status_text, pending_human_unblock_json, resolved_working_directory, active_run_executor, draft_text, draft_attachments_json
         FROM threads
         ORDER BY updated_at DESC
         """
@@ -79,10 +91,11 @@ final class ChatThreadStore {
                     summaryText: stringColumn(statement, index: 4),
                     transcriptText: stringColumn(statement, index: 5),
                     statusText: stringColumn(statement, index: 6),
-                    resolvedWorkingDirectory: stringColumn(statement, index: 7),
-                    activeRunExecutor: stringColumn(statement, index: 8),
-                    draftText: stringColumn(statement, index: 9),
-                    draftAttachments: decodeDraftAttachments(from: stringColumn(statement, index: 10))
+                    pendingHumanUnblock: decodeHumanUnblockRequest(from: stringColumn(statement, index: 7)),
+                    resolvedWorkingDirectory: stringColumn(statement, index: 8),
+                    activeRunExecutor: stringColumn(statement, index: 9),
+                    draftText: stringColumn(statement, index: 10),
+                    draftAttachments: decodeDraftAttachments(from: stringColumn(statement, index: 11))
                 )
             )
         }
@@ -121,9 +134,9 @@ final class ChatThreadStore {
 
         let sql = """
         INSERT INTO threads (
-            id, title, updated_at, run_id, summary_text, transcript_text, status_text, resolved_working_directory, active_run_executor, draft_text, draft_attachments_json
+            id, title, updated_at, run_id, summary_text, transcript_text, status_text, pending_human_unblock_json, resolved_working_directory, active_run_executor, draft_text, draft_attachments_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title,
             updated_at=excluded.updated_at,
@@ -131,6 +144,7 @@ final class ChatThreadStore {
             summary_text=excluded.summary_text,
             transcript_text=excluded.transcript_text,
             status_text=excluded.status_text,
+            pending_human_unblock_json=excluded.pending_human_unblock_json,
             resolved_working_directory=excluded.resolved_working_directory,
             active_run_executor=excluded.active_run_executor,
             draft_text=excluded.draft_text,
@@ -147,10 +161,11 @@ final class ChatThreadStore {
         bindText(statement, index: 5, value: thread.summaryText)
         bindText(statement, index: 6, value: thread.transcriptText)
         bindText(statement, index: 7, value: thread.statusText)
-        bindText(statement, index: 8, value: thread.resolvedWorkingDirectory)
-        bindText(statement, index: 9, value: thread.activeRunExecutor)
-        bindText(statement, index: 10, value: thread.draftText)
-        bindText(statement, index: 11, value: encodeDraftAttachments(thread.draftAttachments))
+        bindText(statement, index: 8, value: encodeHumanUnblockRequest(thread.pendingHumanUnblock))
+        bindText(statement, index: 9, value: thread.resolvedWorkingDirectory)
+        bindText(statement, index: 10, value: thread.activeRunExecutor)
+        bindText(statement, index: 11, value: thread.draftText)
+        bindText(statement, index: 12, value: encodeDraftAttachments(thread.draftAttachments))
         _ = sqlite3_step(statement)
     }
 
@@ -203,6 +218,7 @@ final class ChatThreadStore {
             summary_text TEXT NOT NULL,
             transcript_text TEXT NOT NULL,
             status_text TEXT NOT NULL,
+            pending_human_unblock_json TEXT NOT NULL DEFAULT '',
             resolved_working_directory TEXT NOT NULL,
             active_run_executor TEXT NOT NULL,
             draft_text TEXT NOT NULL DEFAULT '',
@@ -224,6 +240,7 @@ final class ChatThreadStore {
         ensureDraftTextColumnExists(db)
         ensureDraftAttachmentsColumnExists(db)
         ensureAttachmentsColumnExists(db)
+        ensurePendingHumanUnblockColumnExists(db)
     }
 
     private func openConnection() -> OpaquePointer? {
@@ -280,6 +297,17 @@ final class ChatThreadStore {
         )
     }
 
+    private func ensurePendingHumanUnblockColumnExists(_ db: OpaquePointer?) {
+        guard !hasColumn(named: "pending_human_unblock_json", in: "threads", db: db) else { return }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE threads ADD COLUMN pending_human_unblock_json TEXT NOT NULL DEFAULT '';",
+            nil,
+            nil,
+            nil
+        )
+    }
+
     private func hasColumn(named columnName: String, in tableName: String, db: OpaquePointer?) -> Bool {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(tableName));", -1, &statement, nil) == SQLITE_OK else {
@@ -323,6 +351,24 @@ final class ChatThreadStore {
         guard let data = raw.data(using: .utf8),
               let decoded = try? JSONDecoder().decode([DraftAttachment].self, from: data) else {
             return []
+        }
+        return decoded
+    }
+
+    private func encodeHumanUnblockRequest(_ request: HumanUnblockRequest?) -> String {
+        guard let request,
+              let data = try? JSONEncoder().encode(request),
+              let rendered = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return rendered
+    }
+
+    private func decodeHumanUnblockRequest(from raw: String) -> HumanUnblockRequest? {
+        guard !raw.isEmpty,
+              let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(HumanUnblockRequest.self, from: data) else {
+            return nil
         }
         return decoded
     }

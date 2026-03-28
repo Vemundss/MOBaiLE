@@ -14,7 +14,7 @@ Usage: bash ./scripts/pairing_qr.sh [--out <path>] [--format url|json] [--scale 
 
 Reads backend/pairing.json and generates a local QR code image.
   --format url   QR encodes mobaile://pair deep link (default)
-  --format json  QR encodes raw {"server_url","pair_code","session_id"} JSON
+  --format json  QR encodes raw {"server_url","server_urls","pair_code","session_id"} JSON
   --scale <int>  QR pixel scale (default: 12)
 EOF
 }
@@ -74,6 +74,7 @@ print(
     json.dumps(
         {
             "server_url": data["server_url"],
+            "server_urls": data.get("server_urls", [data["server_url"]]),
             "pair_code": data["pair_code"],
             "session_id": data.get("session_id", "iphone-app"),
         },
@@ -96,10 +97,19 @@ p = Path(os.environ["PAIRING_PATH"])
 data = json.loads(p.read_text(encoding="utf-8"))
 if "pair_code" not in data or not str(data["pair_code"]).strip():
     raise SystemExit("pair_code missing in pairing.json; run scripts/install_backend.sh again")
-server = urllib.parse.quote(data["server_url"], safe="")
 pair_code = urllib.parse.quote(data["pair_code"], safe="")
 session = urllib.parse.quote(data.get("session_id", "iphone-app"), safe="")
-print(f"mobaile://pair?server_url={server}&pair_code={pair_code}&session_id={session}")
+server_urls = data.get("server_urls", [data["server_url"]])
+parts = []
+for raw in server_urls:
+    if not str(raw).strip():
+        continue
+    parts.append(f"server_url={urllib.parse.quote(str(raw), safe='')}")
+if not parts:
+    parts.append(f"server_url={urllib.parse.quote(data['server_url'], safe='')}")
+parts.append(f"pair_code={pair_code}")
+parts.append(f"session_id={session}")
+print("mobaile://pair?" + "&".join(parts))
 PY
 )"
 else

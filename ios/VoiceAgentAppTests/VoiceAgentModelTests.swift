@@ -82,9 +82,18 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(resolved, "http://127.0.0.1:8000/v1/files?path=%2FUsers%2Ftest%2Fplot.png")
     }
 
+    func testResolveImageURLRewritesStaleBackendHostToActiveServer() {
+        let resolved = _test_resolveImageURL(
+            "http://192.168.1.20:8000/v1/files?path=%2FUsers%2Ftest%2Fplot.png",
+            serverURL: "https://relay.example.com"
+        )
+        XCTAssertEqual(resolved, "https://relay.example.com/v1/files?path=%2FUsers%2Ftest%2Fplot.png")
+    }
+
     func testPendingPairingWarnsForRFC1918HTTP() {
         let pending = VoiceAgentViewModel.PendingPairing(
             serverURL: "http://192.168.1.20:8000",
+            serverURLs: ["http://192.168.1.20:8000"],
             sessionID: "iphone-app",
             pairCode: "123456",
             legacyToken: nil
@@ -96,6 +105,7 @@ final class VoiceAgentModelTests: XCTestCase {
     func testPendingPairingDoesNotWarnForTailscaleHTTP() {
         let pending = VoiceAgentViewModel.PendingPairing(
             serverURL: "http://mobaile.ts.net:8000",
+            serverURLs: ["http://mobaile.ts.net:8000"],
             sessionID: "iphone-app",
             pairCode: "123456",
             legacyToken: nil
@@ -141,6 +151,62 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertNil(decoded.pendingHumanUnblock)
     }
 
+    func testSessionContextDecodingIncludesLatestRunState() throws {
+        let json = """
+        {
+          "session_id":"session-1",
+          "executor":"codex",
+          "working_directory":"/Users/test/project",
+          "resolved_working_directory":"/Users/test/project",
+          "latest_run_id":"run-123",
+          "latest_run_status":"blocked",
+          "latest_run_summary":"Complete the CAPTCHA",
+          "latest_run_updated_at":"2026-03-27T12:00:00Z",
+          "latest_run_pending_human_unblock":{
+            "instructions":"Complete the CAPTCHA, then reply from the phone.",
+            "suggested_reply":"I completed the unblock step."
+          },
+          "updated_at":"2026-03-27T12:00:01Z"
+        }
+        """
+        let data = Data(json.utf8)
+        let decoded = try JSONDecoder().decode(SessionContext.self, from: data)
+        XCTAssertEqual(decoded.sessionId, "session-1")
+        XCTAssertEqual(decoded.latestRunId, "run-123")
+        XCTAssertEqual(decoded.latestRunStatus, "blocked")
+        XCTAssertEqual(decoded.latestRunSummary, "Complete the CAPTCHA")
+        XCTAssertEqual(decoded.latestRunPendingHumanUnblock?.instructions, "Complete the CAPTCHA, then reply from the phone.")
+    }
+
+    func testChatThreadStorePersistsPendingHumanUnblock() throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let dbURL = baseURL.appendingPathComponent("threads.sqlite3")
+        let store = ChatThreadStore(dbURL: dbURL)
+        let threadID = UUID()
+        store.upsertThread(
+            ChatThread(
+                id: threadID,
+                title: "Blocked Run",
+                updatedAt: Date(timeIntervalSince1970: 1_742_000_000),
+                conversation: [],
+                runID: "run-123",
+                summaryText: "Complete the CAPTCHA",
+                transcriptText: "",
+                statusText: "Run status: blocked",
+                pendingHumanUnblock: HumanUnblockRequest(
+                    instructions: "Complete the CAPTCHA, then reply from the phone."
+                ),
+                resolvedWorkingDirectory: "/Users/test/project",
+                activeRunExecutor: "codex"
+            )
+        )
+
+        let loaded = store.loadThreads()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.pendingHumanUnblock?.instructions, "Complete the CAPTCHA, then reply from the phone.")
+    }
+
     func testRuntimeConfigDecodingSupportsExecutorDiscovery() throws {
         let json = """
         {
@@ -158,7 +224,9 @@ final class VoiceAgentModelTests: XCTestCase {
           "claude_model":"claude-sonnet-4-5",
           "workdir_root":"/Users/test/work",
           "allow_absolute_file_reads":false,
-          "file_roots":["/Users/test/work"]
+          "file_roots":["/Users/test/work"],
+          "server_url":"https://relay.example.com",
+          "server_urls":["https://relay.example.com","http://100.111.99.51:8000"]
         }
         """
 
@@ -172,6 +240,8 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.transcribeReady, true)
         XCTAssertEqual(decoded.codexModel, "gpt-5.1")
         XCTAssertEqual(decoded.claudeModel, "claude-sonnet-4-5")
+        XCTAssertEqual(decoded.serverURL, "https://relay.example.com")
+        XCTAssertEqual(decoded.serverURLs ?? [], ["https://relay.example.com", "http://100.111.99.51:8000"])
     }
 
     func testSessionContextDecodingSupportsResolvedDefaults() throws {
@@ -216,6 +286,24 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(command.group, "Runtime")
         XCTAssertEqual(command.argumentOptions, ["codex", "claude", "local"])
         XCTAssertTrue(command.acceptsArguments)
+    }
+
+    func testPairExchangeResponseDecodingIncludesConnectionCandidates() throws {
+        let json = """
+        {
+          "api_token":"paired-token",
+          "session_id":"iphone-app",
+          "security_mode":"safe",
+          "server_url":"https://relay.example.com",
+          "server_urls":["https://relay.example.com","http://100.111.99.51:8000"]
+        }
+        """
+
+        let data = Data(json.utf8)
+        let decoded = try JSONDecoder().decode(PairExchangeResponse.self, from: data)
+        XCTAssertEqual(decoded.apiToken, "paired-token")
+        XCTAssertEqual(decoded.serverURL, "https://relay.example.com")
+        XCTAssertEqual(decoded.serverURLs ?? [], ["https://relay.example.com", "http://100.111.99.51:8000"])
     }
 
     func testDraftAttachmentRoundTripsThroughCodable() throws {
@@ -292,6 +380,33 @@ final class VoiceAgentModelTests: XCTestCase {
         let state = _test_resolveComposerSlashCommandState("/exec", commands: commands)
         XCTAssertEqual(state?.exactMatch?.id, "executor")
         XCTAssertEqual(state?.suggestions.first?.id, "executor")
+    }
+
+    @MainActor
+    func testComposeVoiceUtteranceTextKeepsTypedNoteAheadOfTranscript() {
+        let vm = VoiceAgentViewModel()
+
+        let combined = vm._test_composeVoiceUtteranceText(
+            draftText: "Run the smoke test again.",
+            transcriptText: "Compare it with the last pass too."
+        )
+
+        XCTAssertEqual(
+            combined,
+            "Run the smoke test again.\n\nCompare it with the last pass too."
+        )
+    }
+
+    @MainActor
+    func testComposeVoiceUtteranceTextFallsBackToTranscriptWhenNoTypedNoteExists() {
+        let vm = VoiceAgentViewModel()
+
+        let combined = vm._test_composeVoiceUtteranceText(
+            draftText: "   ",
+            transcriptText: "Summarize the current repo status."
+        )
+
+        XCTAssertEqual(combined, "Summarize the current repo status.")
     }
 
     @MainActor

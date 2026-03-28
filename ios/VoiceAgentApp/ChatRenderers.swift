@@ -1212,7 +1212,11 @@ private func resolveInlineArtifact(title: String, rawReference: String, serverUR
 
     let resolvedTitle = title.isEmpty ? fallbackArtifactTitle(from: trimmed) : title
     if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
-        guard let url = URL(string: trimmed), isBackendFileURL(url, serverURL: serverURL) else {
+        guard let rawURL = URL(string: trimmed) else {
+            return nil
+        }
+        let url = rewriteProtectedBackendURL(rawURL, serverURL: serverURL) ?? rawURL
+        guard isBackendFileURL(url, serverURL: serverURL) else {
             return nil
         }
         let mime = inferArtifactMimeType(from: url.lastPathComponent)
@@ -1221,7 +1225,7 @@ private func resolveInlineArtifact(title: String, rawReference: String, serverUR
             title: resolvedTitle,
             path: nil,
             mime: mime,
-            url: trimmed
+            url: url.absoluteString
         )
     }
 
@@ -1244,11 +1248,14 @@ private func resolveImageURL(from raw: String, serverURL: String) -> String? {
         return nil
     }
     if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
-        guard let url = URL(string: trimmed),
-              isProtectedBackendURL(url, serverURL: serverURL) else {
+        guard let rawURL = URL(string: trimmed) else {
             return nil
         }
-        return trimmed
+        let url = rewriteProtectedBackendURL(rawURL, serverURL: serverURL) ?? rawURL
+        guard isProtectedBackendURL(url, serverURL: serverURL) else {
+            return nil
+        }
+        return url.absoluteString
     }
     let imagePath = extractImagePath(from: trimmed)
     guard let encoded = imagePath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
@@ -1334,6 +1341,22 @@ private func isProtectedBackendURL(_ url: URL, serverURL: String) -> Bool {
         (url.port ?? defaultPort(for: url.scheme)) == (backend.port ?? defaultPort(for: backend.scheme)) &&
         url.scheme == backend.scheme &&
         url.path.hasPrefix("/v1/")
+}
+
+private func rewriteProtectedBackendURL(_ url: URL, serverURL: String) -> URL? {
+    guard url.path.hasPrefix("/v1/"),
+          let backend = URL(string: serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else {
+        return nil
+    }
+    let originalComponents = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    var components = URLComponents()
+    components.scheme = backend.scheme
+    components.host = backend.host
+    components.port = backend.port
+    components.path = url.path
+    components.percentEncodedQuery = originalComponents?.percentEncodedQuery
+    components.fragment = url.fragment
+    return components.url
 }
 
 private func defaultPort(for scheme: String?) -> Int {

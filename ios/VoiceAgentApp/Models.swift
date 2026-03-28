@@ -215,11 +215,15 @@ struct PairExchangeResponse: Decodable {
     let apiToken: String
     let sessionId: String
     let securityMode: String
+    let serverURL: String?
+    let serverURLs: [String]?
 
     enum CodingKeys: String, CodingKey {
         case apiToken = "api_token"
         case sessionId = "session_id"
         case securityMode = "security_mode"
+        case serverURL = "server_url"
+        case serverURLs = "server_urls"
     }
 }
 
@@ -370,6 +374,8 @@ struct RuntimeConfig: Decodable {
     let workdirRoot: String?
     let allowAbsoluteFileReads: Bool?
     let fileRoots: [String]?
+    let serverURL: String?
+    let serverURLs: [String]?
 
     enum CodingKeys: String, CodingKey {
         case securityMode = "security_mode"
@@ -383,6 +389,8 @@ struct RuntimeConfig: Decodable {
         case workdirRoot = "workdir_root"
         case allowAbsoluteFileReads = "allow_absolute_file_reads"
         case fileRoots = "file_roots"
+        case serverURL = "server_url"
+        case serverURLs = "server_urls"
     }
 }
 
@@ -401,6 +409,11 @@ struct SessionContext: Decodable {
     let executor: String
     let workingDirectory: String?
     let resolvedWorkingDirectory: String
+    let latestRunId: String?
+    let latestRunStatus: String?
+    let latestRunSummary: String?
+    let latestRunUpdatedAt: String?
+    let latestRunPendingHumanUnblock: HumanUnblockRequest?
     let updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
@@ -408,6 +421,11 @@ struct SessionContext: Decodable {
         case executor
         case workingDirectory = "working_directory"
         case resolvedWorkingDirectory = "resolved_working_directory"
+        case latestRunId = "latest_run_id"
+        case latestRunStatus = "latest_run_status"
+        case latestRunSummary = "latest_run_summary"
+        case latestRunUpdatedAt = "latest_run_updated_at"
+        case latestRunPendingHumanUnblock = "latest_run_pending_human_unblock"
         case updatedAt = "updated_at"
     }
 }

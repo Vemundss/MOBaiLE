@@ -74,6 +74,9 @@ def _read_non_negative_int_env(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class RuntimeEnvironment:
     backend_root: Path
+    host: str
+    port: int
+    public_server_url: str
     default_workdir: Path
     security_mode: str
     full_access_mode: bool
@@ -119,6 +122,12 @@ class RuntimeEnvironment:
 
     @classmethod
     def from_env(cls, backend_root: Path) -> "RuntimeEnvironment":
+        host = os.getenv("VOICE_AGENT_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        try:
+            port = int(os.getenv("VOICE_AGENT_PORT", "8000").strip() or "8000")
+        except ValueError:
+            port = 8000
+        public_server_url = os.getenv("VOICE_AGENT_PUBLIC_SERVER_URL", "").strip()
         default_workdir = Path(
             os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))
         ).expanduser().resolve()
@@ -258,6 +267,9 @@ class RuntimeEnvironment:
 
         return cls(
             backend_root=backend_root,
+            host=host,
+            port=port,
+            public_server_url=public_server_url,
             default_workdir=default_workdir,
             security_mode=security_mode,
             full_access_mode=full_access_mode,
@@ -448,6 +460,8 @@ class RuntimeEnvironment:
         *,
         transcribe_provider: str,
         transcribe_ready: bool,
+        server_url: str | None = None,
+        server_urls: list[str] | None = None,
     ) -> RuntimeConfigResponse:
         return RuntimeConfigResponse(
             security_mode=self.security_mode,  # type: ignore[arg-type]
@@ -461,6 +475,8 @@ class RuntimeEnvironment:
             workdir_root=str(self.workdir_root) if self.workdir_root is not None else None,
             allow_absolute_file_reads=self.allow_absolute_file_reads,
             file_roots=[str(root) for root in self.file_roots],
+            server_url=server_url,
+            server_urls=server_urls or [],
         )
 
     @staticmethod

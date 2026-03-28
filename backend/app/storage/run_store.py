@@ -86,10 +86,27 @@ class RunStore:
                     session_id TEXT PRIMARY KEY,
                     executor TEXT,
                     working_directory TEXT,
+                    latest_run_id TEXT,
+                    latest_run_status TEXT,
+                    latest_run_summary TEXT,
+                    latest_run_pending_human_unblock_json TEXT,
+                    latest_run_updated_at TEXT,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            columns = conn.execute("PRAGMA table_info(session_context)").fetchall()
+            column_names = {row["name"] for row in columns}
+            if "latest_run_id" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_id TEXT")
+            if "latest_run_status" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_status TEXT")
+            if "latest_run_summary" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_summary TEXT")
+            if "latest_run_pending_human_unblock_json" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_pending_human_unblock_json TEXT")
+            if "latest_run_updated_at" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_updated_at TEXT")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS agent_session_map (
@@ -249,7 +266,16 @@ class RunStore:
         with self._connect() as conn:
             return conn.execute(
                 """
-                SELECT session_id, executor, working_directory, updated_at
+                SELECT
+                    session_id,
+                    executor,
+                    working_directory,
+                    latest_run_id,
+                    latest_run_status,
+                    latest_run_summary,
+                    latest_run_pending_human_unblock_json,
+                    latest_run_updated_at,
+                    updated_at
                 FROM session_context
                 WHERE session_id = ?
                 """,
@@ -287,6 +313,48 @@ class RunStore:
             ).fetchone()
         assert row is not None
         return row
+
+    def update_session_latest_run(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        status: str,
+        summary: str,
+        pending_human_unblock: HumanUnblockRequest | None = None,
+    ) -> None:
+        pending_human_unblock_json = (
+            pending_human_unblock.model_dump_json() if pending_human_unblock is not None else None
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_context (
+                    session_id,
+                    latest_run_id,
+                    latest_run_status,
+                    latest_run_summary,
+                    latest_run_pending_human_unblock_json,
+                    latest_run_updated_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    latest_run_id=excluded.latest_run_id,
+                    latest_run_status=excluded.latest_run_status,
+                    latest_run_summary=excluded.latest_run_summary,
+                    latest_run_pending_human_unblock_json=excluded.latest_run_pending_human_unblock_json,
+                    latest_run_updated_at=CURRENT_TIMESTAMP,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    session_id,
+                    run_id,
+                    status,
+                    summary,
+                    pending_human_unblock_json,
+                ),
+            )
 
     def get_agent_session_id(self, executor: str, session_id: str, client_thread_id: str) -> str | None:
         with self._connect() as conn:

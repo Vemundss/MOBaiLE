@@ -118,10 +118,32 @@
       },
       "Body_create_audio_run_v1_audio_post": {
         "properties": {
+          "attachments_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments Json"
+          },
           "audio": {
             "format": "binary",
             "title": "Audio",
             "type": "string"
+          },
+          "draft_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Text"
           },
           "executor": {
             "anyOf": [
@@ -607,6 +629,24 @@
             "title": "Security Mode",
             "type": "string"
           },
+          "server_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Url"
+          },
+          "server_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Server Urls",
+            "type": "array"
+          },
           "session_id": {
             "title": "Session Id",
             "type": "string"
@@ -948,6 +988,24 @@
             "title": "Security Mode",
             "type": "string"
           },
+          "server_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Url"
+          },
+          "server_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Server Urls",
+            "type": "array"
+          },
           "transcribe_provider": {
             "title": "Transcribe Provider",
             "type": "string"
@@ -1046,6 +1104,68 @@
             ],
             "title": "Executor",
             "type": "string"
+          },
+          "latest_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Id"
+          },
+          "latest_run_pending_human_unblock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HumanUnblockRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_run_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "running",
+                  "completed",
+                  "failed",
+                  "rejected",
+                  "blocked",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Status"
+          },
+          "latest_run_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Summary"
+          },
+          "latest_run_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Updated At"
           },
           "resolved_working_directory": {
             "title": "Resolved Working Directory",

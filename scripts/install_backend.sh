@@ -10,6 +10,7 @@ SECURITY_MODE="safe"
 PAIR_CODE_TTL_MIN="30"
 EXPOSE_NETWORK="false"
 PROVISION_AUTONOMY_STACK="auto"
+PUBLIC_SERVER_URL=""
 
 require_cmd() {
   local cmd="$1"
@@ -94,13 +95,48 @@ detect_lan_ip() {
   fi
 }
 
+detect_tailscale_dns_name() {
+  if ! command -v tailscale >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+    return
+  fi
+
+  tailscale status --json 2>/dev/null | python3 - <<'PY'
+import json
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(0)
+
+self_node = payload.get("Self")
+if not isinstance(self_node, dict):
+    raise SystemExit(0)
+
+name = str(self_node.get("DNSName", "")).strip().rstrip(".").lower()
+if name.endswith(".ts.net"):
+    print(name)
+PY
+}
+
 detect_url() {
+  if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
+    printf "%s" "${PUBLIC_SERVER_URL%/}"
+    return
+  fi
   if [[ "${EXPOSE_NETWORK}" != "true" ]]; then
     printf "http://127.0.0.1:8000"
     return
   fi
   local url=""
   if command -v tailscale >/dev/null 2>&1; then
+    local ts_dns
+    ts_dns="$(detect_tailscale_dns_name || true)"
+    if [[ -n "${ts_dns}" ]]; then
+      url="http://${ts_dns}:8000"
+    fi
+  fi
+  if [[ -z "${url}" ]] && command -v tailscale >/dev/null 2>&1; then
     local ts_ip
     ts_ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
     if [[ -n "${ts_ip}" ]]; then
@@ -124,6 +160,7 @@ write_env_file() {
   local codex_unrestricted="false"
   local allow_abs_reads="false"
   local host_value="127.0.0.1"
+  local public_url_value="${PUBLIC_SERVER_URL%/}"
   local codex_home_value="~/.codex"
   local codex_search_value="true"
   local context_file_value="../.mobaile/AGENT_CONTEXT.md"
@@ -145,12 +182,14 @@ write_env_file() {
       -v codex="${codex_unrestricted}" \
       -v reads="${allow_abs_reads}" \
       -v host="${host_value}" \
+      -v public_url="${public_url_value}" \
       '
       BEGIN {
         seen_mode=0
         seen_codex=0
         seen_reads=0
         seen_host=0
+        seen_public_url=0
         seen_codex_home=0
         seen_codex_search=0
         seen_context_file=0
@@ -165,6 +204,13 @@ write_env_file() {
       /^VOICE_AGENT_SECURITY_MODE=/ {
         print "VOICE_AGENT_SECURITY_MODE=" mode
         seen_mode=1
+        next
+      }
+      /^VOICE_AGENT_PUBLIC_SERVER_URL=/ {
+        seen_public_url=1
+        if (public_url != "") {
+          print "VOICE_AGENT_PUBLIC_SERVER_URL=" public_url
+        }
         next
       }
       /^VOICE_AGENT_CODEX_UNRESTRICTED=/ {
@@ -210,6 +256,7 @@ write_env_file() {
       END {
         if (!seen_host) print "VOICE_AGENT_HOST=" host
         if (!seen_mode) print "VOICE_AGENT_SECURITY_MODE=" mode
+        if (!seen_public_url && public_url != "") print "VOICE_AGENT_PUBLIC_SERVER_URL=" public_url
         if (!seen_codex) print "VOICE_AGENT_CODEX_UNRESTRICTED=" codex
         if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
         if (!seen_codex_home) print "VOICE_AGENT_CODEX_HOME=" codex_home
@@ -234,6 +281,13 @@ VOICE_AGENT_API_TOKEN=${token}
 VOICE_AGENT_HOST=${host_value}
 VOICE_AGENT_PORT=8000
 VOICE_AGENT_SECURITY_MODE=${SECURITY_MODE}
+EOF
+  if [[ -n "${public_url_value}" ]]; then
+    cat >> "${ENV_FILE}" <<EOF
+VOICE_AGENT_PUBLIC_SERVER_URL=${public_url_value}
+EOF
+  fi
+  cat >> "${ENV_FILE}" <<EOF
 VOICE_AGENT_DEFAULT_EXECUTOR=codex
 VOICE_AGENT_CODEX_BINARY=codex
 VOICE_AGENT_CODEX_HOME=${codex_home_value}
@@ -279,6 +333,10 @@ main() {
         PAIR_CODE_TTL_MIN="$2"
         shift 2
         ;;
+      --public-url)
+        PUBLIC_SERVER_URL="$2"
+        shift 2
+        ;;
       --expose-network)
         EXPOSE_NETWORK="true"
         shift
@@ -292,7 +350,7 @@ main() {
         shift
         ;;
       -h|--help)
-        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
+        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--public-url <https://host[:port]>] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
         exit 0
         ;;
       *)
@@ -343,6 +401,7 @@ main() {
   cat > "${PAIRING_FILE}" <<EOF
 {
   "server_url": "${server_url}",
+  "server_urls": ["${server_url}"],
   "session_id": "iphone-app",
   "pair_code": "${pair_code}",
   "pair_code_expires_at": "${pair_code_expires_at}"
@@ -391,6 +450,9 @@ EOF
   echo
   echo "Use in iOS app onboarding:"
   echo "  server_url: ${server_url}"
+  if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
+    echo "  public_url override: ${PUBLIC_SERVER_URL%/}"
+  fi
   echo "  pair_code: ${pair_code} (expires ${pair_code_expires_at})"
   echo "  session_id: iphone-app"
   echo "  # token is stored in backend/.env (not printed)"

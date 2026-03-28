@@ -22,7 +22,6 @@ struct ContentView: View {
     @State private var trustPairHost = false
     @State private var showAdvancedSettings = false
     @State private var settingsConnectionState: SettingsConnectionState = .idle
-    @State private var showMicrophonePrimer = false
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -130,7 +129,10 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
-                    Task { await vm.consumePendingShortcutActionIfNeeded() }
+                    Task {
+                        await vm.refreshSessionPresenceFromBackendIfPossible()
+                        await vm.consumePendingShortcutActionIfNeeded()
+                    }
                 }
             }
             .onChange(of: showConnectionSettings) {
@@ -207,15 +209,6 @@ struct ContentView: View {
                 allowsMultipleSelection: true,
                 onCompletion: handleFileImport
             )
-            .alert("Before you record", isPresented: $showMicrophonePrimer) {
-                Button("Not now", role: .cancel) {}
-                Button("Continue") {
-                    vm.markMicrophonePrimerSeen()
-                    Task { await vm.startRecording() }
-                }
-            } message: {
-                Text("MOBaiLE will ask for microphone and Speech Recognition access. It transcribes on your iPhone first, and only falls back to backend audio upload when local speech is unavailable.")
-            }
             .onChange(of: selectedPhotoItems) {
                 let items = selectedPhotoItems
                 guard !items.isEmpty else { return }
@@ -280,7 +273,7 @@ struct ContentView: View {
     private var conversationView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 10) {
+                LazyVStack(spacing: 12) {
                     if vm.conversation.isEmpty {
                         ConversationEmptyStateView(
                             isConfigured: vm.hasConfiguredConnection,
@@ -297,7 +290,7 @@ struct ContentView: View {
                                 composerFocused = true
                             }
                         )
-                        .padding(.top, 8)
+                        .padding(.top, 24)
                     }
 
                     ForEach(vm.conversation) { message in
@@ -332,7 +325,7 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal)
-            .padding(.bottom, 4)
+            .padding(.bottom, 8)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if shouldShowRuntimeInfoBar {
                     runtimeInfoBar
@@ -629,7 +622,7 @@ struct ContentView: View {
     }
 
     private var composerBar: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             if shouldShowRecordingNotice {
                 recordingStatusBanner
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -660,42 +653,9 @@ struct ContentView: View {
                 )
             }
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 if shouldShowComposerSummaryRow && !vm.isRecording {
-                    HStack(spacing: 8) {
-                        if shouldShowComposerStatusSummary {
-                            Label(composerStatusSummaryText, systemImage: composerStatusSummaryIcon)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(composerStatusSummaryTint)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(composerStatusSummaryTint.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-
-                        if !vm.draftAttachments.isEmpty {
-                            Label(attachmentSummaryText, systemImage: "paperclip.circle.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.accentColor)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.accentColor.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-
-                        Spacer(minLength: 0)
-
-                        if vm.isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-
-                        if !vm.runID.isEmpty && shouldShowComposerStatusSummary {
-                            Text("Run \(shortRunID(vm.runID))")
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    composerSummaryRow
                 }
 
                 if !vm.draftAttachments.isEmpty && !vm.isRecording {
@@ -731,18 +691,19 @@ struct ContentView: View {
                     standardComposerRow
                 }
             }
-            .padding(8)
+            .padding(10)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(.systemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.16), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
             )
+            .shadow(color: Color.black.opacity(0.05), radius: 14, y: 4)
         }
         .padding(.horizontal)
-        .padding(.bottom, 5)
+        .padding(.bottom, 6)
         .animation(.easeInOut(duration: 0.18), value: vm.isRecording)
         .animation(.easeInOut(duration: 0.18), value: shouldShowRecordingNotice)
         .simultaneousGesture(
@@ -756,40 +717,53 @@ struct ContentView: View {
         )
     }
 
-    private var standardComposerRow: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            Button {
-                composerFocused = false
-                showAttachmentOptions = true
-            } label: {
-                Image(systemName: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 42, height: 42)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(vm.draftAttachments.isEmpty ? .secondary : Color.accentColor)
-            .background(
-                Circle()
-                    .fill(Color(.systemBackground))
-            )
-            .accessibilityLabel("Add attachment")
-            .disabled(!vm.hasConfiguredConnection || vm.isLoading)
+    private var composerSummaryRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if shouldShowComposerStatusSummary {
+                    ComposerMetaPill(
+                        text: composerStatusSummaryText,
+                        systemImage: composerStatusSummaryIcon,
+                        tint: composerStatusSummaryTint
+                    )
+                }
 
+                if !vm.draftAttachments.isEmpty {
+                    ComposerMetaPill(
+                        text: attachmentSummaryText,
+                        systemImage: "paperclip.circle.fill",
+                        tint: .accentColor
+                    )
+                }
+
+                if !vm.runID.isEmpty && shouldShowComposerStatusSummary {
+                    Text("Run \(shortRunID(vm.runID))")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 2)
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+    }
+
+    private var standardComposerRow: some View {
+        VStack(spacing: 10) {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $vm.promptText)
                     .focused($composerFocused)
                     .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
                     .frame(height: composerHeight)
-                    .background(Color(.systemBackground))
+                    .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .stroke(
                                 composerFocused
-                                    ? Color.accentColor.opacity(0.28)
-                                    : Color(.separator).opacity(0.10),
+                                    ? Color.accentColor.opacity(0.30)
+                                    : Color(.separator).opacity(0.12),
                                 lineWidth: 1
                             )
                     )
@@ -805,70 +779,87 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 0.16), value: composerHeight)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 10) {
+                Button {
+                    composerFocused = false
+                    showAttachmentOptions = true
+                } label: {
+                    ComposerActionButtonLabel(
+                        systemImage: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill",
+                        tint: vm.draftAttachments.isEmpty ? .secondary : .accentColor,
+                        fill: vm.draftAttachments.isEmpty ? Color(.secondarySystemBackground) : Color.accentColor.opacity(0.14),
+                        size: 40,
+                        iconSize: 15,
+                        weight: .semibold
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add attachment")
+                .disabled(!vm.hasConfiguredConnection || vm.isLoading)
+                .opacity((!vm.hasConfiguredConnection || vm.isLoading) ? 0.45 : 1)
+
+                Spacer(minLength: 0)
+
                 Button {
                     composerFocused = false
                     handleRecordingButtonTap()
                 } label: {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 44, height: 44)
+                    ComposerPillButtonLabel(
+                        systemImage: "mic.fill",
+                        text: vm.hasDraftContent ? "Add Voice" : "Record",
+                        tint: .blue,
+                        fill: Color.blue.opacity(0.12),
+                        minWidth: vm.hasDraftContent ? 116 : 102
+                    )
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.blue)
-                .background(
-                    Circle()
-                        .fill(Color(.systemBackground))
-                )
-                .contentShape(Circle())
                 .accessibilityLabel("Start recording")
                 .disabled(vm.isLoading || !vm.hasConfiguredConnection)
+                .opacity((vm.isLoading || !vm.hasConfiguredConnection) ? 0.45 : 1)
 
                 if vm.canCancelActiveOperation {
                     Button {
                         composerFocused = false
                         vm.cancelActiveOperation()
                     } label: {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 44, height: 44)
+                        ComposerActionButtonLabel(
+                            systemImage: "stop.fill",
+                            tint: .white,
+                            fill: .red,
+                            size: 46,
+                            iconSize: 13,
+                            weight: .semibold
+                        )
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                    .background(
-                        Circle()
-                            .fill(Color.red)
-                    )
-                    .contentShape(Circle())
                     .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
                 } else {
                     Button {
                         handleComposerSend()
                     } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 14, weight: .bold))
-                            .frame(width: 44, height: 44)
+                        ComposerActionButtonLabel(
+                            systemImage: "arrow.up",
+                            tint: .white,
+                            fill: .accentColor,
+                            size: 46,
+                            iconSize: 14,
+                            weight: .bold
+                        )
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                    .background(
-                        Circle()
-                            .fill(Color.accentColor)
-                    )
-                    .contentShape(Circle())
                     .accessibilityLabel("Send prompt")
                     .disabled(
                         !vm.hasConfiguredConnection ||
                         !vm.hasDraftContent
                     )
+                    .opacity((!vm.hasConfiguredConnection || !vm.hasDraftContent) ? 0.45 : 1)
                 }
             }
-            .opacity(vm.hasConfiguredConnection ? 1 : 0.6)
         }
     }
 
     private var recordingComposerRow: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Circle()
@@ -902,30 +893,62 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
+                if let typedNoteSummary = recordingTypedNoteSummaryText {
+                    ComposerMetaPill(
+                        text: typedNoteSummary,
+                        systemImage: "text.bubble.fill",
+                        tint: .blue
+                    )
+                }
+
+                if let preview = recordingDraftPreviewText {
+                    Text(preview)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
                 if !vm.draftAttachments.isEmpty {
-                    Label(attachmentSummaryText, systemImage: "paperclip.circle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                    ComposerMetaPill(
+                        text: attachmentSummaryText,
+                        systemImage: "paperclip.circle.fill",
+                        tint: .accentColor
+                    )
                 }
             }
 
             Spacer(minLength: 0)
 
-            Button {
-                handleRecordingButtonTap()
-            } label: {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 48, height: 48)
+            VStack(spacing: 8) {
+                Button {
+                    handleRecordingDiscardTap()
+                } label: {
+                    ComposerActionButtonLabel(
+                        systemImage: "xmark",
+                        tint: .secondary,
+                        fill: Color(.secondarySystemBackground),
+                        size: 40,
+                        iconSize: 13,
+                        weight: .semibold
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Discard recording")
+
+                Button {
+                    handleRecordingButtonTap()
+                } label: {
+                    ComposerPillButtonLabel(
+                        systemImage: "paperplane.fill",
+                        text: vm.autoSendAfterSilenceEnabled ? "Send Now" : "Send",
+                        tint: .white,
+                        fill: .blue,
+                        minWidth: 104
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop recording and send")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(
-                Circle()
-                    .fill(Color.red)
-            )
-            .contentShape(Circle())
-            .accessibilityLabel("Stop recording and send")
         }
     }
 
@@ -1028,13 +1051,32 @@ struct ContentView: View {
         return "\(vm.draftAttachments.count) attachments"
     }
 
+    private var hasRecordingDraftText: Bool {
+        !vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var recordingTypedNoteSummaryText: String? {
+        guard hasRecordingDraftText else { return nil }
+        return vm.draftAttachments.isEmpty ? "Typed note included" : "Typed note + files included"
+    }
+
+    private var recordingDraftPreviewText: String? {
+        let preview = vm.promptText
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !preview.isEmpty else { return nil }
+        return preview
+    }
+
     private var composerHeight: CGFloat {
         let trimmed = vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !composerFocused && trimmed.isEmpty {
-            return 52
+            return 50
         }
         let lineCount = max(1, vm.promptText.split(separator: "\n", omittingEmptySubsequences: false).count)
-        return min(148, max(80, CGFloat(lineCount) * 22 + 28))
+        return min(136, max(74, CGFloat(lineCount) * 22 + 24))
     }
 
     private var composerPlaceholder: String {
@@ -1045,7 +1087,7 @@ struct ContentView: View {
             return "Voice recording in progress"
         }
         if vm.draftAttachments.isEmpty {
-            return composerFocused ? "Ask about this repo or type /" : "Ask about this repo"
+            return composerFocused ? "Ask MOBaiLE about this repo or type /" : "Ask MOBaiLE about this repo"
         }
         return composerFocused ? "Add context for these files" : "Add context"
     }
@@ -1078,8 +1120,87 @@ struct ContentView: View {
         compactPathLabel(runtimeDirectoryLabel)
     }
 
+    private var runtimeStatusText: String {
+        let lower = bottomRunStatusText.lowercased()
+
+        if vm.isRecording {
+            return "Recording"
+        }
+        if vm.isUploadingAttachments {
+            return "Uploading"
+        }
+        if lower.contains("input") || lower.contains("blocked") {
+            return "Needs input"
+        }
+        if lower.contains("fail") || lower.contains("timed out") {
+            return "Needs attention"
+        }
+        if lower.contains("cancel") {
+            return "Cancelled"
+        }
+        if vm.isLoading || lower.contains("think") || lower.contains("plan") || lower.contains("execut") || lower.contains("summar") {
+            return "Thinking"
+        }
+        if vm.hasConfiguredConnection {
+            return "Ready"
+        }
+        return "Setup needed"
+    }
+
+    private var runtimeStatusIcon: String {
+        let lower = runtimeStatusText.lowercased()
+
+        if lower.contains("record") {
+            return "mic.fill"
+        }
+        if lower.contains("upload") || lower.contains("thinking") {
+            return "bolt.horizontal.circle.fill"
+        }
+        if lower.contains("input") {
+            return "hand.raised.fill"
+        }
+        if lower.contains("cancel") || lower.contains("attention") {
+            return "exclamationmark.circle.fill"
+        }
+        if lower.contains("ready") {
+            return "checkmark.circle.fill"
+        }
+        return "gearshape.fill"
+    }
+
+    private var runtimeStatusTint: Color {
+        let lower = runtimeStatusText.lowercased()
+
+        if lower.contains("record") {
+            return .red
+        }
+        if lower.contains("upload") || lower.contains("thinking") {
+            return .blue
+        }
+        if lower.contains("input") || lower.contains("setup") {
+            return .orange
+        }
+        if lower.contains("cancel") || lower.contains("attention") {
+            return .red
+        }
+        if lower.contains("ready") {
+            return .green
+        }
+        return .secondary
+    }
+
     private var shouldShowRuntimeInfoBar: Bool {
         vm.hasConfiguredConnection || !vm.conversation.isEmpty
+    }
+
+    private var shouldShowRuntimeStatusBadge: Bool {
+        if vm.isRecording {
+            return false
+        }
+        if vm.conversation.isEmpty && runtimeStatusText == "Ready" {
+            return false
+        }
+        return true
     }
 
     private var canUseBrowsedDirectory: Bool {
@@ -1100,7 +1221,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(.systemBackground).opacity(0.96))
+        .background(.thinMaterial)
         .overlay(
             Rectangle()
                 .fill(Color(.separator).opacity(0.35))
@@ -1111,6 +1232,13 @@ struct ContentView: View {
 
     private var setupRuntimeInfoBar: some View {
         HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 34, height: 34)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Finish setup to start a run")
                     .font(.subheadline.weight(.semibold))
@@ -1127,28 +1255,32 @@ struct ContentView: View {
     }
 
     private var compactRuntimeInfoBar: some View {
-        HStack(spacing: 12) {
-            Label {
-                Text(runtimeDirectorySummary)
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } icon: {
-                Image(systemName: "folder.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-            .accessibilityLabel("Current workspace \(runtimeDirectoryLabel)")
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                if shouldShowRuntimeStatusBadge {
+                    RuntimeStatusBadge(
+                        text: runtimeStatusText,
+                        systemImage: runtimeStatusIcon,
+                        tint: runtimeStatusTint
+                    )
+                }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-            if vm.isLoading || vm.isUploadingAttachments {
-                ProgressView()
-                    .controlSize(.small)
+                runtimeWorkspaceButton
             }
 
-            runtimeWorkspaceButton
+            VStack(alignment: .leading, spacing: 8) {
+                if shouldShowRuntimeStatusBadge {
+                    RuntimeStatusBadge(
+                        text: runtimeStatusText,
+                        systemImage: runtimeStatusIcon,
+                        tint: runtimeStatusTint
+                    )
+                }
+
+                runtimeWorkspaceButton
+            }
         }
     }
 
@@ -1159,10 +1291,26 @@ struct ContentView: View {
                     showWorkspaceBrowser = true
                     Task { await vm.refreshDirectoryBrowser() }
                 } label: {
-                    Text("Browse")
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                        Text(runtimeDirectorySummary)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(Capsule())
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Browse workspace")
+                .buttonStyle(.plain)
+                .accessibilityLabel("Browse workspace \(runtimeDirectoryLabel)")
             } else {
                 Button {
                     showConnectionSettings = true
@@ -1525,10 +1673,13 @@ struct ContentView: View {
         }
         guard vm.hasConfiguredConnection, !vm.isLoading else { return }
         if vm.shouldPresentMicrophonePrimer {
-            showMicrophonePrimer = true
-            return
+            vm.markMicrophonePrimerSeen()
         }
         Task { await vm.startRecording() }
+    }
+
+    private func handleRecordingDiscardTap() {
+        Task { await vm.discardRecording() }
     }
 
     private func handleComposerSend() {
@@ -1678,6 +1829,82 @@ private struct ComposerSlashCommandMenu: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
         )
+    }
+}
+
+private struct ComposerMetaPill: View {
+    let text: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.12))
+            .clipShape(Capsule())
+    }
+}
+
+private struct ComposerActionButtonLabel: View {
+    let systemImage: String
+    let tint: Color
+    let fill: Color
+    let size: CGFloat
+    let iconSize: CGFloat
+    let weight: Font.Weight
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: iconSize, weight: weight))
+            .frame(width: size, height: size)
+            .foregroundStyle(tint)
+            .background(
+                Circle()
+                    .fill(fill)
+            )
+    }
+}
+
+private struct ComposerPillButtonLabel: View {
+    let systemImage: String
+    let text: String
+    let tint: Color
+    let fill: Color
+    let minWidth: CGFloat
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 14)
+            .frame(minWidth: minWidth, minHeight: 40)
+            .background(
+                Capsule()
+                    .fill(fill)
+            )
+    }
+}
+
+private struct RuntimeStatusBadge: View {
+    let text: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+            Text(text)
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(tint.opacity(0.12))
+        .clipShape(Capsule())
     }
 }
 

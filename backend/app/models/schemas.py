@@ -203,6 +203,8 @@ class PairExchangeResponse(BaseModel):
     api_token: str
     session_id: str
     security_mode: Literal["safe", "full-access"]
+    server_url: str | None = None
+    server_urls: list[str] = Field(default_factory=list)
 
 
 class RuntimeExecutorDescriptor(BaseModel):
@@ -227,6 +229,8 @@ class RuntimeConfigResponse(BaseModel):
     workdir_root: str | None = None
     allow_absolute_file_reads: bool
     file_roots: list[str] = Field(default_factory=list)
+    server_url: str | None = None
+    server_urls: list[str] = Field(default_factory=list)
 
 
 class SessionContextResponse(BaseModel):
@@ -234,6 +238,11 @@ class SessionContextResponse(BaseModel):
     executor: RunExecutorName
     working_directory: str | None = None
     resolved_working_directory: str
+    latest_run_id: str | None = None
+    latest_run_status: Literal["running", "completed", "failed", "rejected", "blocked", "cancelled"] | None = None
+    latest_run_summary: str | None = None
+    latest_run_updated_at: str | None = None
+    latest_run_pending_human_unblock: HumanUnblockRequest | None = None
     updated_at: str | None = None
 
 

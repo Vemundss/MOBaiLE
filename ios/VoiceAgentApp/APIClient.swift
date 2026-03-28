@@ -26,26 +26,30 @@ enum APIError: Error, LocalizedError {
 final class APIClient {
     private let jsonDecoder = JSONDecoder()
     private let jsonEncoder = JSONEncoder()
+    var fallbackServerURLs: [String] = []
+    var onResolvedServerURL: ((String) -> Void)?
 
     func createUtterance(
         serverURL: String,
         token: String,
         requestBody: UtteranceRequest
     ) async throws -> UtteranceResponse {
-        guard let url = URL(string: serverURL + "/v1/utterances") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/utterances") else {
+                throw APIError.invalidURL
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try jsonEncoder.encode(requestBody)
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(UtteranceResponse.self, from: data)
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 15
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try jsonEncoder.encode(requestBody)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(UtteranceResponse.self, from: data)
     }
 
     func exchangePairingCode(
@@ -53,19 +57,21 @@ final class APIClient {
         pairCode: String,
         sessionID: String?
     ) async throws -> PairExchangeResponse {
-        guard let url = URL(string: serverURL + "/v1/pair/exchange") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/pair/exchange") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try jsonEncoder.encode(
+                PairExchangeRequest(pairCode: pairCode, sessionId: sessionID)
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(PairExchangeResponse.self, from: data)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 15
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try jsonEncoder.encode(
-            PairExchangeRequest(pairCode: pairCode, sessionId: sessionID)
-        )
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(PairExchangeResponse.self, from: data)
     }
 
     func fetchRun(
@@ -73,18 +79,20 @@ final class APIClient {
         token: String,
         runID: String
     ) async throws -> RunRecord {
-        guard let url = URL(string: serverURL + "/v1/runs/\(runID)") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/runs/\(runID)") else {
+                throw APIError.invalidURL
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(RunRecord.self, from: data)
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(RunRecord.self, from: data)
     }
 
     func fetchSessionRuns(
@@ -93,19 +101,21 @@ final class APIClient {
         sessionID: String,
         limit: Int = 20
     ) async throws -> [RunSummary] {
-        guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: serverURL + "/v1/sessions/\(encoded)/runs?limit=\(limit)") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let url = URL(string: baseURL + "/v1/sessions/\(encoded)/runs?limit=\(limit)") else {
+                throw APIError.invalidURL
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode([RunSummary].self, from: data)
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode([RunSummary].self, from: data)
     }
 
     func fetchRunDiagnostics(
@@ -113,49 +123,55 @@ final class APIClient {
         token: String,
         runID: String
     ) async throws -> RunDiagnostics {
-        guard let url = URL(string: serverURL + "/v1/runs/\(runID)/diagnostics") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/runs/\(runID)/diagnostics") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(RunDiagnostics.self, from: data)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(RunDiagnostics.self, from: data)
     }
 
     func fetchRuntimeConfig(
         serverURL: String,
         token: String
     ) async throws -> RuntimeConfig {
-        guard let url = URL(string: serverURL + "/v1/config") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/config") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(RuntimeConfig.self, from: data)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(RuntimeConfig.self, from: data)
     }
 
     func fetchSlashCommands(
         serverURL: String,
         token: String
     ) async throws -> [SlashCommandDescriptor] {
-        guard let url = URL(string: serverURL + "/v1/slash-commands") else {
-            throw APIError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            try validate(response: response, data: data)
-            return try jsonDecoder.decode([SlashCommandDescriptor].self, from: data)
+            return try await withCandidateServerURL(serverURL) { baseURL in
+                guard let url = URL(string: baseURL + "/v1/slash-commands") else {
+                    throw APIError.invalidURL
+                }
+                var request = URLRequest(url: url)
+                request.httpMethod = "GET"
+                request.timeoutInterval = 10
+                request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                try validate(response: response, data: data)
+                return try jsonDecoder.decode([SlashCommandDescriptor].self, from: data)
+            }
         } catch let APIError.httpError(code, _) where code == 404 {
             return []
         }
@@ -166,17 +182,19 @@ final class APIClient {
         token: String,
         sessionID: String
     ) async throws -> SessionContext {
-        guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: serverURL + "/v1/sessions/\(encoded)/context") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let url = URL(string: baseURL + "/v1/sessions/\(encoded)/context") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(SessionContext.self, from: data)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(SessionContext.self, from: data)
     }
 
     func updateSessionContext(
@@ -185,19 +203,21 @@ final class APIClient {
         sessionID: String,
         requestBody: SessionContextUpdateRequest
     ) async throws -> SessionContext {
-        guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: serverURL + "/v1/sessions/\(encoded)/context") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let url = URL(string: baseURL + "/v1/sessions/\(encoded)/context") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "PATCH"
+            request.timeoutInterval = 15
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try jsonEncoder.encode(requestBody)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(SessionContext.self, from: data)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "PATCH"
-        request.timeoutInterval = 15
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try jsonEncoder.encode(requestBody)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(SessionContext.self, from: data)
     }
 
     func executeSlashCommand(
@@ -207,22 +227,24 @@ final class APIClient {
         commandID: String,
         arguments: String?
     ) async throws -> SlashCommandExecutionResponse {
-        guard let encodedSession = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let encodedCommand = commandID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-              let url = URL(string: serverURL + "/v1/sessions/\(encodedSession)/slash-commands/\(encodedCommand)") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let encodedSession = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let encodedCommand = commandID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                  let url = URL(string: baseURL + "/v1/sessions/\(encodedSession)/slash-commands/\(encodedCommand)") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try jsonEncoder.encode(
+                SlashCommandExecutionRequest(arguments: arguments)
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(SlashCommandExecutionResponse.self, from: data)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 15
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try jsonEncoder.encode(
-            SlashCommandExecutionRequest(arguments: arguments)
-        )
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(SlashCommandExecutionResponse.self, from: data)
     }
 
     func fetchDirectoryListing(
@@ -230,25 +252,27 @@ final class APIClient {
         token: String,
         path: String?
     ) async throws -> DirectoryListingResponse {
-        guard var components = URLComponents(string: serverURL + "/v1/directories") else {
-            throw APIError.invalidURL
-        }
-        let trimmedPath = (path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedPath.isEmpty {
-            components.queryItems = [URLQueryItem(name: "path", value: trimmedPath)]
-        }
-        guard let url = components.url else {
-            throw APIError.invalidURL
-        }
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard var components = URLComponents(string: baseURL + "/v1/directories") else {
+                throw APIError.invalidURL
+            }
+            let trimmedPath = (path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedPath.isEmpty {
+                components.queryItems = [URLQueryItem(name: "path", value: trimmedPath)]
+            }
+            guard let url = components.url else {
+                throw APIError.invalidURL
+            }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(DirectoryListingResponse.self, from: data)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(DirectoryListingResponse.self, from: data)
+        }
     }
 
     func createDirectory(
@@ -256,18 +280,20 @@ final class APIClient {
         token: String,
         path: String
     ) async throws -> DirectoryCreateResponse {
-        guard let url = URL(string: serverURL + "/v1/directories") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/directories") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try jsonEncoder.encode(DirectoryCreateRequest(path: path))
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(DirectoryCreateResponse.self, from: data)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 15
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try jsonEncoder.encode(DirectoryCreateRequest(path: path))
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(DirectoryCreateResponse.self, from: data)
     }
 
     func createAudioRun(
@@ -279,49 +305,62 @@ final class APIClient {
         workingDirectory: String?,
         responseMode: String?,
         responseProfile: String?,
+        draftText: String,
+        attachments: [ChatArtifact],
         audioFileURL: URL
     ) async throws -> AudioRunResponse {
-        guard let url = URL(string: serverURL + "/v1/audio") else {
-            throw APIError.invalidURL
-        }
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/audio") else {
+                throw APIError.invalidURL
+            }
 
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            let boundary = "Boundary-\(UUID().uuidString)"
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 30
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-        let audioData = try Data(contentsOf: audioFileURL)
-        var fields: [String: String] = [
-            "session_id": sessionID,
-            "response_mode": responseMode ?? "",
-            "response_profile": responseProfile ?? ""
-        ]
-        let trimmedExecutor = (executor ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedExecutor.isEmpty {
-            fields["executor"] = trimmedExecutor
-        }
-        let trimmedWorkingDirectory = (workingDirectory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedWorkingDirectory.isEmpty {
-            fields["working_directory"] = trimmedWorkingDirectory
-        }
-        let trimmedThreadID = (threadID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedThreadID.isEmpty {
-            fields["thread_id"] = trimmedThreadID
-        }
-        request.httpBody = buildMultipartBody(
-            boundary: boundary,
-            fields: fields,
-            fileData: audioData,
-            fileFieldName: "audio",
-            fileName: audioFileURL.lastPathComponent,
-            mimeType: "audio/m4a"
-        )
+            let audioData = try Data(contentsOf: audioFileURL)
+            var fields: [String: String] = [
+                "session_id": sessionID,
+                "response_mode": responseMode ?? "",
+                "response_profile": responseProfile ?? ""
+            ]
+            let trimmedExecutor = (executor ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedExecutor.isEmpty {
+                fields["executor"] = trimmedExecutor
+            }
+            let trimmedWorkingDirectory = (workingDirectory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedWorkingDirectory.isEmpty {
+                fields["working_directory"] = trimmedWorkingDirectory
+            }
+            let trimmedThreadID = (threadID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedThreadID.isEmpty {
+                fields["thread_id"] = trimmedThreadID
+            }
+            let trimmedDraftText = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedDraftText.isEmpty {
+                fields["draft_text"] = trimmedDraftText
+            }
+            if !attachments.isEmpty {
+                let encodedAttachments = try jsonEncoder.encode(attachments)
+                let attachmentsJSON = String(decoding: encodedAttachments, as: UTF8.self)
+                fields["attachments_json"] = attachmentsJSON
+            }
+            request.httpBody = buildMultipartBody(
+                boundary: boundary,
+                fields: fields,
+                fileData: audioData,
+                fileFieldName: "audio",
+                fileName: audioFileURL.lastPathComponent,
+                mimeType: "audio/m4a"
+            )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(AudioRunResponse.self, from: data)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(AudioRunResponse.self, from: data)
+        }
     }
 
     func uploadAttachment(
@@ -333,38 +372,40 @@ final class APIClient {
         onProgress: ((Double) -> Void)? = nil,
         registerCancellation: ((@escaping () -> Void) -> Void)? = nil
     ) async throws -> UploadResponse {
-        guard let url = URL(string: serverURL + "/v1/uploads") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/uploads") else {
+                throw APIError.invalidURL
+            }
+
+            let boundary = "Boundary-\(UUID().uuidString)"
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 60
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+            let fileData = try Data(contentsOf: fileURL)
+            let bodyData = buildMultipartBody(
+                boundary: boundary,
+                fields: ["session_id": sessionID],
+                fileData: fileData,
+                fileFieldName: "file",
+                fileName: fileURL.lastPathComponent,
+                mimeType: inferAttachmentMimeType(fileName: fileURL.lastPathComponent, fallback: mimeType)
+            )
+            let delegate = UploadTaskDelegate(progressHandler: onProgress)
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            defer { session.finishTasksAndInvalidate() }
+
+            let (data, response) = try await delegate.upload(
+                session: session,
+                request: request,
+                bodyData: bodyData,
+                registerCancellation: registerCancellation
+            )
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(UploadResponse.self, from: data)
         }
-
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 60
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-
-        let fileData = try Data(contentsOf: fileURL)
-        let bodyData = buildMultipartBody(
-            boundary: boundary,
-            fields: ["session_id": sessionID],
-            fileData: fileData,
-            fileFieldName: "file",
-            fileName: fileURL.lastPathComponent,
-            mimeType: inferAttachmentMimeType(fileName: fileURL.lastPathComponent, fallback: mimeType)
-        )
-        let delegate = UploadTaskDelegate(progressHandler: onProgress)
-        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        defer { session.finishTasksAndInvalidate() }
-
-        let (data, response) = try await delegate.upload(
-            session: session,
-            request: request,
-            bodyData: bodyData,
-            registerCancellation: registerCancellation
-        )
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(UploadResponse.self, from: data)
     }
 
     func streamRunEvents(
@@ -376,24 +417,25 @@ final class APIClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    guard var components = URLComponents(string: serverURL + "/v1/runs/\(runID)/events") else {
-                        throw APIError.invalidURL
-                    }
-                    if let afterSeq, afterSeq >= 0 {
-                        components.queryItems = [
-                            URLQueryItem(name: "after_seq", value: String(afterSeq))
-                        ]
-                    }
-                    guard let url = components.url else {
-                        throw APIError.invalidURL
-                    }
+                    let (bytes, response) = try await withCandidateServerURL(serverURL) { baseURL in
+                        guard var components = URLComponents(string: baseURL + "/v1/runs/\(runID)/events") else {
+                            throw APIError.invalidURL
+                        }
+                        if let afterSeq, afterSeq >= 0 {
+                            components.queryItems = [
+                                URLQueryItem(name: "after_seq", value: String(afterSeq))
+                            ]
+                        }
+                        guard let url = components.url else {
+                            throw APIError.invalidURL
+                        }
 
-                    var request = URLRequest(url: url)
-                    request.httpMethod = "GET"
-                    request.timeoutInterval = 60
-                    request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                        var request = URLRequest(url: url)
+                        request.httpMethod = "GET"
+                        request.timeoutInterval = 60
+                        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                        return try await URLSession.shared.bytes(for: request)
+                    }
                     guard let http = response as? HTTPURLResponse else {
                         throw APIError.invalidResponse
                     }
@@ -451,18 +493,20 @@ final class APIClient {
         token: String,
         runID: String
     ) async throws -> CancelRunResponse {
-        guard let url = URL(string: serverURL + "/v1/runs/\(runID)/cancel") else {
-            throw APIError.invalidURL
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/runs/\(runID)/cancel") else {
+                throw APIError.invalidURL
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(CancelRunResponse.self, from: data)
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 10
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try jsonDecoder.decode(CancelRunResponse.self, from: data)
     }
 
     func downloadArtifactToTemporaryFile(
@@ -470,16 +514,18 @@ final class APIClient {
         token: String,
         artifact: ChatArtifact
     ) async throws -> URL {
-        guard let requestURL = resolveArtifactURL(serverURL: serverURL, artifact: artifact) else {
-            throw APIError.invalidURL
+        let (requestURL, data) = try await withCandidateServerURL(serverURL) { baseURL in
+            guard let requestURL = resolveArtifactURL(serverURL: baseURL, artifact: artifact) else {
+                throw APIError.invalidURL
+            }
+            let data = try await fetchURLData(
+                serverURL: baseURL,
+                token: token,
+                url: requestURL,
+                timeout: 30
+            )
+            return (requestURL, data)
         }
-        let data = try await fetchURLData(
-            serverURL: serverURL,
-            token: token,
-            url: requestURL,
-            timeout: 30
-        )
-
         let ext = preferredExtension(from: artifact, url: requestURL)
         let baseName = suggestedBaseName(from: artifact, url: requestURL)
         let filename = "\(baseName)-\(UUID().uuidString)\(ext)"
@@ -503,6 +549,31 @@ final class APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return data
+    }
+
+    private func withCandidateServerURL<T>(
+        _ serverURL: String,
+        operation: (String) async throws -> T
+    ) async throws -> T {
+        let candidates = candidateServerURLs(for: serverURL)
+        var lastError: Error?
+
+        for (index, candidate) in candidates.enumerated() {
+            do {
+                let value = try await operation(candidate)
+                if normalizedBaseURL(candidate) != normalizedBaseURL(serverURL) {
+                    onResolvedServerURL?(candidate)
+                }
+                return value
+            } catch {
+                lastError = error
+                if index == candidates.count - 1 || !shouldRetryAcrossCandidates(error) {
+                    throw error
+                }
+            }
+        }
+
+        throw lastError ?? APIError.invalidResponse
     }
 
     private func buildMultipartBody(
@@ -543,10 +614,13 @@ final class APIClient {
 
     private func resolveArtifactURL(serverURL: String, artifact: ChatArtifact) -> URL? {
         if let raw = artifact.url?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            if let rewritten = rewriteProtectedBackendURL(raw, serverURL: serverURL) {
+                return rewritten
+            }
             return URL(string: raw)
         }
         if let path = artifact.path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
-            let normalizedServer = serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let normalizedServer = normalizedBaseURL(serverURL)
             guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
                 return nil
             }
@@ -555,14 +629,78 @@ final class APIClient {
         return nil
     }
 
+    private func rewriteProtectedBackendURL(_ rawURL: String, serverURL: String) -> URL? {
+        guard let original = URL(string: rawURL),
+              original.path.hasPrefix("/v1/"),
+              let backend = URL(string: normalizedBaseURL(serverURL)) else {
+            return nil
+        }
+        let originalComponents = URLComponents(url: original, resolvingAgainstBaseURL: false)
+        var components = URLComponents()
+        components.scheme = backend.scheme
+        components.host = backend.host
+        components.port = backend.port
+        components.path = original.path
+        components.percentEncodedQuery = originalComponents?.percentEncodedQuery
+        components.fragment = original.fragment
+        return components.url
+    }
+
     private func shouldAttachAuth(to url: URL, serverURL: String) -> Bool {
-        guard let backend = URL(string: serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else {
+        guard let backend = URL(string: normalizedBaseURL(serverURL)) else {
             return false
         }
         return url.host == backend.host &&
             (url.port ?? defaultPort(for: url.scheme)) == (backend.port ?? defaultPort(for: backend.scheme)) &&
             url.scheme == backend.scheme &&
             url.path.hasPrefix("/v1/")
+    }
+
+    private func candidateServerURLs(for serverURL: String) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+
+        for raw in [serverURL] + fallbackServerURLs {
+            let normalized = normalizedBaseURL(raw)
+            guard !normalized.isEmpty, !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            ordered.append(normalized)
+        }
+
+        return ordered
+    }
+
+    private func normalizedBaseURL(_ rawURL: String) -> String {
+        rawURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func shouldRetryAcrossCandidates(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return false
+        }
+        if let apiError = error as? APIError {
+            switch apiError {
+            case .invalidURL, .missingCredentials:
+                return false
+            case .invalidResponse:
+                return true
+            case let .httpError(code, _):
+                return code == 404 || (500...599).contains(code)
+            }
+        }
+        if error is DecodingError {
+            return true
+        }
+        if let urlError = error as? URLError {
+            if urlError.code == .cancelled {
+                return false
+            }
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain
     }
 
     private func defaultPort(for scheme: String?) -> Int {

@@ -34,6 +34,7 @@ from app.models.schemas import (
     DirectoryEntry,
     DirectoryListingResponse,
     ExecutionEvent,
+    HumanUnblockRequest,
     PairExchangeRequest,
     PairExchangeResponse,
     RunDiagnostics,
@@ -51,6 +52,7 @@ from app.models.schemas import (
     UtteranceResponse,
 )
 from app.orchestrator.planner import plan_from_utterance
+from app.pairing_url import refresh_pairing_server_url
 from app.policy.validator import validate_plan
 from app.profile_store import ProfileStore
 from app.run_state import RunState
@@ -66,6 +68,12 @@ load_env_defaults(BACKEND_ROOT / ".env")
 
 app = FastAPI(title="Voice Agent Backend", version="0.1.0")
 ENV = RuntimeEnvironment.from_env(BACKEND_ROOT)
+refresh_pairing_server_url(
+    ENV.pairing_file,
+    bind_host=ENV.host,
+    bind_port=ENV.port,
+    public_server_url=ENV.public_server_url,
+)
 TRANSCRIBER = Transcriber()
 RUN_STORE = RunStore(ENV.db_path)
 RUN_STATE = RunState(RUN_STORE, max_event_message_chars=ENV.max_event_message_chars)
@@ -138,10 +146,13 @@ def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchang
         _rotate_pair_code(pairing)
         session_id = payload.session_id or str(pairing.get("session_id", "iphone-app")).strip() or "iphone-app"
         api_token = _issue_paired_client_token(pairing, session_id=session_id)
+        server_urls = _pairing_server_urls(pairing)
         return PairExchangeResponse(
             api_token=api_token,
             session_id=session_id,
             security_mode=ENV.security_mode,  # type: ignore[arg-type]
+            server_url=server_urls[0] if server_urls else str(pairing.get("server_url", "")).strip() or None,
+            server_urls=server_urls,
         )
 
 
@@ -269,11 +280,14 @@ async def create_audio_run(
     executor: RunExecutorName | None = Form(None),
     mode: Literal["assistant", "execute"] = Form("execute"),
     transcript_hint: str | None = Form(None),
+    draft_text: str | None = Form(None),
+    attachments_json: str | None = Form(None),
     working_directory: str | None = Form(None),
     response_mode: Literal["concise", "verbose"] = Form("concise"),
     response_profile: Literal["guided", "minimal"] = Form("guided"),
 ) -> AudioRunResponse:
     normalized_thread_id = (thread_id or "").strip() or None
+    attachments = _parse_audio_attachments(attachments_json)
     content_length_header = audio.headers.get("content-length")
     if content_length_header:
         try:
@@ -299,11 +313,13 @@ async def create_audio_run(
     except TranscriptionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     try:
+        utterance_text = _merge_voice_utterance(draft_text, transcript_text)
         result = create_utterance(
             UtteranceRequest(
                 session_id=session_id,
                 thread_id=normalized_thread_id,
-                utterance_text=transcript_text,
+                utterance_text=utterance_text,
+                attachments=attachments,
                 executor=executor,
                 mode=mode,
                 working_directory=working_directory,
@@ -373,9 +389,13 @@ def get_run(run_id: str) -> RunRecord:
 
 @app.get("/v1/config", response_model=RuntimeConfigResponse)
 def get_runtime_config() -> RuntimeConfigResponse:
+    pairing = _read_pairing_file()
+    server_urls = _pairing_server_urls(pairing)
     return ENV.runtime_config_response(
         transcribe_provider=TRANSCRIBER.provider,
         transcribe_ready=ENV.transcriber_ready(TRANSCRIBER.provider),
+        server_url=server_urls[0] if server_urls else None,
+        server_urls=server_urls,
     )
 
 
@@ -601,6 +621,14 @@ def _session_context_response(session_id: str) -> SessionContextResponse:
     row = RUN_STORE.get_session_context(session_id)
     raw_executor = str(row["executor"]).strip() if row is not None and row["executor"] else ""
     raw_working_directory = str(row["working_directory"]).strip() if row is not None and row["working_directory"] else ""
+    latest_run_pending_human_unblock: HumanUnblockRequest | None = None
+    if row is not None and row["latest_run_pending_human_unblock_json"]:
+        try:
+            latest_run_pending_human_unblock = HumanUnblockRequest.model_validate_json(
+                row["latest_run_pending_human_unblock_json"]
+            )
+        except Exception:
+            latest_run_pending_human_unblock = None
 
     effective_executor = raw_executor if raw_executor in {"local", "codex", "claude"} else ENV.default_executor
     effective_working_directory = raw_working_directory or None
@@ -615,6 +643,11 @@ def _session_context_response(session_id: str) -> SessionContextResponse:
         executor=effective_executor,  # type: ignore[arg-type]
         working_directory=effective_working_directory,
         resolved_working_directory=resolved_working_directory,
+        latest_run_id=str(row["latest_run_id"]).strip() if row is not None and row["latest_run_id"] else None,
+        latest_run_status=str(row["latest_run_status"]).strip() if row is not None and row["latest_run_status"] else None,
+        latest_run_summary=str(row["latest_run_summary"]).strip() if row is not None and row["latest_run_summary"] else None,
+        latest_run_updated_at=str(row["latest_run_updated_at"]).strip() if row is not None and row["latest_run_updated_at"] else None,
+        latest_run_pending_human_unblock=latest_run_pending_human_unblock,
         updated_at=str(row["updated_at"]).strip() if row is not None and row["updated_at"] else None,
     )
 
@@ -867,6 +900,30 @@ def _render_utterance_for_executor(raw_text: str, attachments: list[ChatArtifact
     return "\n\n".join(section for section in sections if section.strip())
 
 
+def _merge_voice_utterance(draft_text: str | None, transcript_text: str) -> str:
+    parts = [
+        (draft_text or "").strip(),
+        transcript_text.strip(),
+    ]
+    return "\n\n".join(part for part in parts if part)
+
+
+def _parse_audio_attachments(raw_attachments: str | None) -> list[ChatArtifact]:
+    payload = (raw_attachments or "").strip()
+    if not payload:
+        return []
+    try:
+        decoded = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="attachments_json must be valid JSON") from exc
+    if not isinstance(decoded, list):
+        raise HTTPException(status_code=400, detail="attachments_json must be a JSON array")
+    try:
+        return [ChatArtifact.model_validate(item) for item in decoded]
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="attachments_json contains an invalid attachment") from exc
+
+
 def _default_attachment_prompt(count: int) -> str:
     if count == 1:
         return "Please inspect the attached file and summarize the important details."
@@ -936,6 +993,26 @@ def _read_pairing_file() -> dict[str, object]:
         return json.loads(ENV.pairing_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
+
+
+def _pairing_server_urls(payload: dict[str, object]) -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
+
+    for raw in payload.get("server_urls", []) if isinstance(payload.get("server_urls"), list) else []:
+        if not isinstance(raw, str):
+            continue
+        candidate = raw.strip().rstrip("/")
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        urls.append(candidate)
+
+    primary = str(payload.get("server_url", "")).strip().rstrip("/")
+    if primary and primary not in seen:
+        urls.insert(0, primary)
+
+    return urls
 
 
 def _write_pairing_file(payload: dict[str, object]) -> None:

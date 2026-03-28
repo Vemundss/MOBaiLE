@@ -330,6 +330,8 @@ def test_session_context_updates_and_runs_inherit_defaults(monkeypatch, tmp_path
     assert initial.json()["executor"] == "local"
     assert initial.json()["working_directory"] is None
     assert initial.json()["resolved_working_directory"] == str(workspace)
+    assert initial.json()["latest_run_id"] is None
+    assert initial.json()["latest_run_status"] is None
 
     project_dir = workspace / "project"
     update = client.patch(
@@ -366,6 +368,17 @@ def test_session_context_updates_and_runs_inherit_defaults(monkeypatch, tmp_path
     run_payload = run.json()
     assert run_payload["executor"] == "local"
     assert run_payload["working_directory"] == str(project_dir)
+
+    refreshed = client.get(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert refreshed.status_code == 200
+    refreshed_payload = refreshed.json()
+    assert refreshed_payload["latest_run_id"] == run_id
+    assert refreshed_payload["latest_run_status"] == "running"
+    assert refreshed_payload["latest_run_summary"] == "Run started"
+    assert refreshed_payload["latest_run_pending_human_unblock"] is None
 
 
 def test_session_context_rejects_unavailable_executor(monkeypatch, tmp_path: Path):
@@ -590,6 +603,35 @@ def test_audio_mock_flow(monkeypatch, tmp_path: Path):
     payload = resp.json()
     assert payload["transcript_text"] == "create a hello python script and run it"
     assert payload["status"] == "accepted"
+
+
+def test_audio_mock_flow_preserves_draft_context_and_attachments(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path, provider="mock")
+    attachment = {
+        "type": "file",
+        "title": "notes.txt",
+        "path": str(tmp_path / "notes.txt"),
+        "mime": "text/plain",
+    }
+    resp = client.post(
+        "/v1/audio",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
+        data={
+            "session_id": "audio-context",
+            "executor": "local",
+            "draft_text": "Run the smoke test again.",
+            "transcript_hint": "Compare it with the last pass too.",
+            "attachments_json": json.dumps([attachment]),
+        },
+    )
+    assert resp.status_code == 200
+
+    run_id = resp.json()["run_id"]
+    run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+    assert run_resp.status_code == 200
+    payload = run_resp.json()
+    assert payload["utterance_text"] == "Run the smoke test again.\n\nCompare it with the last pass too."
 
 
 def test_audio_openai_missing_key(monkeypatch, tmp_path: Path):
@@ -947,6 +989,22 @@ def test_workdir_restricted_in_safe_mode(monkeypatch, tmp_path: Path):
 
 
 def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
+    pairing_file = tmp_path / "pairing.json"
+    pairing_file.write_text(
+        json.dumps(
+            {
+                "server_url": "https://relay.example.com",
+                "server_urls": [
+                    "https://relay.example.com",
+                    "http://100.111.99.51:8000",
+                ],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
     fake_codex = tmp_path / "codex"
     fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     fake_codex.chmod(0o755)
@@ -963,6 +1021,7 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
             "VOICE_AGENT_CODEX_MODEL": "gpt-5.1",
             "VOICE_AGENT_CLAUDE_MODEL": "claude-sonnet-4-5",
             "VOICE_AGENT_DEFAULT_EXECUTOR": "claude",
+            "VOICE_AGENT_PAIRING_FILE": str(pairing_file),
         },
     )
     resp = client.get(
@@ -984,6 +1043,9 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
     assert executors["local"]["internal_only"] is True
     assert payload["transcribe_provider"] == "mock"
     assert payload["transcribe_ready"] is True
+    assert payload["server_url"] == "https://relay.example.com"
+    assert payload["server_urls"][0] == "https://relay.example.com"
+    assert "http://100.111.99.51:8000" in payload["server_urls"][1:]
 
 
 def test_utterance_and_audio_omit_executor_use_resolved_default(monkeypatch, tmp_path: Path):
@@ -1142,7 +1204,8 @@ def test_pair_exchange_returns_scoped_token_and_rotates_code(monkeypatch, tmp_pa
     pairing_file.write_text(
         (
             '{'
-            '"server_url":"http://127.0.0.1:8000",'
+            '"server_url":"https://relay.example.com",'
+            '"server_urls":["https://relay.example.com","http://100.111.99.51:8000"],'
             '"api_token":"abc-token",'
             '"session_id":"iphone-app",'
             '"pair_code":"pair-1234",'
@@ -1163,6 +1226,9 @@ def test_pair_exchange_returns_scoped_token_and_rotates_code(monkeypatch, tmp_pa
     payload = resp.json()
     assert payload["api_token"] != "abc-token"
     assert payload["session_id"] == "ios1"
+    assert payload["server_url"] == "https://relay.example.com"
+    assert payload["server_urls"][0] == "https://relay.example.com"
+    assert "http://100.111.99.51:8000" in payload["server_urls"][1:]
     updated = pairing_file.read_text(encoding="utf-8")
     assert '"pair_code":"pair-1234"' not in updated.replace(" ", "")
     assert payload["api_token"] not in updated
@@ -1320,6 +1386,17 @@ def test_codex_human_unblock_transitions_to_blocked(monkeypatch, tmp_path: Path)
     assert "suggested_reply" in payload["pending_human_unblock"]
     event_types = [event["type"] for event in payload["events"]]
     assert "run.blocked" in event_types
+
+    context_resp = client.get(
+        "/v1/sessions/blocked1/context",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert context_resp.status_code == 200
+    context_payload = context_resp.json()
+    assert context_payload["latest_run_id"] == run_id
+    assert context_payload["latest_run_status"] == "blocked"
+    assert context_payload["latest_run_summary"] == payload["summary"]
+    assert context_payload["latest_run_pending_human_unblock"]["instructions"].startswith("Complete the CAPTCHA")
 
 
 def test_codex_run_timeout(monkeypatch, tmp_path: Path):

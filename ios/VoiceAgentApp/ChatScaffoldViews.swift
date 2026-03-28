@@ -53,20 +53,31 @@ private struct ConnectionBadge: View {
     let statusText: String
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Label(isConnected ? "Connected" : "Setup needed", systemImage: isConnected ? "checkmark.circle.fill" : "gearshape.fill")
-                .font(.caption.weight(.semibold))
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: isConnected ? "checkmark.circle.fill" : "gearshape.fill")
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(isConnected ? Color.green : Color.orange)
 
-            Text(statusText)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isConnected ? "Connected" : "Setup needed")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(statusText)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+        )
     }
 }
 
@@ -106,27 +117,33 @@ struct ConversationEmptyStateView: View {
         )
     ]
 
-    private var configuredStarterPrompts: [StarterPrompt] {
-        Array(starterPrompts.prefix(2))
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: isConfigured ? 12 : 18) {
+        VStack(alignment: .leading, spacing: 18) {
             if isConfigured {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Ask about this repo, or try a quick start.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 16) {
+                    Label(statusText, systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.green.opacity(0.12))
+                        .clipShape(Capsule())
 
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(minimum: 0), spacing: 10, alignment: .top),
-                            GridItem(.flexible(minimum: 0), spacing: 10, alignment: .top)
-                        ],
-                        spacing: 10
-                    ) {
-                        ForEach(configuredStarterPrompts, id: \.label) { prompt in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Start with a focused task")
+                            .font(.title3.weight(.semibold))
+                        Text("Ask about this repo directly, or use a quick start to keep the first run narrow and useful.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Quick starts")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(starterPrompts, id: \.label) { prompt in
                             CompactStarterPromptButton(prompt: prompt) {
                                 onUsePrompt(prompt.prompt)
                             }
@@ -143,35 +160,30 @@ struct ConversationEmptyStateView: View {
                     }
                 }
             } else {
-                HStack(alignment: .center, spacing: 12) {
-                    MobaileLogoMark()
-                        .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .center, spacing: 12) {
+                        MobaileLogoMark()
+                            .frame(width: 44, height: 44)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("MOBaiLE")
-                            .font(.title3.weight(.semibold))
-                        Text("Voice and workspace agent")
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Connect MOBaiLE")
+                                .font(.title3.weight(.semibold))
+                            Text("Pair your backend once, then keep prompts, recording, and results in one thread.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 0)
                     }
 
-                    Spacer(minLength: 0)
-
                     ConnectionBadge(isConnected: isConfigured, statusText: statusText)
-                        .frame(maxWidth: 150, alignment: .trailing)
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Connect your backend once, then prompts, voice tasks, and live run updates all happen here.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("What you unlock")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 10) {
+                        Text("What you unlock")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
                         EmptyStateFeatureRow(
                             systemImage: "mic.fill",
                             title: "Voice-first tasks",
@@ -193,13 +205,14 @@ struct ConversationEmptyStateView: View {
                         onOpenSettings()
                     } label: {
                         Label("Open Settings", systemImage: "slider.horizontal.3")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(isConfigured ? 14 : 18)
+        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
@@ -217,15 +230,33 @@ private struct CompactStarterPromptButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Label(prompt.label, systemImage: prompt.systemImage)
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: prompt.systemImage)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 32, height: 32)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(prompt.label)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(prompt.detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
             }
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Color(.systemBackground))

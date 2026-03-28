@@ -36,8 +36,10 @@ Manual fallback inside app Settings:
 Important:
 
 - if you are using a real iPhone, `127.0.0.1` will not work
-- use a LAN or Tailscale URL from `backend/pairing.json`
+- use the preferred URL from `backend/pairing.json`; MOBaiLE will also keep any fallback LAN/Tailscale URLs advertised there
+- when Tailscale MagicDNS is enabled, pairing prefers the stable `*.ts.net` hostname before raw Tailscale IPs
 - the app asks for microphone and Speech Recognition permission
+- if you have a stable remote hostname, set `VOICE_AGENT_PUBLIC_SERVER_URL` on the backend so pairing prefers that URL
 
 ## If You Are Building It From This Repo
 
@@ -93,6 +95,7 @@ The checked-in project does not hard-code a development team, so Xcode should le
 - Pairing link opens but app does not connect:
   - verify the backend is running
   - verify the pair code and session in `backend/pairing.json` are current
+  - check whether `backend/pairing.json` lists multiple `server_urls`; the app will try them in order and promote the one that works
   - verify `VOICE_AGENT_API_TOKEN` in `backend/.env` matches the running backend
   - if pairing fails immediately, rotate the pairing file first with `bash ./scripts/rotate_api_token.sh`
 
