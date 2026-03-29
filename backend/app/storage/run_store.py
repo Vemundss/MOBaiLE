@@ -86,6 +86,9 @@ class RunStore:
                     session_id TEXT PRIMARY KEY,
                     executor TEXT,
                     working_directory TEXT,
+                    codex_model TEXT,
+                    codex_reasoning_effort TEXT,
+                    claude_model TEXT,
                     latest_run_id TEXT,
                     latest_run_status TEXT,
                     latest_run_summary TEXT,
@@ -97,6 +100,12 @@ class RunStore:
             )
             columns = conn.execute("PRAGMA table_info(session_context)").fetchall()
             column_names = {row["name"] for row in columns}
+            if "codex_model" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN codex_model TEXT")
+            if "codex_reasoning_effort" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN codex_reasoning_effort TEXT")
+            if "claude_model" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN claude_model TEXT")
             if "latest_run_id" not in column_names:
                 conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_id TEXT")
             if "latest_run_status" not in column_names:
@@ -270,6 +279,9 @@ class RunStore:
                     session_id,
                     executor,
                     working_directory,
+                    codex_model,
+                    codex_reasoning_effort,
+                    claude_model,
                     latest_run_id,
                     latest_run_status,
                     latest_run_summary,
@@ -288,24 +300,50 @@ class RunStore:
         *,
         executor: str | None,
         working_directory: str | None,
+        codex_model: str | None,
+        codex_reasoning_effort: str | None,
+        claude_model: str | None,
     ) -> sqlite3.Row:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO session_context (
-                    session_id, executor, working_directory, updated_at
+                    session_id,
+                    executor,
+                    working_directory,
+                    codex_model,
+                    codex_reasoning_effort,
+                    claude_model,
+                    updated_at
                 )
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(session_id) DO UPDATE SET
                     executor=excluded.executor,
                     working_directory=excluded.working_directory,
+                    codex_model=excluded.codex_model,
+                    codex_reasoning_effort=excluded.codex_reasoning_effort,
+                    claude_model=excluded.claude_model,
                     updated_at=CURRENT_TIMESTAMP
                 """,
-                (session_id, executor, working_directory),
+                (
+                    session_id,
+                    executor,
+                    working_directory,
+                    codex_model,
+                    codex_reasoning_effort,
+                    claude_model,
+                ),
             )
             row = conn.execute(
                 """
-                SELECT session_id, executor, working_directory, updated_at
+                SELECT
+                    session_id,
+                    executor,
+                    working_directory,
+                    codex_model,
+                    codex_reasoning_effort,
+                    claude_model,
+                    updated_at
                 FROM session_context
                 WHERE session_id = ?
                 """,

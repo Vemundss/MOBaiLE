@@ -402,6 +402,71 @@ def test_session_context_rejects_unavailable_executor(monkeypatch, tmp_path: Pat
     assert "not available" in response.json()["detail"]
 
 
+def test_session_context_persists_runtime_overrides(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CODEX_MODEL": "gpt-5.4",
+            "VOICE_AGENT_CODEX_REASONING_EFFORT": "medium",
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    response = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "executor": "codex",
+            "codex_model": "gpt-5.4-mini",
+            "codex_reasoning_effort": "xhigh",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["executor"] == "codex"
+    assert payload["codex_model"] == "gpt-5.4-mini"
+    assert payload["codex_reasoning_effort"] == "xhigh"
+    assert payload["claude_model"] is None
+
+
+def test_session_context_rejects_invalid_codex_effort(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    response = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"codex_reasoning_effort": "turbo"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_slash_command_catalog_and_execution(monkeypatch, tmp_path: Path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -449,6 +514,51 @@ def test_slash_command_catalog_and_execution(monkeypatch, tmp_path: Path):
     assert executor_payload["command_id"] == "executor"
     assert executor_payload["session_context"]["executor"] == "local"
     assert "Available: local." in executor_payload["message"]
+
+
+def test_slash_command_catalog_includes_model_and_effort_for_codex(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CODEX_BINARY": str(fake_codex),
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    catalog = client.get(
+        "/v1/slash-commands",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert catalog.status_code == 200
+    payload = catalog.json()
+    ids = [item["id"] for item in payload]
+    assert ids == ["cwd", "executor", "model", "effort"]
+
+    model_response = client.post(
+        "/v1/sessions/sess-context/slash-commands/model",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"arguments": "gpt-5.4-mini"},
+    )
+    assert model_response.status_code == 200
+    assert model_response.json()["session_context"]["codex_model"] == "gpt-5.4-mini"
+
+    effort_response = client.post(
+        "/v1/sessions/sess-context/slash-commands/effort",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"arguments": "high"},
+    )
+    assert effort_response.status_code == 200
+    assert effort_response.json()["session_context"]["codex_reasoning_effort"] == "high"
 
 
 def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
@@ -1019,6 +1129,7 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
         extra_env={
             "PATH": f"{tmp_path}:{env_path}",
             "VOICE_AGENT_CODEX_MODEL": "gpt-5.1",
+            "VOICE_AGENT_CODEX_REASONING_EFFORT": "high",
             "VOICE_AGENT_CLAUDE_MODEL": "claude-sonnet-4-5",
             "VOICE_AGENT_DEFAULT_EXECUTOR": "claude",
             "VOICE_AGENT_PAIRING_FILE": str(pairing_file),
@@ -1031,6 +1142,8 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["codex_model"] == "gpt-5.1"
+    assert payload["codex_reasoning_effort"] == "high"
+    assert payload["codex_reasoning_effort_options"] == ["minimal", "low", "medium", "high", "xhigh"]
     assert payload["claude_model"] == "claude-sonnet-4-5"
     assert payload["default_executor"] == "claude"
     assert "codex" in payload["available_executors"]

@@ -957,6 +957,38 @@
             ],
             "title": "Codex Model"
           },
+          "codex_reasoning_effort": {
+            "anyOf": [
+              {
+                "enum": [
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Reasoning Effort"
+          },
+          "codex_reasoning_effort_options": {
+            "items": {
+              "enum": [
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "string"
+            },
+            "title": "Codex Reasoning Effort Options",
+            "type": "array"
+          },
           "default_executor": {
             "enum": [
               "local",
@@ -1096,6 +1128,46 @@
       },
       "SessionContextResponse": {
         "properties": {
+          "claude_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claude Model"
+          },
+          "codex_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Model"
+          },
+          "codex_reasoning_effort": {
+            "anyOf": [
+              {
+                "enum": [
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Reasoning Effort"
+          },
           "executor": {
             "enum": [
               "local",
@@ -1208,6 +1280,46 @@
       },
       "SessionContextUpdateRequest": {
         "properties": {
+          "claude_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claude Model"
+          },
+          "codex_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Model"
+          },
+          "codex_reasoning_effort": {
+            "anyOf": [
+              {
+                "enum": [
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Reasoning Effort"
+          },
           "executor": {
             "anyOf": [
               {

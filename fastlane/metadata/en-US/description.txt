@@ -1,6 +1,6 @@
-MOBaiLE lets you talk to your own machine from your iPhone.
+MOBaiLE is a handheld agent-control app for your own computer.
 
-Pair the app with a backend running on your Mac or Linux box, then send a text or voice request, keep it anchored to a working directory, and watch planning, execution, and results stream back live in one thread.
+Pair the app with a backend running on your Mac or Linux machine, then send a text or voice request, keep it anchored to a working directory, and watch planning, execution, and results stream back live in one thread.
 
 What you can do:
 - Inspect a repo when you are away from the keyboard

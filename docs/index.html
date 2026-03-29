@@ -6,7 +6,7 @@
   <title>MOBaiLE</title>
   <meta
     name="description"
-    content="MOBaiLE is an iPhone client for a paired backend on your own machine. It provides public support and privacy pages for App Store distribution."
+    content="MOBaiLE lets you start a task from iPhone, run it on your own Mac or Linux machine, and follow the result live."
   />
   <style>
     :root {
@@ -176,6 +176,39 @@
       line-height: 1.65;
     }
 
+    .showcase {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      padding: 0 32px 32px;
+    }
+
+    .shot {
+      padding: 18px;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .shot img {
+      display: block;
+      width: 100%;
+      border-radius: 20px;
+      box-shadow: 0 18px 32px rgba(23, 18, 12, 0.14);
+    }
+
+    .shot h3 {
+      margin: 16px 0 8px;
+      font-size: 20px;
+      line-height: 1.15;
+    }
+
+    .shot p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
     ul {
       margin: 14px 0 0;
       padding-left: 20px;
@@ -195,7 +228,8 @@
 
     @media (max-width: 860px) {
       .grid,
-      .strip {
+      .strip,
+      .showcase {
         grid-template-columns: 1fr;
       }
 
@@ -205,6 +239,7 @@
 
       .grid,
       .strip,
+      .showcase,
       footer {
         padding-left: 22px;
         padding-right: 22px;
@@ -215,49 +250,66 @@
 <body>
   <main class="shell">
     <section class="hero">
-      <div class="eyebrow">MOBaiLE • Public Info</div>
+      <div class="eyebrow">MOBaiLE • Paired iPhone Client</div>
       <h1>Your computer, in your pocket.</h1>
       <p class="lede">
-        MOBaiLE is an iPhone client for a paired backend running on your own machine. This site hosts the public
-        privacy and support pages used for App Store distribution and links to the open source repository.
+        Start a task from iPhone, run it on your own Mac or Linux machine, and keep planning, execution, and results
+        in one live thread. These pages also host the public support and privacy URLs used for distribution.
       </p>
       <div class="actions">
-        <a class="button primary" href="privacy-policy.html">Privacy Policy</a>
+        <a class="button primary" href="https://github.com/Vemundss/MOBaiLE">View on GitHub</a>
         <a class="button secondary" href="support.html">Support</a>
-        <a class="button secondary" href="https://github.com/Vemundss/MOBaiLE">Source Code</a>
+        <a class="button secondary" href="privacy-policy.html">Privacy Policy</a>
       </div>
     </section>
 
     <section class="grid">
       <article class="card">
-        <h2>What It Is</h2>
+        <h2>Run on your own machine</h2>
         <p>
-          Send a prompt from your phone, run the work on your own Mac or Linux box, and watch progress stream back
-          live in the app.
+          Pair MOBaiLE with your own backend so work happens on the files, tools, and credentials you already trust.
         </p>
       </article>
       <article class="card">
-        <h2>Privacy Surface</h2>
+        <h2>Stay in one thread</h2>
         <p>
-          The app stores local settings on-device and sends prompts, audio, attachments, and run metadata to the
-          backend you pair with. Full details are in the <a href="privacy-policy.html">privacy policy</a>.
+          Prompts, voice input, status updates, results, and follow-ups stay in one conversation instead of vanishing
+          into a black box.
         </p>
       </article>
       <article class="card">
-        <h2>Open Source</h2>
+        <h2>Support and privacy</h2>
         <p>
-          The repository, setup scripts, backend, and iOS client are published at
-          <a href="https://github.com/Vemundss/MOBaiLE">github.com/Vemundss/MOBaiLE</a>.
+          The app stores local settings on-device and sends prompts, audio, attachments, and run metadata only to the
+          backend you pair with. Full details live in the <a href="privacy-policy.html">privacy policy</a>.
         </p>
+      </article>
+    </section>
+
+    <section class="showcase">
+      <article class="shot">
+        <img src="readme-screens/configured-empty.png" alt="MOBaiLE configured start screen with runtime context and quick-start prompts" />
+        <h3>Start with context</h3>
+        <p>Pick up in the right workspace, choose a focused starter prompt, or begin a voice-first thread immediately.</p>
+      </article>
+      <article class="shot">
+        <img src="readme-screens/conversation.png" alt="MOBaiLE live conversation showing a prompt, result, and next step" />
+        <h3>Watch the run live</h3>
+        <p>See progress, summaries, and the next recommended step in the same thread that launched the work.</p>
+      </article>
+      <article class="shot">
+        <img src="readme-screens/recording.png" alt="MOBaiLE recording screen with voice mode, auto-send, and attachments" />
+        <h3>Handle voice tasks cleanly</h3>
+        <p>Record, review, and send without losing the thread, attachments, or the next action.</p>
       </article>
     </section>
 
     <section class="strip">
       <article class="panel">
-        <h2>For App Review and Distribution</h2>
+        <h2>Public URLs for distribution</h2>
         <p>
-          These public pages exist so the app has stable support and privacy-policy URLs. They should stay reachable,
-          accurate, and in sync with what the shipped app actually does.
+          These pages stay live so the shipped app has stable support and privacy-policy URLs, and so anyone landing
+          here can verify what MOBaiLE does before installing or pairing it.
         </p>
         <ul>
           <li>Support URL: this site’s <a href="support.html">support page</a></li>
@@ -266,21 +318,22 @@
         </ul>
       </article>
       <article class="panel">
-        <h2>Maintainer Notes</h2>
+        <h2>Open-source project</h2>
         <p>
-          If repository ownership or naming changes, update the App Store URLs, the iOS app metadata, and the GitHub
-          Pages configuration together.
+          MOBaiLE ships as an open repository with the iPhone app, paired backend, setup scripts, and release
+          automation in one place.
         </p>
         <ul>
+          <li><a href="https://github.com/Vemundss/MOBaiLE">Repository homepage</a></li>
+          <li><a href="https://github.com/Vemundss/MOBaiLE/issues">Issue tracker</a></li>
           <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/CONTRIBUTING.md">Contributing Guide</a></li>
           <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/SECURITY.md">Security Policy</a></li>
-          <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/CODE_OF_CONDUCT.md">Code of Conduct</a></li>
         </ul>
       </article>
     </section>
 
     <footer>
-      Public site for MOBaiLE. Last updated: March 24, 2026.
+      Public site for MOBaiLE. Last updated: March 29, 2026.
       <a href="privacy-policy.html">Privacy</a> ·
       <a href="support.html">Support</a> ·
       <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a>

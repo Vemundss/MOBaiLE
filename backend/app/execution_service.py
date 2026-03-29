@@ -117,6 +117,9 @@ class ExecutionService:
         executor: AgentExecutorName,
         client_thread_id: str | None = None,
         response_profile: ResponseProfile = "guided",
+        codex_model_override: str | None = None,
+        codex_reasoning_effort_override: str | None = None,
+        claude_model_override: str | None = None,
         guardrail_message: str | None = None,
     ) -> None:
         agent_executor = self._make_agent_executor(executor, workdir)
@@ -157,7 +160,19 @@ class ExecutionService:
                 sections=[ChatSection(title="Safety", body=guardrail_message)],
             )
         try:
-            proc = agent_executor.start(agent_prompt, resume_session_id=resume_session_id)
+            if executor == "codex":
+                proc = agent_executor.start(
+                    agent_prompt,
+                    resume_session_id=resume_session_id,
+                    model_override=codex_model_override,
+                    reasoning_effort_override=codex_reasoning_effort_override,
+                )
+            else:
+                proc = agent_executor.start(
+                    agent_prompt,
+                    resume_session_id=resume_session_id,
+                    model_override=claude_model_override,
+                )
         except FileNotFoundError:
             self.run_state.append_event(
                 run_id,

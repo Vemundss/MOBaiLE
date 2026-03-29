@@ -23,6 +23,21 @@ SCENARIOS=(
   "conversation|threads|05-threads"
 )
 
+run_renderer() {
+  if python3 -c 'import PIL' >/dev/null 2>&1; then
+    python3 "${RENDERER}" --input-dir "${RAW_OUTPUT_DIR}" --output-dir "${OUTPUT_DIR}"
+    return
+  fi
+
+  if command -v uv >/dev/null 2>&1; then
+    uv run --with pillow python3 "${RENDERER}" --input-dir "${RAW_OUTPUT_DIR}" --output-dir "${OUTPUT_DIR}"
+    return
+  fi
+
+  echo "Could not render App Store screenshots: Pillow is not installed and uv is unavailable." >&2
+  exit 1
+}
+
 echo "Building ${SCHEME} for iOS Simulator..."
 xcodebuild \
   -project "${PROJECT_PATH}" \
@@ -84,6 +99,6 @@ for device in "${DEVICES[@]}"; do
   xcrun simctl status_bar "${device}" clear >/dev/null 2>&1 || true
 done
 
-python3 "${RENDERER}" --input-dir "${RAW_OUTPUT_DIR}" --output-dir "${OUTPUT_DIR}"
+run_renderer
 
 echo "Saved screenshots to ${OUTPUT_DIR}"

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 AgentExecutorName = Literal["codex", "claude"]
 RunExecutorName = Literal["local", "codex", "claude"]
 ResponseProfile = Literal["guided", "minimal"]
+CodexReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh"]
 
 
 class UtteranceRequest(BaseModel):
@@ -225,6 +226,8 @@ class RuntimeConfigResponse(BaseModel):
     transcribe_provider: str
     transcribe_ready: bool
     codex_model: str | None = None
+    codex_reasoning_effort: CodexReasoningEffort | None = None
+    codex_reasoning_effort_options: list[CodexReasoningEffort] = Field(default_factory=list)
     claude_model: str | None = None
     workdir_root: str | None = None
     allow_absolute_file_reads: bool
@@ -237,6 +240,9 @@ class SessionContextResponse(BaseModel):
     session_id: str
     executor: RunExecutorName
     working_directory: str | None = None
+    codex_model: str | None = None
+    codex_reasoning_effort: CodexReasoningEffort | None = None
+    claude_model: str | None = None
     resolved_working_directory: str
     latest_run_id: str | None = None
     latest_run_status: Literal["running", "completed", "failed", "rejected", "blocked", "cancelled"] | None = None
@@ -249,6 +255,9 @@ class SessionContextResponse(BaseModel):
 class SessionContextUpdateRequest(BaseModel):
     executor: RunExecutorName | None = None
     working_directory: str | None = None
+    codex_model: str | None = None
+    codex_reasoning_effort: CodexReasoningEffort | None = None
+    claude_model: str | None = None
 
 
 class SlashCommandDescriptor(BaseModel):

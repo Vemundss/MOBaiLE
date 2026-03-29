@@ -4,11 +4,15 @@
   <img src="ios/VoiceAgentApp/mobaile_logo.png" alt="MOBaiLE logo" width="180" />
 </p>
 
-<p align="center"><strong>Your computer, in your pocket.</strong></p>
+<p align="center"><strong>Your own computer, in your pocket.</strong></p>
 
 <p align="center">
-  MOBaiLE pairs an iPhone app with a backend on your own Mac or Linux machine.
-  Ask from your phone, run on your own files, tools, and network, and watch the run stream back live.
+  MOBaiLE is a handheld agent-control app for your own Mac or Linux computer.
+  Start work from your iPhone, run on your files and tools, and watch the execution stream back live.
+</p>
+
+<p align="center">
+  This repo ships both the iPhone app and the paired backend. Build from <code>ios/</code> while developing, or use TestFlight/App Store for signed releases.
 </p>
 
 <p align="center">
@@ -20,7 +24,7 @@
   ·
   <a href="scripts/README.md"><strong>Scripts</strong></a>
   ·
-  <a href="docs/APP_STORE_SUBMISSION.md"><strong>App Store</strong></a>
+  <a href="docs/APP_STORE_COPY.md"><strong>App Store</strong></a>
 </p>
 
 <p align="center">
@@ -29,7 +33,7 @@
 
 ## Why MOBaiLE
 
-MOBaiLE is built for the moment when opening your laptop feels like too much friction, but the task is still real.
+MOBaiLE is for the moments when the work is real, but opening your laptop is the slowest part.
 
 <table>
   <tr>
@@ -39,7 +43,7 @@ MOBaiLE is built for the moment when opening your laptop feels like too much fri
     </td>
     <td width="33%" valign="top">
       <strong>See progress live</strong><br />
-      Follow planning, execution, and final result from the phone instead of sending work into a black box.
+      Follow planning, execution, and the final result from the phone instead of sending work into a black box.
     </td>
     <td width="33%" valign="top">
       <strong>Start safe, expand later</strong><br />
@@ -76,7 +80,7 @@ MOBaiLE is built for the moment when opening your laptop feels like too much fri
   </tr>
 </table>
 
-## Great First Prompts
+## Try These First
 
 - `create a hello python script and run it`
 - `inspect this repo and tell me where onboarding feels rough`
@@ -85,11 +89,18 @@ MOBaiLE is built for the moment when opening your laptop feels like too much fri
 
 ## Quick Start
 
-Choose the shortest path that matches what you need.
+Choose the shortest path that matches how you want to use MOBaiLE.
 
-### 1. Fastest local backend
+### 0. What you need
 
-If you already have `python3`:
+- one Mac or Linux computer you control
+- an iPhone with MOBaiLE installed
+- the backend running on that computer
+- Tailscale only if you want access away from your local network
+
+### 1. Fastest local setup
+
+If you already have `python3` on the computer that will run the backend:
 
 ```bash
 bash ./scripts/install_backend.sh --mode safe
@@ -102,7 +113,7 @@ curl http://127.0.0.1:8000/health
 
 ### 2. Managed install into `~/MOBaiLE`
 
-If you want a no-clone bootstrap flow:
+If you want a no-clone bootstrap flow on a fresh host:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
@@ -160,6 +171,8 @@ On your iPhone:
   - install from TestFlight or App Store if distributed
   - or build from `ios/` in Xcode if you are developing locally
 
+MOBaiLE never runs your code on the phone. The iPhone app only sends prompts, voice, attachments, and metadata to the backend you pair with.
+
 ### Sign in to Tailscale on both devices
 
 Use the same Tailscale account and tailnet on both devices.
@@ -200,6 +213,8 @@ What bootstrap does:
 - installs and starts a background service on macOS or Linux when supported
 - generates `backend/pairing-qr.png`
 
+If you want a stable URL for the iPhone to use, set `VOICE_AGENT_PUBLIC_SERVER_URL` before pairing. Otherwise MOBaiLE prefers a Tailscale or LAN address from `backend/pairing.json`.
+
 ### Verify backend health
 
 ```bash
@@ -230,6 +245,8 @@ Manual fallback inside MOBaiLE settings:
 1. `Server URL`: Tailscale URL from `backend/pairing.json`
 2. `API Token`: `VOICE_AGENT_API_TOKEN` from `backend/.env`
 3. `Session ID`: default `iphone-app` is fine
+
+If the app cannot connect on cellular, check that the backend was installed with `--expose-network` or that your chosen Tailscale/public URL is reachable from the iPhone.
 
 ### Validate remote access over cellular
 

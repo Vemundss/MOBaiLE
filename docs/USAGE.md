@@ -1,11 +1,12 @@
 # Usage
 
-This is the canonical operator/setup document for the repo. If another document disagrees on
-installation, service management, or runtime configuration, prefer this file.
+This is the canonical operator/setup document for the repo. If another document disagrees on installation, service management, or runtime configuration, prefer this file.
 
-This document explains how to run the current backend MVP locally.
+This document explains how to run the backend that MOBaiLE pairs with on your own Mac or Linux computer.
 
 ## Quick Setup (recommended)
+
+Use this path if you want a working backend quickly on a host you control.
 
 From project root:
 
@@ -32,6 +33,7 @@ bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
 `install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
 If Tailscale MagicDNS is available, pairing now prefers the stable `*.ts.net` hostname automatically before raw `100.x` or LAN IPs.
 For a stable public endpoint, set `VOICE_AGENT_PUBLIC_SERVER_URL` in `backend/.env` or pass `--public-url https://your-host` during install. MOBaiLE will prefer that URL and keep Tailscale/LAN fallbacks alongside it.
+The iPhone app only talks to this backend. It does not run code on-device.
 Safe mode defaults:
 - restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
 - restricted file reads (`VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false`)
@@ -51,6 +53,8 @@ All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 - macOS/Linux shell
 - Python 3.11+
 - `uv` (auto-installed by `install_backend.sh` if missing)
+
+If you are setting this up for the iPhone app, you also need a reachable backend URL. For local testing that can be `127.0.0.1`; for a real phone it should be a LAN, Tailscale, or other reachable host URL.
 
 Check versions:
 

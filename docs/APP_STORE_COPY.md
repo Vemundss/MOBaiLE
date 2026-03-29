@@ -5,24 +5,24 @@ This file is the copy pack for the current MOBaiLE App Store submission.
 ## Listing Metadata
 
 - Name: `MOBaiLE`
-- Subtitle: `Your computer, in your pocket`
+- Subtitle: `Your own computer, in your pocket`
 - Promotional text:
-  `Send a task from your phone, run it on your own Mac or Linux machine, and follow every step live.`
+  `Start work from iPhone, run it on your own Mac or Linux machine, and follow every step live.`
 - Keywords:
   `developer,terminal,remote,voice,repo,coding,productivity,automation,assistant`
 
 ## Store Description
 
-MOBaiLE lets you talk to your own machine from your iPhone.
+MOBaiLE is a handheld agent-control app for your own computer.
 
-Pair the app with a backend running on your Mac or Linux box, then send a text or voice request, keep it anchored to a working directory, and watch planning, execution, and results stream back live in one thread.
+Pair the app with a backend running on your Mac or Linux machine, then send a text or voice request, keep it anchored to a working directory, and watch planning, execution, and results stream back live in one thread.
 
 What you can do:
-- inspect a repo when you are away from the keyboard
-- run a smoke test and get the summary back in one place
-- dictate a task from your phone and send it hands-free
-- keep conversation history, run logs, and artifacts together
-- switch workspaces and keep future tasks pointed at the right folder
+- Inspect a repo when you are away from the keyboard
+- Run a smoke test and get the summary back in one place
+- Dictate a task from your phone and send it hands-free
+- Keep conversation history, run logs, and artifacts together
+- Switch workspaces and keep future tasks pointed at the right folder
 
 MOBaiLE is a client for a backend you configure and control. The app does not execute code on-device. It sends prompts, audio, attachments, and related metadata to the backend you pair with.
 

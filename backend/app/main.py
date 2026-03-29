@@ -58,6 +58,7 @@ from app.profile_store import ProfileStore
 from app.run_state import RunState
 from app.runtime_environment import load_env_defaults
 from app.runtime_environment import RuntimeEnvironment
+from app.runtime_environment import CODEX_REASONING_EFFORT_OPTIONS
 from app.storage import RunStore
 from app.transcription import Transcriber, TranscriptionError
 
@@ -232,6 +233,9 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
                 executor,
                 request.thread_id,
                 request.response_profile,
+                session_context.codex_model,
+                session_context.codex_reasoning_effort,
+                session_context.claude_model,
                 guardrail_message if guardrail_status == "warn" else None,
             ),
             daemon=True,
@@ -463,6 +467,9 @@ def get_session_context(session_id: str) -> SessionContextResponse:
 def update_session_context(session_id: str, payload: SessionContextUpdateRequest) -> SessionContextResponse:
     executor = _UNSET
     working_directory = _UNSET
+    codex_model = _UNSET
+    codex_reasoning_effort = _UNSET
+    claude_model = _UNSET
 
     if "executor" in payload.model_fields_set:
         executor = None if payload.executor is None else _validated_session_context_executor(payload.executor)
@@ -477,10 +484,22 @@ def update_session_context(session_id: str, payload: SessionContextUpdateRequest
         else:
             working_directory = None
 
+    if "codex_model" in payload.model_fields_set:
+        codex_model = _normalized_optional_text(payload.codex_model)
+
+    if "codex_reasoning_effort" in payload.model_fields_set:
+        codex_reasoning_effort = _validated_optional_codex_reasoning_effort(payload.codex_reasoning_effort)
+
+    if "claude_model" in payload.model_fields_set:
+        claude_model = _normalized_optional_text(payload.claude_model)
+
     return _update_session_context(
         session_id,
         executor=executor,
         working_directory=working_directory,
+        codex_model=codex_model,
+        codex_reasoning_effort=codex_reasoning_effort,
+        claude_model=claude_model,
     )
 
 
@@ -621,6 +640,13 @@ def _session_context_response(session_id: str) -> SessionContextResponse:
     row = RUN_STORE.get_session_context(session_id)
     raw_executor = str(row["executor"]).strip() if row is not None and row["executor"] else ""
     raw_working_directory = str(row["working_directory"]).strip() if row is not None and row["working_directory"] else ""
+    codex_model = str(row["codex_model"]).strip() if row is not None and row["codex_model"] else ""
+    codex_reasoning_effort = (
+        str(row["codex_reasoning_effort"]).strip().lower()
+        if row is not None and row["codex_reasoning_effort"]
+        else ""
+    )
+    claude_model = str(row["claude_model"]).strip() if row is not None and row["claude_model"] else ""
     latest_run_pending_human_unblock: HumanUnblockRequest | None = None
     if row is not None and row["latest_run_pending_human_unblock_json"]:
         try:
@@ -642,6 +668,9 @@ def _session_context_response(session_id: str) -> SessionContextResponse:
         session_id=session_id,
         executor=effective_executor,  # type: ignore[arg-type]
         working_directory=effective_working_directory,
+        codex_model=codex_model or None,
+        codex_reasoning_effort=codex_reasoning_effort or None,  # type: ignore[arg-type]
+        claude_model=claude_model or None,
         resolved_working_directory=resolved_working_directory,
         latest_run_id=str(row["latest_run_id"]).strip() if row is not None and row["latest_run_id"] else None,
         latest_run_status=str(row["latest_run_status"]).strip() if row is not None and row["latest_run_status"] else None,
@@ -657,6 +686,9 @@ def _update_session_context(
     *,
     executor=_UNSET,
     working_directory=_UNSET,
+    codex_model=_UNSET,
+    codex_reasoning_effort=_UNSET,
+    claude_model=_UNSET,
 ) -> SessionContextResponse:
     current = RUN_STORE.get_session_context(session_id)
     next_executor = str(current["executor"]).strip() if current is not None and current["executor"] else None
@@ -665,16 +697,32 @@ def _update_session_context(
         if current is not None and current["working_directory"]
         else None
     )
+    next_codex_model = str(current["codex_model"]).strip() if current is not None and current["codex_model"] else None
+    next_codex_reasoning_effort = (
+        str(current["codex_reasoning_effort"]).strip().lower()
+        if current is not None and current["codex_reasoning_effort"]
+        else None
+    )
+    next_claude_model = str(current["claude_model"]).strip() if current is not None and current["claude_model"] else None
 
     if executor is not _UNSET:
         next_executor = executor
     if working_directory is not _UNSET:
         next_working_directory = working_directory
+    if codex_model is not _UNSET:
+        next_codex_model = codex_model
+    if codex_reasoning_effort is not _UNSET:
+        next_codex_reasoning_effort = codex_reasoning_effort
+    if claude_model is not _UNSET:
+        next_claude_model = claude_model
 
     RUN_STORE.upsert_session_context(
         session_id,
         executor=next_executor,
         working_directory=next_working_directory,
+        codex_model=next_codex_model,
+        codex_reasoning_effort=next_codex_reasoning_effort,
+        claude_model=next_claude_model,
     )
     return _session_context_response(session_id)
 
@@ -687,13 +735,41 @@ def _validated_session_context_executor(executor: RunExecutorName) -> RunExecuto
     raise HTTPException(status_code=400, detail=f"executor {executor} is not available on this backend")
 
 
+def _normalized_optional_text(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None
+
+
+def _validated_optional_codex_reasoning_effort(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized not in CODEX_REASONING_EFFORT_OPTIONS:
+        allowed = ", ".join(CODEX_REASONING_EFFORT_OPTIONS)
+        raise HTTPException(status_code=400, detail=f"codex reasoning effort must be one of: {allowed}")
+    return normalized
+
+
+def _effective_codex_model(context: SessionContextResponse) -> str | None:
+    return _normalized_optional_text(context.codex_model) or ENV.codex_model_override or None
+
+
+def _effective_codex_reasoning_effort(context: SessionContextResponse) -> str | None:
+    return _validated_optional_codex_reasoning_effort(context.codex_reasoning_effort) or ENV.codex_reasoning_effort_override or None
+
+
+def _effective_claude_model(context: SessionContextResponse) -> str | None:
+    return _normalized_optional_text(context.claude_model) or ENV.claude_model_override or None
+
+
 def _slash_command_catalog() -> list[SlashCommandDescriptor]:
     executor_options = _slash_command_executor_options()
     executor_usage = "/executor"
     if executor_options:
         executor_usage = f"/executor [{'|'.join(executor_options)}]"
+    codex_effort_options = ["backend-default", *CODEX_REASONING_EFFORT_OPTIONS]
 
-    return [
+    commands = [
         SlashCommandDescriptor(
             id="cwd",
             title="Working Directory",
@@ -718,6 +794,39 @@ def _slash_command_catalog() -> list[SlashCommandDescriptor]:
             argument_placeholder="executor",
         ),
     ]
+
+    if any(option in {"codex", "claude"} for option in executor_options):
+        commands.append(
+            SlashCommandDescriptor(
+                id="model",
+                title="Model Override",
+                description="Show or override the active agent model for this session.",
+                usage="/model [backend-default|model-id]",
+                group="Runtime",
+                aliases=["runtime-model"],
+                symbol="sparkles",
+                argument_kind="text",
+                argument_placeholder="model-id",
+            )
+        )
+
+    if "codex" in executor_options:
+        commands.append(
+            SlashCommandDescriptor(
+                id="effort",
+                title="Codex Effort",
+                description="Show or override the Codex reasoning effort for this session.",
+                usage="/effort [backend-default|minimal|low|medium|high|xhigh]",
+                group="Runtime",
+                aliases=["thinking", "reasoning"],
+                symbol="brain.head.profile",
+                argument_kind="enum",
+                argument_options=codex_effort_options,
+                argument_placeholder="effort",
+            )
+        )
+
+    return commands
 
 
 def _slash_command_executor_options() -> list[str]:
@@ -782,6 +891,65 @@ def _execute_slash_command(
             session_context=context,
         )
 
+    if normalized_command == "model":
+        context = _session_context_response(session_id)
+        if not normalized_arguments:
+            return SlashCommandExecutionResponse(
+                command_id="model",
+                message=_model_status_message(context),
+                session_context=context,
+            )
+
+        normalized_model = normalized_arguments
+        if normalized_model.lower() in {"backend-default", "default", "auto"}:
+            normalized_model = ""
+
+        if context.executor == "local":
+            raise HTTPException(status_code=400, detail="model overrides apply only to codex or claude executors")
+
+        if context.executor == "codex":
+            context = _update_session_context(
+                session_id,
+                codex_model=_normalized_optional_text(normalized_model),
+            )
+        else:
+            context = _update_session_context(
+                session_id,
+                claude_model=_normalized_optional_text(normalized_model),
+            )
+
+        return SlashCommandExecutionResponse(
+            command_id="model",
+            message=_model_status_message(context),
+            session_context=context,
+        )
+
+    if normalized_command == "effort":
+        context = _session_context_response(session_id)
+        if not normalized_arguments:
+            return SlashCommandExecutionResponse(
+                command_id="effort",
+                message=_codex_effort_status_message(context),
+                session_context=context,
+            )
+
+        if context.executor != "codex":
+            raise HTTPException(status_code=400, detail="codex effort overrides require the codex executor")
+
+        requested_effort = normalized_arguments.lower()
+        if requested_effort in {"backend-default", "default", "auto"}:
+            requested_effort = ""
+
+        context = _update_session_context(
+            session_id,
+            codex_reasoning_effort=_validated_optional_codex_reasoning_effort(requested_effort),
+        )
+        return SlashCommandExecutionResponse(
+            command_id="effort",
+            message=_codex_effort_status_message(context),
+            session_context=context,
+        )
+
     raise HTTPException(status_code=404, detail=f"unknown slash command {normalized_command}")
 
 
@@ -795,6 +963,23 @@ def _working_directory_status_message(context: SessionContextResponse) -> str:
 def _executor_status_message(context: SessionContextResponse) -> str:
     options = ", ".join(_slash_command_executor_options())
     return f"Executor: {context.executor}. Available: {options}."
+
+
+def _model_status_message(context: SessionContextResponse) -> str:
+    if context.executor == "codex":
+        model = _effective_codex_model(context) or "backend default"
+        return f"Codex model: {model}."
+    if context.executor == "claude":
+        model = _effective_claude_model(context) or "backend default"
+        return f"Claude model: {model}."
+    return "Model overrides apply when the session executor is codex or claude."
+
+
+def _codex_effort_status_message(context: SessionContextResponse) -> str:
+    if context.executor != "codex":
+        return "Codex effort overrides apply when the session executor is codex."
+    effort = _effective_codex_reasoning_effort(context) or "backend default"
+    return f"Codex reasoning effort: {effort}."
 
 
 def _fetch_today_calendar_events() -> list[AgendaItem]:

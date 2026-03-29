@@ -4,8 +4,10 @@
   <img src="../docs/readme-screens/conversation.png" alt="MOBaiLE conversation screen on iPhone" width="250" />
 </p>
 
-MOBaiLE on iPhone is the handheld client for your paired backend.
-You open the app, connect it to your own machine, send text or voice requests, and follow the run without going back to your laptop.
+MOBaiLE on iPhone is the handheld control surface for your paired backend.
+You open the app, connect it to your own computer, send text or voice requests, and follow the run without going back to your laptop.
+
+The app does not execute code on the phone. It forwards your prompt, audio, attachments, and session context to the backend you control.
 
 ## What You Can Do From The Phone
 
@@ -14,11 +16,11 @@ You open the app, connect it to your own machine, send text or voice requests, a
 - Watch progress and final result inside the same thread
 - Reuse the same workspace and thread context across runs
 
-You do not need to understand agents, Xcode, or internal backend details to use the app once it is paired.
+You do not need to understand agents, Xcode, or backend internals to use the app once it is paired.
 
 ## If You Just Want To Use MOBaiLE
 
-This is the shortest human path:
+This is the shortest path:
 
 1. Make sure your backend is already running.
 2. Open `backend/pairing-qr.png` on your computer.
@@ -103,6 +105,8 @@ The checked-in project does not hard-code a development team, so Xcode should le
 - Audio fails but text works:
   - enable `Speech Recognition` for MOBaiLE in iOS Settings
   - if you are on Simulator or local speech is unavailable, configure backend `OPENAI_API_KEY` for audio-upload fallback
+
+If you are just pairing the app, you should not need to touch Xcode after the first install. Most connection issues come from the backend URL, token, or network path rather than the iPhone app itself.
 
 ## Developer Notes
 

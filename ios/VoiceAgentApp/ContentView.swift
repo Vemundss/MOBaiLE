@@ -44,7 +44,7 @@ struct ContentView: View {
     private var baseNavigationView: some View {
         NavigationStack {
             conversationView
-                .navigationTitle("MOBaiLE")
+                .navigationTitle(activeNavigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -242,6 +242,8 @@ struct ContentView: View {
             switch action {
             case "start-voice":
                 await vm.handleStartVoiceTaskShortcut()
+            case "start-new-voice":
+                await vm.handleStartNewVoiceThreadShortcut()
             case "send-last-prompt":
                 await vm.handleSendLastPromptShortcut()
             default:
@@ -291,11 +293,15 @@ struct ContentView: View {
                             isConfigured: vm.hasConfiguredConnection,
                             statusText: headerStatusText,
                             canRetryLastPrompt: vm.canRetryLastPrompt,
+                            runtimeContext: emptyStateRuntimeContext,
                             onOpenSettings: {
                                 showConnectionSettings = true
                             },
                             onRetryLastPrompt: {
                                 Task { await vm.retryLastPrompt() }
+                            },
+                            onStartVoiceMode: {
+                                handleVoiceModeStartTap()
                             },
                             onUsePrompt: { prompt in
                                 vm.promptText = prompt
@@ -384,6 +390,38 @@ struct ContentView: View {
                 }
 
                 Section {
+                    Picker("Executor", selection: $vm.executor) {
+                        ForEach(vm.selectableExecutors, id: \.self) { option in
+                            Text(option.capitalized).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if vm.effectiveExecutor == "codex" {
+                        TextField("Codex model", text: $vm.codexModelOverride)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.footnote.monospaced())
+
+                        Picker("Codex effort", selection: $vm.codexReasoningEffort) {
+                            Text("Backend default").tag("")
+                            ForEach(vm.backendCodexReasoningEffortOptions, id: \.self) { option in
+                                Text(option.uppercased()).tag(option)
+                            }
+                        }
+                    } else if vm.effectiveExecutor == "claude" {
+                        TextField("Claude model", text: $vm.claudeModelOverride)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.footnote.monospaced())
+                    }
+                } header: {
+                    Text("Agent Runtime")
+                } footer: {
+                    Text(agentRuntimeFooterText)
+                }
+
+                Section {
                     Picker("Agent guidance", selection: $vm.agentGuidanceMode) {
                         Text("Guided").tag("guided")
                         Text("Minimal").tag("minimal")
@@ -442,12 +480,6 @@ struct ContentView: View {
                             }
                         TextField("Timeout seconds", text: $vm.runTimeoutSeconds)
                             .keyboardType(.numberPad)
-                        Picker("Executor", selection: $vm.executor) {
-                            ForEach(vm.selectableExecutors, id: \.self) { option in
-                                Text(option.capitalized).tag(option)
-                            }
-                        }
-                        .pickerStyle(.segmented)
                         Toggle("Hide Hidden Folders", isOn: $vm.hideDotFoldersInBrowser)
                         if !vm.backendWorkdirRoot.isEmpty {
                             LabeledContent("Backend Root", value: vm.backendWorkdirRoot)
@@ -456,6 +488,9 @@ struct ContentView: View {
                         LabeledContent("Backend Mode", value: vm.backendSecurityMode)
                         ForEach(vm.backendExecutorModelRows, id: \.id) { row in
                             LabeledContent("\(row.title) Model", value: row.model)
+                        }
+                        if !vm.backendCodexReasoningEffort.isEmpty {
+                            LabeledContent("Codex Effort", value: vm.backendCodexReasoningEffort.uppercased())
                         }
                     }
                 } footer: {
@@ -522,6 +557,9 @@ struct ContentView: View {
                         RuntimeContextChip(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased())
                         RuntimeContextChip(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel)
                         RuntimeContextChip(icon: "sparkles", label: "Model", value: vm.currentBackendModelLabel)
+                        if let runtimeEffortLabel {
+                            RuntimeContextChip(icon: "brain.head.profile", label: "Effort", value: runtimeEffortLabel)
+                        }
                         if !vm.backendWorkdirRoot.isEmpty {
                             RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
                         }
@@ -531,6 +569,9 @@ struct ContentView: View {
                             RuntimeContextChip(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased())
                             RuntimeContextChip(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel)
                             RuntimeContextChip(icon: "sparkles", label: "Model", value: vm.currentBackendModelLabel)
+                            if let runtimeEffortLabel {
+                                RuntimeContextChip(icon: "brain.head.profile", label: "Effort", value: runtimeEffortLabel)
+                            }
                         }
                         if !vm.backendWorkdirRoot.isEmpty {
                             RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
@@ -951,7 +992,8 @@ struct ContentView: View {
                 Text(recordingSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let typedNoteSummary = recordingTypedNoteSummaryText {
                     ComposerMetaPill(
@@ -1165,9 +1207,45 @@ struct ContentView: View {
         return "Add server URL and API token"
     }
 
+    private var activeNavigationTitle: String {
+        let trimmed = vm.activeThreadTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "MOBaiLE" : trimmed
+    }
+
+    private var emptyStateRuntimeContext: EmptyStateRuntimeContext? {
+        guard vm.hasConfiguredConnection else { return nil }
+        let workspace = compactPathLabel(runtimeDirectoryLabel)
+        return EmptyStateRuntimeContext(
+            executor: runtimeExecutorLabel,
+            model: vm.currentBackendModelLabel,
+            effort: runtimeEffortLabel,
+            workspace: workspace
+        )
+    }
+
     private var runtimeExecutorLabel: String {
-        let value = vm.runID.isEmpty ? vm.executor : vm.activeRunExecutor
+        let value = vm.runID.isEmpty ? vm.effectiveExecutor : vm.activeRunExecutor
         return value.uppercased()
+    }
+
+    private var runtimeEffortLabel: String? {
+        guard vm.effectiveExecutor == "codex" else { return nil }
+        let label = vm.currentCodexReasoningEffortLabel
+        return label == "DEFAULT" ? nil : label
+    }
+
+    private var agentRuntimeFooterText: String {
+        if vm.effectiveExecutor == "codex" {
+            return vm.hasCodexRuntimeOverrides
+                ? "These Codex values override the backend default for this session only."
+                : "Leave model blank and effort on Backend default to follow the backend defaults."
+        }
+        if vm.effectiveExecutor == "claude" {
+            return vm.hasClaudeRuntimeOverrides
+                ? "This Claude model override applies only to the current session."
+                : "Leave the Claude model blank to follow the backend default."
+        }
+        return "Choose an agent executor to expose per-session model controls."
     }
 
     private var runtimeDirectoryLabel: String {
@@ -1250,7 +1328,7 @@ struct ContentView: View {
     }
 
     private var shouldShowRuntimeInfoBar: Bool {
-        vm.hasConfiguredConnection || !vm.conversation.isEmpty
+        !vm.conversation.isEmpty
     }
 
     private var shouldShowRuntimeStatusBadge: Bool {
@@ -1708,13 +1786,16 @@ struct ContentView: View {
     }
 
     private var recordingSubtitle: String {
+        if vm.isVoiceModeActiveForCurrentThread && vm.usesAutoSendForCurrentTurn {
+            return "Send now, or pause for silence. The mic reopens after the reply."
+        }
         if vm.isVoiceModeActiveForCurrentThread {
-            return "Sends this turn and reopens the mic after the reply"
+            return "Send now. The mic reopens after the reply."
         }
         if vm.usesAutoSendForCurrentTurn {
-            return "Auto-sends after \(vm.autoSendAfterSilenceSeconds)s of silence"
+            return "Send now, or wait for silence to submit."
         }
-        return "Tap stop when you're ready to send"
+        return "Tap Send when you're ready."
     }
 
     private func recordingDurationLabel(since startedAt: Date, now: Date) -> String {
@@ -1811,6 +1892,9 @@ struct ContentView: View {
             case .new:
                 vm.clearComposerText()
                 vm.startNewChat()
+            case .voiceNew:
+                vm.clearComposerText()
+                await vm.handleStartNewVoiceThreadShortcut()
             case .threads:
                 vm.clearComposerText()
                 showThreads = true

@@ -370,6 +370,8 @@ struct RuntimeConfig: Decodable {
     let transcribeProvider: String?
     let transcribeReady: Bool?
     let codexModel: String?
+    let codexReasoningEffort: String?
+    let codexReasoningEffortOptions: [String]?
     let claudeModel: String?
     let workdirRoot: String?
     let allowAbsoluteFileReads: Bool?
@@ -385,6 +387,8 @@ struct RuntimeConfig: Decodable {
         case transcribeProvider = "transcribe_provider"
         case transcribeReady = "transcribe_ready"
         case codexModel = "codex_model"
+        case codexReasoningEffort = "codex_reasoning_effort"
+        case codexReasoningEffortOptions = "codex_reasoning_effort_options"
         case claudeModel = "claude_model"
         case workdirRoot = "workdir_root"
         case allowAbsoluteFileReads = "allow_absolute_file_reads"
@@ -397,10 +401,16 @@ struct RuntimeConfig: Decodable {
 struct SessionContextUpdateRequest: Encodable {
     let executor: String?
     let workingDirectory: String?
+    let codexModel: String?
+    let codexReasoningEffort: String?
+    let claudeModel: String?
 
     enum CodingKeys: String, CodingKey {
         case executor
         case workingDirectory = "working_directory"
+        case codexModel = "codex_model"
+        case codexReasoningEffort = "codex_reasoning_effort"
+        case claudeModel = "claude_model"
     }
 }
 
@@ -408,6 +418,9 @@ struct SessionContext: Decodable {
     let sessionId: String
     let executor: String
     let workingDirectory: String?
+    let codexModel: String?
+    let codexReasoningEffort: String?
+    let claudeModel: String?
     let resolvedWorkingDirectory: String
     let latestRunId: String?
     let latestRunStatus: String?
@@ -420,6 +433,9 @@ struct SessionContext: Decodable {
         case sessionId = "session_id"
         case executor
         case workingDirectory = "working_directory"
+        case codexModel = "codex_model"
+        case codexReasoningEffort = "codex_reasoning_effort"
+        case claudeModel = "claude_model"
         case resolvedWorkingDirectory = "resolved_working_directory"
         case latestRunId = "latest_run_id"
         case latestRunStatus = "latest_run_status"
@@ -569,6 +585,7 @@ struct ChatArtifact: Codable, Equatable, Identifiable {
 
 enum ComposerLocalSlashAction: String, CaseIterable {
     case new
+    case voiceNew = "voice-new"
     case threads
     case logs
     case settings
@@ -655,6 +672,15 @@ struct ComposerSlashCommand: Identifiable, Equatable {
             usage: "/new",
             group: "Session",
             aliases: ["chat"]
+        ),
+        .local(
+            .voiceNew,
+            title: "New Voice Thread",
+            description: "Start a fresh thread and jump straight into voice mode.",
+            symbol: "waveform.badge.plus",
+            usage: "/voice-new",
+            group: "Session",
+            aliases: ["newvoice", "voice-thread"]
         ),
         .local(
             .threads,

@@ -9,7 +9,7 @@ class ClaudeExecutor:
     def __init__(self, workdir: Path, binary: str | None = None) -> None:
         self.workdir = workdir.resolve()
         self.binary = binary or os.getenv("VOICE_AGENT_CLAUDE_BINARY", "claude")
-        self.model = (
+        self.default_model = (
             os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
             or os.getenv("ANTHROPIC_MODEL", "").strip()
         )
@@ -25,7 +25,13 @@ class ClaudeExecutor:
             "" if self.skip_permissions else "acceptEdits",
         ).strip()
 
-    def start(self, prompt: str, *, resume_session_id: str | None = None) -> subprocess.Popen[str]:
+    def start(
+        self,
+        prompt: str,
+        *,
+        resume_session_id: str | None = None,
+        model_override: str | None = None,
+    ) -> subprocess.Popen[str]:
         # Claude Code's headless print mode can stream structured JSON events.
         cmd = [self.binary, "-p", prompt, "--output-format", "stream-json", "--verbose"]
         if resume_session_id:
@@ -36,8 +42,9 @@ class ClaudeExecutor:
             cmd.extend(["--permission-mode", self.permission_mode])
 
         env = os.environ.copy()
-        if self.model:
-            env["ANTHROPIC_MODEL"] = self.model
+        model = (model_override or self.default_model).strip()
+        if model:
+            env["ANTHROPIC_MODEL"] = model
 
         return subprocess.Popen(
             cmd,

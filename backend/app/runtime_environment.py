@@ -26,6 +26,8 @@ AGENT_HOME_HINTS: dict[AgentExecutorName, str] = {
     "claude": "~/.claude/*",
 }
 
+CODEX_REASONING_EFFORT_OPTIONS = ("minimal", "low", "medium", "high", "xhigh")
+
 
 def _resolve_path_value(raw_value: str, *, base_dir: Path) -> Path:
     path = Path(raw_value).expanduser()
@@ -89,6 +91,7 @@ class RuntimeEnvironment:
     codex_home: Path
     codex_enable_web_search: bool
     codex_model_override: str
+    codex_reasoning_effort_override: str
     claude_model_override: str
     codex_timeout_sec: int
     claude_timeout_sec: int
@@ -187,6 +190,9 @@ class RuntimeEnvironment:
         }
         codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 0)
         codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
+        codex_reasoning_effort_override = os.getenv("VOICE_AGENT_CODEX_REASONING_EFFORT", "").strip().lower()
+        if codex_reasoning_effort_override not in CODEX_REASONING_EFFORT_OPTIONS:
+            codex_reasoning_effort_override = ""
         claude_model_override = os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
         claude_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", codex_timeout_sec)
         playwright_output_dir = _resolve_path_value(
@@ -282,6 +288,7 @@ class RuntimeEnvironment:
             codex_home=codex_home,
             codex_enable_web_search=codex_enable_web_search,
             codex_model_override=codex_model_override,
+            codex_reasoning_effort_override=codex_reasoning_effort_override,
             claude_model_override=claude_model_override,
             codex_timeout_sec=codex_timeout_sec,
             claude_timeout_sec=claude_timeout_sec,
@@ -471,6 +478,8 @@ class RuntimeEnvironment:
             transcribe_provider=transcribe_provider,
             transcribe_ready=transcribe_ready,
             codex_model=self.codex_model_override or None,
+            codex_reasoning_effort=self.codex_reasoning_effort_override or None,
+            codex_reasoning_effort_options=list(CODEX_REASONING_EFFORT_OPTIONS),
             claude_model=self.claude_model_override or None,
             workdir_root=str(self.workdir_root) if self.workdir_root is not None else None,
             allow_absolute_file_reads=self.allow_absolute_file_reads,

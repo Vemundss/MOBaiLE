@@ -14,6 +14,17 @@ struct StartVoiceTaskIntent: AppIntent {
     }
 }
 
+struct StartNewVoiceThreadIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start New Voice Thread"
+    static var description = IntentDescription("Open MOBaiLE, create a fresh thread, and begin recording.")
+    static var openAppWhenRun: Bool = true
+
+    func perform() async throws -> some IntentResult {
+        UserDefaults.standard.set("start-new-voice", forKey: pendingShortcutActionKey)
+        return .result()
+    }
+}
+
 struct SendLastPromptIntent: AppIntent {
     static var title: LocalizedStringResource = "Send Last Prompt"
     static var description = IntentDescription("Open MOBaiLE and resend your last prompt.")
@@ -38,6 +49,16 @@ struct MOBaiLEAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Voice Mode",
             systemImageName: "mic.fill"
+        )
+        AppShortcut(
+            intent: StartNewVoiceThreadIntent(),
+            phrases: [
+                "Start a new voice thread in \(.applicationName)",
+                "Start a new conversation with \(.applicationName)",
+                "Open a fresh voice task in \(.applicationName)",
+            ],
+            shortTitle: "New Voice Thread",
+            systemImageName: "waveform.badge.plus"
         )
         AppShortcut(
             intent: SendLastPromptIntent(),

@@ -88,12 +88,21 @@ private struct StarterPrompt {
     let detail: String
 }
 
+struct EmptyStateRuntimeContext {
+    let executor: String
+    let model: String
+    let effort: String?
+    let workspace: String
+}
+
 struct ConversationEmptyStateView: View {
     let isConfigured: Bool
     let statusText: String
     let canRetryLastPrompt: Bool
+    let runtimeContext: EmptyStateRuntimeContext?
     let onOpenSettings: () -> Void
     let onRetryLastPrompt: () -> Void
+    let onStartVoiceMode: () -> Void
     let onUsePrompt: (String) -> Void
 
     private let starterPrompts = [
@@ -138,6 +147,10 @@ struct ConversationEmptyStateView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
+                    if let runtimeContext {
+                        configuredRuntimeContextRow(context: runtimeContext)
+                    }
+
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Quick starts")
                             .font(.caption.weight(.semibold))
@@ -150,13 +163,46 @@ struct ConversationEmptyStateView: View {
                         }
                     }
 
-                    if canRetryLastPrompt {
-                        Button {
-                            onRetryLastPrompt()
-                        } label: {
-                            Label("Retry last prompt", systemImage: "arrow.clockwise")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) {
+                            Button {
+                                onStartVoiceMode()
+                            } label: {
+                                Label("Start voice mode", systemImage: "waveform.circle.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            if canRetryLastPrompt {
+                                Button {
+                                    onRetryLastPrompt()
+                                } label: {
+                                    Label("Retry last prompt", systemImage: "arrow.clockwise")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
-                        .buttonStyle(.bordered)
+
+                        VStack(spacing: 10) {
+                            Button {
+                                onStartVoiceMode()
+                            } label: {
+                                Label("Start voice mode", systemImage: "waveform.circle.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            if canRetryLastPrompt {
+                                Button {
+                                    onRetryLastPrompt()
+                                } label: {
+                                    Label("Retry last prompt", systemImage: "arrow.clockwise")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
                     }
                 }
             } else {
@@ -221,6 +267,63 @@ struct ConversationEmptyStateView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(Color(.separator).opacity(0.20), lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func configuredRuntimeContextRow(context: EmptyStateRuntimeContext) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Current runtime")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
+                    EmptyStateMetaPill(systemImage: "sparkles", text: context.model)
+                    if let effort = context.effort {
+                        EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
+                    }
+                    EmptyStateMetaPill(systemImage: "folder.fill", text: context.workspace)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
+                        EmptyStateMetaPill(systemImage: "sparkles", text: context.model)
+                        if let effort = context.effort {
+                            EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
+                        }
+                    }
+
+                    EmptyStateMetaPill(systemImage: "folder.fill", text: context.workspace)
+                }
+            }
+        }
+    }
+}
+
+private struct EmptyStateMetaPill: View {
+    let systemImage: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+            Text(text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color(.systemBackground))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+            )
     }
 }
 

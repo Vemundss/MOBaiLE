@@ -233,7 +233,7 @@ private struct ExpandableMarkdownBlock: View {
     private static func shouldCollapse(_ text: String, isUser: Bool) -> Bool {
         guard !isUser else { return false }
         let lineCount = text.split(separator: "\n", omittingEmptySubsequences: false).count
-        return text.count > 420 || lineCount > 9
+        return text.count > 900 || lineCount > 16
     }
 }
 

@@ -125,6 +125,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var workingDirectory: String = "~"
     @Published var runTimeoutSeconds: String = "0"
     @Published var executor: String = "codex"
+    @Published var codexModelOverride: String = ""
+    @Published var codexReasoningEffort: String = ""
+    @Published var claudeModelOverride: String = ""
     @Published var responseMode: String = "concise"
     @Published var agentGuidanceMode: String = "guided"
     @Published var developerMode: Bool = false
@@ -162,6 +165,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var backendAvailableExecutors: [String] = ["codex"]
     @Published var backendSlashCommands: [ComposerSlashCommand] = []
     @Published var backendWorkdirRoot: String = ""
+    @Published var backendCodexReasoningEffort: String = ""
+    @Published var backendCodexReasoningEffortOptions: [String] = ["minimal", "low", "medium", "high", "xhigh"]
     @Published var showDirectoryBrowser: Bool = false
     @Published var isLoadingDirectoryBrowser: Bool = false
     @Published var directoryBrowserEntries: [DirectoryEntry] = []
@@ -203,6 +208,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var voiceModeThreadID: UUID?
     private var shouldResumeVoiceModeAfterSpeech = false
 
+    private static let defaultCodexReasoningEffortOptions = ["minimal", "low", "medium", "high", "xhigh"]
+
     private enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
         static let serverURLCandidates = "mobaile.server_url_candidates"
@@ -212,6 +219,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         static let runTimeoutSeconds = "mobaile.run_timeout_seconds"
         static let runTimeoutMigratedToZeroDefault = "mobaile.run_timeout_migrated_to_zero_default"
         static let executor = "mobaile.executor"
+        static let codexModelOverride = "mobaile.codex_model_override"
+        static let codexReasoningEffort = "mobaile.codex_reasoning_effort"
+        static let claudeModelOverride = "mobaile.claude_model_override"
         static let responseMode = "mobaile.response_mode"
         static let agentGuidanceMode = "mobaile.agent_guidance_mode"
         static let developerMode = "mobaile.developer_mode"
@@ -260,7 +270,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         let captureThreadID = UUID(uuidString: "22222222-2222-2222-2222-222222222222") ?? UUID()
         let draftThreadID = UUID(uuidString: "33333333-3333-3333-3333-333333333333") ?? UUID()
 
-        let previewThreads = [
+        var previewThreads = [
             ChatThread(
                 id: primaryThreadID,
                 title: "Run smoke test",
@@ -325,6 +335,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             ),
         ]
 
+        if scenario == .configuredEmpty,
+           let primaryIndex = previewThreads.firstIndex(where: { $0.id == primaryThreadID }) {
+            previewThreads[primaryIndex].title = "New Chat"
+            previewThreads[primaryIndex].runID = ""
+            previewThreads[primaryIndex].summaryText = ""
+            previewThreads[primaryIndex].statusText = "Ready"
+        }
+
         let previewExecutors = [
             RuntimeExecutorDescriptor(
                 id: "codex",
@@ -359,6 +377,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         backendDefaultExecutor = "codex"
         backendAvailableExecutors = previewExecutors.map(\.id)
         backendExecutorDescriptors = previewExecutors
+        backendCodexReasoningEffort = "high"
+        backendCodexReasoningEffortOptions = Self.defaultCodexReasoningEffortOptions
         backendSlashCommands = previewSlashCommands()
         directoryBrowserPath = workspace
         directoryBrowserEntries = []
@@ -374,6 +394,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         pendingPairing = nil
         didBootstrapSession = true
         draftAttachmentTransferStates = [:]
+        codexModelOverride = ""
+        codexReasoningEffort = ""
+        claudeModelOverride = ""
         voiceModeEnabled = false
         voiceModeThreadID = nil
         isSpeakingReply = false
@@ -940,6 +963,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         await startVoiceModeIfNeeded()
     }
 
+    func handleStartNewVoiceThreadShortcut() async {
+        if isRecording || isLoading {
+            return
+        }
+        startNewChat()
+        await startVoiceModeIfNeeded()
+    }
+
     func handleSendLastPromptShortcut() async {
         if canRetryLastPrompt {
             await retryLastPrompt()
@@ -1028,6 +1059,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         switch action {
         case "start-voice":
             await handleStartVoiceTaskShortcut()
+        case "start-new-voice":
+            await handleStartNewVoiceThreadShortcut()
         case "send-last-prompt":
             await handleSendLastPromptShortcut()
         default:
@@ -1461,6 +1494,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         resolveComposerSlashCommandState(from: promptText, commands: composerSlashCatalog)
     }
 
+    var activeThreadTitle: String {
+        guard let activeThreadID,
+              let thread = threads.first(where: { $0.id == activeThreadID }) else {
+            return "MOBaiLE"
+        }
+        let trimmed = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "MOBaiLE" : trimmed
+    }
+
     var pendingHumanUnblockRequest: HumanUnblockRequest? {
         if let threadID = activeThreadID,
            let thread = threads.first(where: { $0.id == threadID }),
@@ -1649,13 +1691,43 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             return normalized
         }()
 
+        let codexModelOverrideValue: String? = {
+            let normalized = codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { return nil }
+            if normalized == normalizedBackendCodexModel {
+                return nil
+            }
+            return normalized
+        }()
+
+        let codexReasoningEffortOverrideValue: String? = {
+            let normalized = codexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty else { return nil }
+            if normalized == normalizedBackendCodexReasoningEffort {
+                return nil
+            }
+            return normalized
+        }()
+
+        let claudeModelOverrideValue: String? = {
+            let normalized = claudeModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { return nil }
+            if normalized == normalizedBackendClaudeModel {
+                return nil
+            }
+            return normalized
+        }()
+
         let context = try await client.updateSessionContext(
             serverURL: normalizedServerURL,
             token: apiToken,
             sessionID: sessionID,
             requestBody: SessionContextUpdateRequest(
                 executor: executorOverride,
-                workingDirectory: workingDirectoryOverride
+                workingDirectory: workingDirectoryOverride,
+                codexModel: codexModelOverrideValue,
+                codexReasoningEffort: codexReasoningEffortOverrideValue,
+                claudeModel: claudeModelOverrideValue
             )
         )
         applySessionContext(context)
@@ -1700,6 +1772,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if !resolved.isEmpty {
             resolvedWorkingDirectory = resolved
         }
+        codexModelOverride = context.codexModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        codexReasoningEffort = context.codexReasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        claudeModelOverride = context.claudeModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         lastHydratedSessionContextID = normalizedSession.isEmpty ? lastHydratedSessionContextID : normalizedSession
         lastHydratedSessionContextServerURL = normalizedServerURL
         persistSettings()
@@ -2215,6 +2290,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         defaults.set(workingDirectory, forKey: DefaultsKey.workingDirectory)
         defaults.set(runTimeoutSeconds, forKey: DefaultsKey.runTimeoutSeconds)
         defaults.set(executor, forKey: DefaultsKey.executor)
+        defaults.set(codexModelOverride, forKey: DefaultsKey.codexModelOverride)
+        defaults.set(codexReasoningEffort, forKey: DefaultsKey.codexReasoningEffort)
+        defaults.set(claudeModelOverride, forKey: DefaultsKey.claudeModelOverride)
         defaults.set("concise", forKey: DefaultsKey.responseMode)
         defaults.set(agentGuidanceMode, forKey: DefaultsKey.agentGuidanceMode)
         defaults.set(developerMode, forKey: DefaultsKey.developerMode)
@@ -2569,6 +2647,13 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
         backendTranscribeReady = cfg.transcribeReady ?? false
         backendWorkdirRoot = cfg.workdirRoot ?? ""
+        backendCodexReasoningEffort = cfg.codexReasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let advertisedEffortOptions = (cfg.codexReasoningEffortOptions ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        backendCodexReasoningEffortOptions = advertisedEffortOptions.isEmpty
+            ? Self.defaultCodexReasoningEffortOptions
+            : advertisedEffortOptions
         let slashDescriptors = try await client.fetchSlashCommands(
             serverURL: normalizedServerURL,
             token: apiToken
@@ -2741,7 +2826,44 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         modelLabel(for: effectiveExecutor)
     }
 
-    private var effectiveExecutor: String {
+    var currentCodexModelLabel: String {
+        let overrideValue = codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !overrideValue.isEmpty {
+            return overrideValue
+        }
+        return displayModelName(normalizedBackendCodexModel)
+    }
+
+    var currentClaudeModelLabel: String {
+        let overrideValue = claudeModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !overrideValue.isEmpty {
+            return overrideValue
+        }
+        return displayModelName(normalizedBackendClaudeModel)
+    }
+
+    var currentCodexReasoningEffortLabel: String {
+        let overrideValue = codexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !overrideValue.isEmpty {
+            return overrideValue.uppercased()
+        }
+        let backendValue = normalizedBackendCodexReasoningEffort
+        if !backendValue.isEmpty {
+            return backendValue.uppercased()
+        }
+        return "DEFAULT"
+    }
+
+    var hasCodexRuntimeOverrides: Bool {
+        !codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !codexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasClaudeRuntimeOverrides: Bool {
+        !claudeModelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var effectiveExecutor: String {
         let trimmed = executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if trimmed == "local" {
             return "local"
@@ -2794,6 +2916,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         let normalized = executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalized == "local" {
             return "n/a"
+        }
+        if normalized == "codex" {
+            return currentCodexModelLabel
+        }
+        if normalized == "claude" {
+            return currentClaudeModelLabel
         }
         if let descriptor = backendExecutorDescriptors.first(where: { $0.id == normalized }) {
             return displayModelName(descriptor.model)
@@ -3102,6 +3230,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if let value = defaults.string(forKey: DefaultsKey.executor), !value.isEmpty {
             executor = value
         }
+        if let value = defaults.string(forKey: DefaultsKey.codexModelOverride) {
+            codexModelOverride = value
+        }
+        if let value = defaults.string(forKey: DefaultsKey.codexReasoningEffort) {
+            codexReasoningEffort = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        if let value = defaults.string(forKey: DefaultsKey.claudeModelOverride) {
+            claudeModelOverride = value
+        }
         if let value = defaults.string(forKey: DefaultsKey.responseMode), !value.isEmpty {
             responseMode = value == "verbose" ? "concise" : value
         }
@@ -3201,6 +3338,26 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func normalized(_ rawURL: String) -> String {
         rawURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private var normalizedBackendCodexModel: String {
+        backendExecutorDescriptors
+            .first(where: { $0.id == "codex" })?
+            .model?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? ""
+    }
+
+    private var normalizedBackendClaudeModel: String {
+        backendExecutorDescriptors
+            .first(where: { $0.id == "claude" })?
+            .model?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? ""
+    }
+
+    private var normalizedBackendCodexReasoningEffort: String {
+        backendCodexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func displayModelName(_ rawModel: String?) -> String {
@@ -3313,6 +3470,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         backendExecutorDescriptors = []
         backendSlashCommands = []
         backendWorkdirRoot = ""
+        backendCodexReasoningEffort = ""
+        backendCodexReasoningEffortOptions = Self.defaultCodexReasoningEffortOptions
     }
 
     private func isLocalOrPrivateHost(_ host: String) -> Bool {
