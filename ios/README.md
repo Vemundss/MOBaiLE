@@ -90,7 +90,8 @@ The checked-in project does not hard-code a development team, so Xcode should le
 
 - Real iPhone shows `App Transport Security requires the use of a secure connection`:
   - Debug builds allow plain `http://` backend URLs
-  - Release-style builds still require `https://` or a local Bonjour host such as `*.local`
+  - Release-style builds allow plain `http://` for local network addresses and `*.ts.net` Tailscale MagicDNS hosts
+  - Other remote hosts still require `https://` unless you add a matching ATS exception
 
 - Pairing link opens but app does not connect:
   - verify the backend is running

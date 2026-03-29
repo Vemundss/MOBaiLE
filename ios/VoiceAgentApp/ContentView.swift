@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var settingsConnectionState: SettingsConnectionState = .idle
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var incomingURLStore: IncomingURLStore
 
     private enum SettingsConnectionState: Equatable {
         case idle
@@ -126,14 +127,20 @@ struct ContentView: View {
                 await vm.bootstrapSessionIfNeeded()
                 await vm.consumePendingShortcutActionIfNeeded()
                 applyPreviewPresentationIfNeeded()
+                consumePendingIncomingURLIfNeeded()
             }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
                     Task {
                         await vm.refreshSessionPresenceFromBackendIfPossible()
                         await vm.consumePendingShortcutActionIfNeeded()
+                        consumePendingIncomingURLIfNeeded()
                     }
                 }
+            }
+            .onReceive(incomingURLStore.$pendingURL) { pendingURL in
+                guard pendingURL != nil else { return }
+                consumePendingIncomingURLIfNeeded()
             }
             .onChange(of: showConnectionSettings) {
                 if showConnectionSettings {
@@ -161,11 +168,16 @@ struct ContentView: View {
                 trustPairHost = vm.isTrustedPairHost(pending.serverHost)
             }
             .onOpenURL { url in
-                if handleShortcutURL(url) {
-                    return
-                }
-                vm.applyPairingURL(url)
+                incomingURLStore.receive(url)
             }
+    }
+
+    private func consumePendingIncomingURLIfNeeded() {
+        guard let url = incomingURLStore.takePendingURL() else { return }
+        if handleShortcutURL(url) {
+            return
+        }
+        vm.applyPairingURL(url)
     }
 
     private var pairingSheetView: some View {
@@ -399,8 +411,8 @@ struct ContentView: View {
                 } footer: {
                     Text(
                         vm.autoSendAfterSilenceEnabled
-                            ? "AirPods click uses headset controls. Auto-send submits after the selected silence window."
-                            : "AirPods click uses headset controls to start recording and stop+send."
+                            ? "AirPods click uses headset controls. Auto-send submits after the selected silence window. Voice mode always auto-sends and reopens the mic after each reply."
+                            : "AirPods click uses headset controls to start recording and stop+send. Voice mode keeps the conversation going by reopening the mic after each reply."
                     )
                 }
 
@@ -720,6 +732,20 @@ struct ContentView: View {
     private var composerSummaryRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                if vm.isVoiceModeActiveForCurrentThread {
+                    Button {
+                        handleVoiceModeButtonTap()
+                    } label: {
+                        ComposerMetaPill(
+                            text: vm.voiceModeStatusText,
+                            systemImage: "waveform.circle.fill",
+                            tint: .blue
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("End voice mode")
+                }
+
                 if shouldShowComposerStatusSummary {
                     ComposerMetaPill(
                         text: composerStatusSummaryText,
@@ -800,6 +826,24 @@ struct ContentView: View {
 
                 Spacer(minLength: 0)
 
+                let canStartVoiceMode = !vm.isLoading && vm.hasConfiguredConnection
+                Button {
+                    composerFocused = false
+                    handleVoiceModeButtonTap()
+                } label: {
+                    ComposerPillButtonLabel(
+                        systemImage: vm.isVoiceModeActiveForCurrentThread ? "waveform.circle.fill" : "waveform.circle",
+                        text: vm.isVoiceModeActiveForCurrentThread ? "End Voice" : "Voice Mode",
+                        tint: vm.isVoiceModeActiveForCurrentThread ? .white : .blue,
+                        fill: vm.isVoiceModeActiveForCurrentThread ? .blue : Color.blue.opacity(0.12),
+                        minWidth: 96
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(vm.isVoiceModeActiveForCurrentThread ? "End voice mode" : "Start voice mode")
+                .disabled(!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode)
+                .opacity((!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode) ? 0.45 : 1)
+
                 Button {
                     composerFocused = false
                     handleRecordingButtonTap()
@@ -809,7 +853,7 @@ struct ContentView: View {
                         text: vm.hasDraftContent ? "Add Voice" : "Record",
                         tint: .blue,
                         fill: Color.blue.opacity(0.12),
-                        minWidth: vm.hasDraftContent ? 116 : 102
+                        minWidth: vm.hasDraftContent ? 102 : 94
                     )
                 }
                 .buttonStyle(.plain)
@@ -877,7 +921,23 @@ struct ContentView: View {
                             .font(.headline.weight(.semibold))
                     }
 
-                    if vm.autoSendAfterSilenceEnabled {
+                    if vm.isVoiceModeActiveForCurrentThread {
+                        Button {
+                            handleVoiceModeButtonTap()
+                        } label: {
+                            Text("Voice mode")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.blue)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("End voice mode")
+                    }
+
+                    if vm.usesAutoSendForCurrentTurn {
                         Text("Auto-send")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.blue)
@@ -940,7 +1000,7 @@ struct ContentView: View {
                 } label: {
                     ComposerPillButtonLabel(
                         systemImage: "paperplane.fill",
-                        text: vm.autoSendAfterSilenceEnabled ? "Send Now" : "Send",
+                        text: vm.usesAutoSendForCurrentTurn ? "Send Now" : "Send",
                         tint: .white,
                         fill: .blue,
                         minWidth: 104
@@ -1003,7 +1063,7 @@ struct ContentView: View {
     }
 
     private var shouldShowComposerSummaryRow: Bool {
-        shouldShowComposerStatusSummary || !vm.draftAttachments.isEmpty
+        vm.isVoiceModeActiveForCurrentThread || shouldShowComposerStatusSummary || !vm.draftAttachments.isEmpty
     }
 
     private var composerStatusSummaryText: String {
@@ -1609,12 +1669,12 @@ struct ContentView: View {
 
                     Spacer(minLength: 0)
 
-                    Text(vm.autoSendAfterSilenceEnabled ? "Auto-send" : "Manual")
+                    Text(vm.usesAutoSendForCurrentTurn ? "Auto-send" : "Manual")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(vm.autoSendAfterSilenceEnabled ? .blue : .secondary)
+                        .foregroundStyle(vm.usesAutoSendForCurrentTurn ? .blue : .secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background((vm.autoSendAfterSilenceEnabled ? Color.blue : Color.secondary).opacity(0.12))
+                        .background((vm.usesAutoSendForCurrentTurn ? Color.blue : Color.secondary).opacity(0.12))
                         .clipShape(Capsule())
                 }
                 .padding(.horizontal, 12)
@@ -1648,7 +1708,10 @@ struct ContentView: View {
     }
 
     private var recordingSubtitle: String {
-        if vm.autoSendAfterSilenceEnabled {
+        if vm.isVoiceModeActiveForCurrentThread {
+            return "Sends this turn and reopens the mic after the reply"
+        }
+        if vm.usesAutoSendForCurrentTurn {
             return "Auto-sends after \(vm.autoSendAfterSilenceSeconds)s of silence"
         }
         return "Tap stop when you're ready to send"
@@ -1680,6 +1743,21 @@ struct ContentView: View {
 
     private func handleRecordingDiscardTap() {
         Task { await vm.discardRecording() }
+    }
+
+    private func handleVoiceModeButtonTap() {
+        if !vm.isVoiceModeActiveForCurrentThread && vm.shouldPresentMicrophonePrimer {
+            vm.markMicrophonePrimerSeen()
+        }
+        Task { await vm.toggleVoiceMode() }
+    }
+
+    private func handleVoiceModeStartTap() {
+        guard !vm.isVoiceModeActiveForCurrentThread else { return }
+        if vm.shouldPresentMicrophonePrimer {
+            vm.markMicrophonePrimerSeen()
+        }
+        Task { await vm.startVoiceModeIfNeeded() }
     }
 
     private func handleComposerSend() {
@@ -1760,7 +1838,7 @@ struct ContentView: View {
                 await vm.retryLastPrompt()
             case .voice:
                 vm.clearComposerText()
-                handleRecordingButtonTap()
+                handleVoiceModeStartTap()
             case .paste:
                 vm.clearComposerText()
                 await vm.pasteClipboardContentIntoDraft()

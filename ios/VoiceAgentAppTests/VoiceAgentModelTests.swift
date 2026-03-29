@@ -2,6 +2,34 @@ import XCTest
 @testable import VoiceAgentApp
 
 final class VoiceAgentModelTests: XCTestCase {
+    @MainActor
+    func testIncomingURLStoreBuffersUntilConsumed() {
+        let store = IncomingURLStore()
+        let url = URL(string: "mobaile://pair?pair_code=abc&server_url=http%3A%2F%2F127.0.0.1%3A8000")!
+
+        store.receive(url)
+
+        XCTAssertEqual(store.pendingURL, url)
+        XCTAssertEqual(store.takePendingURL(), url)
+        XCTAssertNil(store.pendingURL)
+    }
+
+    @MainActor
+    func testApplyPairingURLStagesPendingPairingFromCustomScheme() {
+        let vm = VoiceAgentViewModel()
+        let url = URL(string: "mobaile://pair?server_url=http%3A%2F%2Fvemunds-macbook-air.tail6a5903.ts.net%3A8000&server_url=http%3A%2F%2F100.111.99.51%3A8000&pair_code=abc123&session_id=iphone-app")!
+
+        vm.applyPairingURL(url)
+
+        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.pendingPairing?.serverURLs ?? [], [
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            "http://100.111.99.51:8000",
+        ])
+        XCTAssertEqual(vm.pendingPairing?.pairCode, "abc123")
+        XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
+    }
+
     func testRunRecordDecoding() throws {
         let json = """
         {
@@ -407,6 +435,48 @@ final class VoiceAgentModelTests: XCTestCase {
         )
 
         XCTAssertEqual(combined, "Summarize the current repo status.")
+    }
+
+    @MainActor
+    func testVoiceModeUsesAutoSendEvenWhenManualModeIsConfigured() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let threadID = vm.activeThreadID else {
+            XCTFail("Expected an active thread")
+            return
+        }
+
+        vm.autoSendAfterSilenceEnabled = false
+        vm._test_setVoiceModeEnabled(true, threadID: threadID)
+
+        XCTAssertTrue(vm._test_usesAutoSendForCurrentTurn())
+    }
+
+    @MainActor
+    func testSwitchingThreadsDisablesVoiceModeLoop() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let firstThreadID = vm.activeThreadID else {
+            XCTFail("Expected a first thread")
+            return
+        }
+        vm.createNewThread()
+        guard let secondThreadID = vm.activeThreadID else {
+            XCTFail("Expected a second thread")
+            return
+        }
+
+        defer {
+            vm.deleteThread(secondThreadID)
+            vm.deleteThread(firstThreadID)
+        }
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm.switchToThread(secondThreadID)
+
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertFalse(vm.isVoiceModeActiveForCurrentThread)
     }
 
     @MainActor

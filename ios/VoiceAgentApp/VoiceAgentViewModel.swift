@@ -31,8 +31,48 @@ private enum PreviewScenario: String {
     }
 }
 
+private enum PairingHostRules {
+    static func isLocalOrPrivateHost(_ host: String) -> Bool {
+        if host.isEmpty { return false }
+        return isLoopbackOrBonjourHost(host) || isRFC1918LANHost(host) || isTailscaleHost(host)
+    }
+
+    static func isLoopbackOrBonjourHost(_ host: String) -> Bool {
+        let lower = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lower == "localhost" || lower == "::1" || lower.hasSuffix(".local") || lower.hasPrefix("127.")
+    }
+
+    static func isRFC1918LANHost(_ host: String) -> Bool {
+        let lower = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower.hasPrefix("10.") || lower.hasPrefix("192.168.") {
+            return true
+        }
+        if lower.hasPrefix("172.") {
+            let parts = lower.split(separator: ".")
+            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func isTailscaleHost(_ host: String) -> Bool {
+        let lower = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower.hasSuffix(".ts.net") {
+            return true
+        }
+        if lower.hasPrefix("100.") {
+            let parts = lower.split(separator: ".")
+            if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
+                return true
+            }
+        }
+        return false
+    }
+}
+
 @MainActor
-final class VoiceAgentViewModel: ObservableObject {
+final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     struct PendingPairing: Identifiable, Equatable {
         let id = UUID()
         let serverURL: String
@@ -47,7 +87,7 @@ final class VoiceAgentViewModel: ObservableObject {
 
         var localNetworkWarning: String? {
             guard serverURL.lowercased().hasPrefix("http://"),
-                  Self.isRFC1918LANHost(serverHost) else {
+                  PairingHostRules.isRFC1918LANHost(serverHost) else {
                 return nil
             }
             return "This pairing link uses plain HTTP over your local network. It keeps setup simple, but anyone who can observe this Wi-Fi could capture the pairing exchange. Prefer Tailscale or HTTPS when possible."
@@ -57,45 +97,10 @@ final class VoiceAgentViewModel: ObservableObject {
             if serverURL.lowercased().hasPrefix("https://") {
                 return "HTTPS"
             }
-            if Self.isLocalOrPrivateHost(serverHost) {
+            if PairingHostRules.isLocalOrPrivateHost(serverHost) {
                 return "LOCAL"
             }
             return "HTTP"
-        }
-
-        private static func isLocalOrPrivateHost(_ host: String) -> Bool {
-            if host.isEmpty { return false }
-            return isLoopbackOrBonjourHost(host) || isRFC1918LANHost(host) || isTailscaleHost(host)
-        }
-
-        private static func isLoopbackOrBonjourHost(_ host: String) -> Bool {
-            host == "localhost" || host == "::1" || host.hasSuffix(".local") || host.hasPrefix("127.")
-        }
-
-        private static func isRFC1918LANHost(_ host: String) -> Bool {
-            if host.hasPrefix("10.") || host.hasPrefix("192.168.") {
-                return true
-            }
-            if host.hasPrefix("172.") {
-                let parts = host.split(separator: ".")
-                if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
-                    return true
-                }
-            }
-            return false
-        }
-
-        private static func isTailscaleHost(_ host: String) -> Bool {
-            if host.hasSuffix(".ts.net") {
-                return true
-            }
-            if host.hasPrefix("100.") {
-                let parts = host.split(separator: ".")
-                if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
-                    return true
-                }
-            }
-            return false
         }
     }
 
@@ -146,6 +151,8 @@ final class VoiceAgentViewModel: ObservableObject {
     @Published var isRecording: Bool = false
     @Published var recordingStartedAt: Date?
     @Published var didCompleteRun: Bool = false
+    @Published var voiceModeEnabled: Bool = false
+    @Published var isSpeakingReply: Bool = false
     @Published var activeRunExecutor: String = "codex"
     @Published var threads: [ChatThread] = []
     @Published var activeThreadID: UUID?
@@ -193,6 +200,8 @@ final class VoiceAgentViewModel: ObservableObject {
     private var observedRunContexts: [String: ObservedRunContext] = [:]
     private var lastHydratedSessionContextID: String?
     private var lastHydratedSessionContextServerURL: String?
+    private var voiceModeThreadID: UUID?
+    private var shouldResumeVoiceModeAfterSpeech = false
 
     private enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
@@ -219,17 +228,19 @@ final class VoiceAgentViewModel: ObservableObject {
         static let pendingShortcutAction = "mobaile.pending_shortcut_action"
     }
 
-    init() {
+    override init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         draftAttachmentDirectory = appSupport
             .appendingPathComponent("MOBaiLE", isDirectory: true)
             .appendingPathComponent("draft-attachments", isDirectory: true)
+        super.init()
         try? FileManager.default.createDirectory(
             at: draftAttachmentDirectory,
             withIntermediateDirectories: true,
             attributes: nil
         )
+        speaker.delegate = self
         client.onResolvedServerURL = { [weak self] resolvedURL in
             Task { @MainActor in
                 self?.promoteResolvedServerURL(resolvedURL)
@@ -363,6 +374,10 @@ final class VoiceAgentViewModel: ObservableObject {
         pendingPairing = nil
         didBootstrapSession = true
         draftAttachmentTransferStates = [:]
+        voiceModeEnabled = false
+        voiceModeThreadID = nil
+        isSpeakingReply = false
+        shouldResumeVoiceModeAfterSpeech = false
         refreshClientConnectionCandidates()
 
         performThreadStateRestore {
@@ -385,6 +400,8 @@ final class VoiceAgentViewModel: ObservableObject {
                 isRecording = false
                 recordingStartedAt = nil
                 didCompleteRun = false
+                voiceModeEnabled = false
+                voiceModeThreadID = nil
 
             case .conversation:
                 conversation = previewConversation()
@@ -401,6 +418,8 @@ final class VoiceAgentViewModel: ObservableObject {
                 isRecording = false
                 recordingStartedAt = nil
                 didCompleteRun = true
+                voiceModeEnabled = false
+                voiceModeThreadID = nil
 
             case .recording:
                 conversation = previewConversation()
@@ -418,6 +437,8 @@ final class VoiceAgentViewModel: ObservableObject {
                 recordingStartedAt = Date().addingTimeInterval(-38)
                 autoSendAfterSilenceEnabled = true
                 didCompleteRun = false
+                voiceModeEnabled = true
+                voiceModeThreadID = primaryThreadID
             }
         }
     }
@@ -568,7 +589,7 @@ final class VoiceAgentViewModel: ObservableObject {
         recordingStartedAt = nil
         do {
             let silenceConfig: AudioRecorderService.SilenceConfig?
-            if autoSendAfterSilenceEnabled {
+            if usesAutoSendForCurrentTurn {
                 silenceConfig = AudioRecorderService.SilenceConfig(
                     requiredSilenceDuration: normalizedAutoSendAfterSilenceSeconds
                 )
@@ -576,6 +597,10 @@ final class VoiceAgentViewModel: ObservableObject {
                 silenceConfig = nil
             }
 
+            shouldResumeVoiceModeAfterSpeech = false
+            if speaker.isSpeaking {
+                speaker.stopSpeaking(at: .immediate)
+            }
             try await recorder.start(silenceConfig: silenceConfig) { [weak self] in
                 guard let self else { return }
                 Task { @MainActor in
@@ -882,6 +907,19 @@ final class VoiceAgentViewModel: ObservableObject {
         statusText = hasConfiguredConnection ? "Ready for prompts" : "Set server URL and token first."
     }
 
+    func toggleVoiceMode() async {
+        if isVoiceModeActiveForCurrentThread {
+            endVoiceMode()
+            return
+        }
+        await beginVoiceMode()
+    }
+
+    func startVoiceModeIfNeeded() async {
+        guard !isVoiceModeActiveForCurrentThread else { return }
+        await beginVoiceMode()
+    }
+
     func toggleRecordingFromHeadsetControl() async {
         guard airPodsClickToRecordEnabled else { return }
         guard hasConfiguredConnection else {
@@ -899,7 +937,7 @@ final class VoiceAgentViewModel: ObservableObject {
         if isRecording || isLoading {
             return
         }
-        await startRecording()
+        await startVoiceModeIfNeeded()
     }
 
     func handleSendLastPromptShortcut() async {
@@ -910,6 +948,29 @@ final class VoiceAgentViewModel: ObservableObject {
         statusText = "No previous prompt to resend."
     }
 
+    var isVoiceModeActiveForCurrentThread: Bool {
+        guard let activeThreadID else { return false }
+        return voiceModeEnabled && voiceModeThreadID == activeThreadID
+    }
+
+    var usesAutoSendForCurrentTurn: Bool {
+        autoSendAfterSilenceEnabled || isVoiceModeActiveForCurrentThread
+    }
+
+    var voiceModeStatusText: String {
+        guard isVoiceModeActiveForCurrentThread else { return "Voice mode" }
+        if isRecording {
+            return "Listening"
+        }
+        if isSpeakingReply {
+            return "Speaking"
+        }
+        if isLoading {
+            return "Replying"
+        }
+        return "Voice mode on"
+    }
+
     var shouldPresentMicrophonePrimer: Bool {
         !hasSeenMicrophonePrimer
     }
@@ -918,6 +979,44 @@ final class VoiceAgentViewModel: ObservableObject {
         guard !hasSeenMicrophonePrimer else { return }
         hasSeenMicrophonePrimer = true
         defaults.set(true, forKey: DefaultsKey.microphonePrimerSeen)
+    }
+
+    private func beginVoiceMode() async {
+        guard hasConfiguredConnection else {
+            statusText = "Set server URL and token first."
+            return
+        }
+        if activeThreadID == nil {
+            createNewThread()
+        }
+        voiceModeEnabled = true
+        voiceModeThreadID = activeThreadID
+        shouldResumeVoiceModeAfterSpeech = false
+        errorText = ""
+        if !isRecording && !isLoading {
+            await startRecording()
+        } else if isLoading {
+            statusText = "Voice mode will continue after this reply."
+        } else {
+            statusText = "Voice mode is on."
+        }
+    }
+
+    func endVoiceMode() {
+        deactivateVoiceMode(stopSpeaking: true)
+        if !isRecording && !isLoading && hasConfiguredConnection {
+            statusText = "Ready for prompts"
+        }
+    }
+
+    private func deactivateVoiceMode(stopSpeaking: Bool) {
+        voiceModeEnabled = false
+        voiceModeThreadID = nil
+        shouldResumeVoiceModeAfterSpeech = false
+        isSpeakingReply = false
+        if stopSpeaking, speaker.isSpeaking {
+            speaker.stopSpeaking(at: .immediate)
+        }
     }
 
     func consumePendingShortcutActionIfNeeded() async {
@@ -2327,6 +2426,9 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func switchToThread(_ threadID: UUID) {
         guard let idx = threadIndex(for: threadID) else { return }
+        if voiceModeEnabled, voiceModeThreadID != threadID {
+            deactivateVoiceMode(stopSpeaking: true)
+        }
         persistActiveThreadSnapshot()
         let thread = threads[idx]
         let restoredAttachments = availableDraftAttachments(from: thread.draftAttachments)
@@ -2361,6 +2463,9 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func createNewThread() {
+        if voiceModeEnabled {
+            deactivateVoiceMode(stopSpeaking: true)
+        }
         persistActiveThreadSnapshot()
         let thread = ChatThread(
             id: UUID(),
@@ -2412,6 +2517,9 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     func deleteThread(_ threadID: UUID) {
+        if voiceModeThreadID == threadID {
+            deactivateVoiceMode(stopSpeaking: true)
+        }
         if activeThreadID == threadID {
             persistActiveThreadSnapshot()
         }
@@ -2488,10 +2596,64 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func speak(_ text: String) {
-        guard !text.isEmpty else { return }
-        let utterance = AVSpeechUtterance(string: text)
+        let spoken = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !spoken.isEmpty else { return }
+        let utterance = AVSpeechUtterance(string: spoken)
         utterance.rate = 0.5
         speaker.speak(utterance)
+    }
+
+    private func scheduleVoiceModeResumeAfterCurrentReply(threadID: UUID, replyText: String) {
+        guard voiceModeEnabled, voiceModeThreadID == threadID else {
+            speak(replyText)
+            return
+        }
+        shouldResumeVoiceModeAfterSpeech = true
+        let spokenReply = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !spokenReply.isEmpty else {
+            Task { @MainActor in
+                await self.resumeVoiceModeAfterSpokenReplyIfNeeded()
+            }
+            return
+        }
+        speak(spokenReply)
+    }
+
+    private func resumeVoiceModeAfterSpokenReplyIfNeeded() async {
+        guard shouldResumeVoiceModeAfterSpeech else { return }
+        guard voiceModeEnabled,
+              let voiceModeThreadID,
+              voiceModeThreadID == activeThreadID else {
+            shouldResumeVoiceModeAfterSpeech = false
+            return
+        }
+        shouldResumeVoiceModeAfterSpeech = false
+        guard !isLoading, !isRecording else { return }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        await startRecording()
+        if !isRecording {
+            deactivateVoiceMode(stopSpeaking: false)
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.isSpeakingReply = true
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.isSpeakingReply = false
+            await self.resumeVoiceModeAfterSpokenReplyIfNeeded()
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.isSpeakingReply = false
+            await self.resumeVoiceModeAfterSpokenReplyIfNeeded()
+        }
     }
 
     private var normalizedServerURL: String {
@@ -2647,6 +2809,10 @@ final class VoiceAgentViewModel: ObservableObject {
         if activeThreadID == threadID, didCompleteRun && summaryText == run.summary {
             return
         }
+        let shouldContinueVoiceMode = voiceModeEnabled && voiceModeThreadID == threadID
+        if shouldContinueVoiceMode, run.status != "completed" {
+            deactivateVoiceMode(stopSpeaking: false)
+        }
 
         setThreadPendingHumanUnblock(
             threadID: threadID,
@@ -2668,7 +2834,11 @@ final class VoiceAgentViewModel: ObservableObject {
             if runEndedAt == nil {
                 runEndedAt = Date()
             }
-            speak(run.summary)
+            if shouldContinueVoiceMode && run.status == "completed" {
+                scheduleVoiceModeResumeAfterCurrentReply(threadID: threadID, replyText: run.summary)
+            } else {
+                speak(run.summary)
+            }
         }
 
         removeObservedRunContext(runID: run.runId)
@@ -3146,26 +3316,7 @@ final class VoiceAgentViewModel: ObservableObject {
     }
 
     private func isLocalOrPrivateHost(_ host: String) -> Bool {
-        let lower = host.lowercased()
-        if lower == "localhost" || lower == "::1" || lower.hasSuffix(".local") {
-            return true
-        }
-        if lower.hasPrefix("127.") || lower.hasPrefix("10.") || lower.hasPrefix("192.168.") {
-            return true
-        }
-        if lower.hasPrefix("100.") {
-            let parts = lower.split(separator: ".")
-            if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
-                return true
-            }
-        }
-        if lower.hasPrefix("172.") {
-            let parts = lower.split(separator: ".")
-            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
-                return true
-            }
-        }
-        return false
+        PairingHostRules.isLocalOrPrivateHost(host)
     }
 
     private func loadThreads() {
@@ -3601,5 +3752,18 @@ final class VoiceAgentViewModel: ObservableObject {
 
     func _test_composeVoiceUtteranceText(draftText: String, transcriptText: String) -> String {
         composeVoiceUtteranceText(draftText: draftText, transcriptText: transcriptText)
+    }
+
+    func _test_setVoiceModeEnabled(_ enabled: Bool, threadID: UUID?) {
+        if enabled {
+            voiceModeEnabled = true
+            voiceModeThreadID = threadID
+            return
+        }
+        deactivateVoiceMode(stopSpeaking: false)
+    }
+
+    func _test_usesAutoSendForCurrentTurn() -> Bool {
+        usesAutoSendForCurrentTurn
     }
 }

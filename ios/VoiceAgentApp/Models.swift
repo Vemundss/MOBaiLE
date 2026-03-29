@@ -705,8 +705,8 @@ struct ComposerSlashCommand: Identifiable, Equatable {
         ),
         .local(
             .voice,
-            title: "Start Recording",
-            description: "Start hands-free voice capture.",
+            title: "Start Voice Mode",
+            description: "Open live voice mode and keep listening after each reply.",
             symbol: "mic",
             usage: "/voice",
             group: "Input",

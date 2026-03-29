@@ -4,8 +4,8 @@ import Foundation
 private let pendingShortcutActionKey = "mobaile.pending_shortcut_action"
 
 struct StartVoiceTaskIntent: AppIntent {
-    static var title: LocalizedStringResource = "Start Voice Task"
-    static var description = IntentDescription("Open MOBaiLE and start recording.")
+    static var title: LocalizedStringResource = "Start Voice Mode"
+    static var description = IntentDescription("Open MOBaiLE and keep listening after each reply.")
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult {
@@ -30,11 +30,13 @@ struct MOBaiLEAppShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: StartVoiceTaskIntent(),
             phrases: [
+                "Start voice mode in \(.applicationName)",
                 "Start voice task in \(.applicationName)",
                 "Record with \(.applicationName)",
                 "Talk to my computer with \(.applicationName)",
+                "Talk hands-free with \(.applicationName)",
             ],
-            shortTitle: "Start Voice",
+            shortTitle: "Voice Mode",
             systemImageName: "mic.fill"
         )
         AppShortcut(
