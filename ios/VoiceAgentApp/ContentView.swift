@@ -795,14 +795,6 @@ struct ContentView: View {
                     )
                 }
 
-                if !vm.draftAttachments.isEmpty {
-                    ComposerMetaPill(
-                        text: attachmentSummaryText,
-                        systemImage: "paperclip.circle.fill",
-                        tint: .accentColor
-                    )
-                }
-
                 if !vm.runID.isEmpty && shouldShowComposerStatusSummary {
                     Text("Run \(shortRunID(vm.runID))")
                         .font(.caption2.monospaced())
@@ -815,242 +807,279 @@ struct ContentView: View {
     }
 
     private var standardComposerRow: some View {
-        VStack(spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $vm.promptText)
-                    .focused($composerFocused)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 9)
-                    .frame(height: composerHeight)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(
-                                composerFocused
-                                    ? Color.accentColor.opacity(0.30)
-                                    : Color(.separator).opacity(0.12),
-                                lineWidth: 1
-                            )
-                    )
-
-                if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(composerPlaceholder)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 14)
-                        .padding(.top, 16)
-                        .allowsHitTesting(false)
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .bottom, spacing: 10) {
+                composerUtilityActionTray
+                composerTextEditorSurface
+                    .frame(minWidth: 140)
+                composerPrimaryActionButton
             }
-            .animation(.easeInOut(duration: 0.16), value: composerHeight)
 
-            HStack(spacing: 10) {
-                Button {
-                    composerFocused = false
-                    showAttachmentOptions = true
-                } label: {
-                    ComposerActionButtonLabel(
-                        systemImage: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill",
-                        tint: vm.draftAttachments.isEmpty ? .secondary : .accentColor,
-                        fill: vm.draftAttachments.isEmpty ? Color(.secondarySystemBackground) : Color.accentColor.opacity(0.14),
-                        size: 40,
-                        iconSize: 15,
-                        weight: .semibold
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add attachment")
-                .disabled(!vm.hasConfiguredConnection || vm.isLoading)
-                .opacity((!vm.hasConfiguredConnection || vm.isLoading) ? 0.45 : 1)
+            VStack(spacing: 8) {
+                composerTextEditorSurface
 
-                Spacer(minLength: 0)
-
-                let canStartVoiceMode = !vm.isLoading && vm.hasConfiguredConnection
-                Button {
-                    composerFocused = false
-                    handleVoiceModeButtonTap()
-                } label: {
-                    ComposerPillButtonLabel(
-                        systemImage: vm.isVoiceModeActiveForCurrentThread ? "waveform.circle.fill" : "waveform.circle",
-                        text: vm.isVoiceModeActiveForCurrentThread ? "End Voice" : "Voice Mode",
-                        tint: vm.isVoiceModeActiveForCurrentThread ? .white : .blue,
-                        fill: vm.isVoiceModeActiveForCurrentThread ? .blue : Color.blue.opacity(0.12),
-                        minWidth: 96
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(vm.isVoiceModeActiveForCurrentThread ? "End voice mode" : "Start voice mode")
-                .disabled(!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode)
-                .opacity((!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode) ? 0.45 : 1)
-
-                Button {
-                    composerFocused = false
-                    handleRecordingButtonTap()
-                } label: {
-                    ComposerPillButtonLabel(
-                        systemImage: "mic.fill",
-                        text: vm.hasDraftContent ? "Add Voice" : "Record",
-                        tint: .blue,
-                        fill: Color.blue.opacity(0.12),
-                        minWidth: vm.hasDraftContent ? 102 : 94
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Start recording")
-                .disabled(vm.isLoading || !vm.hasConfiguredConnection)
-                .opacity((vm.isLoading || !vm.hasConfiguredConnection) ? 0.45 : 1)
-
-                if vm.canCancelActiveOperation {
-                    Button {
-                        composerFocused = false
-                        vm.cancelActiveOperation()
-                    } label: {
-                        ComposerActionButtonLabel(
-                            systemImage: "stop.fill",
-                            tint: .white,
-                            fill: .red,
-                            size: 46,
-                            iconSize: 13,
-                            weight: .semibold
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
-                } else {
-                    Button {
-                        handleComposerSend()
-                    } label: {
-                        ComposerActionButtonLabel(
-                            systemImage: "arrow.up",
-                            tint: .white,
-                            fill: .accentColor,
-                            size: 46,
-                            iconSize: 14,
-                            weight: .bold
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Send prompt")
-                    .disabled(
-                        !vm.hasConfiguredConnection ||
-                        !vm.hasDraftContent
-                    )
-                    .opacity((!vm.hasConfiguredConnection || !vm.hasDraftContent) ? 0.45 : 1)
+                HStack(spacing: 10) {
+                    composerUtilityActionTray
+                    Spacer(minLength: 0)
+                    composerPrimaryActionButton
                 }
             }
         }
     }
 
+    private var composerTextEditorSurface: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $vm.promptText)
+                .focused($composerFocused)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .frame(height: composerHeight)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(
+                            composerFocused
+                                ? Color.accentColor.opacity(0.30)
+                                : Color(.separator).opacity(0.12),
+                            lineWidth: 1
+                        )
+                )
+
+            if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(composerPlaceholder)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 14)
+                    .padding(.top, 16)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeInOut(duration: 0.16), value: composerHeight)
+    }
+
+    private var composerUtilityActionTray: some View {
+        HStack(spacing: 4) {
+            Button {
+                composerFocused = false
+                showAttachmentOptions = true
+            } label: {
+                ComposerTrayButtonLabel(
+                    systemImage: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill",
+                    tint: vm.draftAttachments.isEmpty ? Color.secondary : Color.accentColor,
+                    fill: vm.draftAttachments.isEmpty ? .clear : Color.accentColor.opacity(0.16)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add attachment")
+            .disabled(!vm.hasConfiguredConnection || vm.isLoading)
+            .opacity((!vm.hasConfiguredConnection || vm.isLoading) ? 0.45 : 1)
+
+            let canStartVoiceMode = !vm.isLoading && vm.hasConfiguredConnection
+            Button {
+                composerFocused = false
+                handleVoiceModeButtonTap()
+            } label: {
+                ComposerTrayButtonLabel(
+                    systemImage: vm.isVoiceModeActiveForCurrentThread ? "waveform.circle.fill" : "waveform.circle",
+                    tint: Color.blue,
+                    fill: vm.isVoiceModeActiveForCurrentThread ? Color.blue.opacity(0.16) : .clear
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(vm.isVoiceModeActiveForCurrentThread ? "End voice mode" : "Start voice mode")
+            .disabled(!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode)
+            .opacity((!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode) ? 0.45 : 1)
+
+            if vm.hasDraftContent && !vm.canCancelActiveOperation {
+                Button {
+                    composerFocused = false
+                    handleRecordingButtonTap()
+                } label: {
+                    ComposerTrayButtonLabel(
+                        systemImage: "mic.fill",
+                        tint: .blue,
+                        fill: Color.blue.opacity(0.12)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add a voice note")
+                .disabled(vm.isLoading || !vm.hasConfiguredConnection)
+                .opacity((vm.isLoading || !vm.hasConfiguredConnection) ? 0.45 : 1)
+            }
+        }
+        .padding(4)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(Capsule())
+    }
+
+    @ViewBuilder
+    private var composerPrimaryActionButton: some View {
+        if vm.canCancelActiveOperation {
+            Button {
+                composerFocused = false
+                vm.cancelActiveOperation()
+            } label: {
+                ComposerActionButtonLabel(
+                    systemImage: "stop.fill",
+                    tint: .white,
+                    fill: .red,
+                    size: 46,
+                    iconSize: 13,
+                    weight: .semibold
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
+        } else if vm.hasDraftContent {
+            Button {
+                handleComposerSend()
+            } label: {
+                ComposerActionButtonLabel(
+                    systemImage: "arrow.up",
+                    tint: .white,
+                    fill: .accentColor,
+                    size: 46,
+                    iconSize: 14,
+                    weight: .bold
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Send prompt")
+            .disabled(
+                !vm.hasConfiguredConnection ||
+                !vm.hasDraftContent
+            )
+            .opacity((!vm.hasConfiguredConnection || !vm.hasDraftContent) ? 0.45 : 1)
+        } else {
+            Button {
+                composerFocused = false
+                handleRecordingButtonTap()
+            } label: {
+                ComposerActionButtonLabel(
+                    systemImage: "mic.fill",
+                    tint: .white,
+                    fill: .blue,
+                    size: 46,
+                    iconSize: 14,
+                    weight: .bold
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Start recording")
+            .disabled(vm.isLoading || !vm.hasConfiguredConnection)
+            .opacity((vm.isLoading || !vm.hasConfiguredConnection) ? 0.45 : 1)
+        }
+    }
+
     private var recordingComposerRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                recordingComposerDetails
+                Spacer(minLength: 0)
+                recordingComposerActions
+            }
 
-                    if let startedAt = vm.recordingStartedAt {
-                        TimelineView(.periodic(from: startedAt, by: 1)) { context in
-                            Text(recordingDurationLabel(since: startedAt, now: context.date))
-                                .font(.headline.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(.primary)
-                        }
-                    } else {
-                        Text("Recording")
-                            .font(.headline.weight(.semibold))
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                recordingComposerDetails
+                HStack {
+                    Spacer(minLength: 0)
+                    recordingComposerActions
+                }
+            }
+        }
+    }
 
-                    if vm.isVoiceModeActiveForCurrentThread {
-                        Button {
-                            handleVoiceModeButtonTap()
-                        } label: {
-                            Text("Voice mode")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.blue)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.blue.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("End voice mode")
-                    }
+    private var recordingComposerDetails: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
 
-                    if vm.usesAutoSendForCurrentTurn {
-                        Text("Auto-send")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.blue.opacity(0.12))
-                            .clipShape(Capsule())
+                if let startedAt = vm.recordingStartedAt {
+                    TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                        Text(recordingDurationLabel(since: startedAt, now: context.date))
+                            .font(.headline.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.primary)
                     }
+                } else {
+                    Text("Recording")
+                        .font(.headline.weight(.semibold))
                 }
 
-                Text(recordingSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let typedNoteSummary = recordingTypedNoteSummaryText {
+                if vm.isVoiceModeActiveForCurrentThread {
                     ComposerMetaPill(
-                        text: typedNoteSummary,
-                        systemImage: "text.bubble.fill",
+                        text: "Voice",
+                        systemImage: "waveform.circle.fill",
                         tint: .blue
                     )
                 }
-
-                if let preview = recordingDraftPreviewText {
-                    Text(preview)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                if !vm.draftAttachments.isEmpty {
-                    ComposerMetaPill(
-                        text: attachmentSummaryText,
-                        systemImage: "paperclip.circle.fill",
-                        tint: .accentColor
-                    )
-                }
             }
 
-            Spacer(minLength: 0)
+            Text(recordingSubtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 8) {
-                Button {
-                    handleRecordingDiscardTap()
-                } label: {
-                    ComposerActionButtonLabel(
-                        systemImage: "xmark",
-                        tint: .secondary,
-                        fill: Color(.secondarySystemBackground),
-                        size: 40,
-                        iconSize: 13,
-                        weight: .semibold
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Discard recording")
-
-                Button {
-                    handleRecordingButtonTap()
-                } label: {
-                    ComposerPillButtonLabel(
-                        systemImage: "paperplane.fill",
-                        text: vm.usesAutoSendForCurrentTurn ? "Send Now" : "Send",
-                        tint: .white,
-                        fill: .blue,
-                        minWidth: 104
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Stop recording and send")
+            if let typedNoteSummary = recordingTypedNoteSummaryText {
+                ComposerMetaPill(
+                    text: typedNoteSummary,
+                    systemImage: "text.bubble.fill",
+                    tint: .blue
+                )
             }
+
+            if let preview = recordingDraftPreviewText {
+                Text(preview)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            if !vm.draftAttachments.isEmpty {
+                ComposerMetaPill(
+                    text: attachmentSummaryText,
+                    systemImage: "paperclip.circle.fill",
+                    tint: .accentColor
+                )
+            }
+        }
+    }
+
+    private var recordingComposerActions: some View {
+        HStack(spacing: 8) {
+            Button {
+                handleRecordingDiscardTap()
+            } label: {
+                ComposerActionButtonLabel(
+                    systemImage: "xmark",
+                    tint: .secondary,
+                    fill: Color(.secondarySystemBackground),
+                    size: 40,
+                    iconSize: 13,
+                    weight: .semibold
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Discard recording")
+
+            Button {
+                handleRecordingButtonTap()
+            } label: {
+                ComposerActionButtonLabel(
+                    systemImage: "paperplane.fill",
+                    tint: .white,
+                    fill: .blue,
+                    size: 44,
+                    iconSize: 14,
+                    weight: .semibold
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop recording and send")
         }
     }
 
@@ -1105,7 +1134,7 @@ struct ContentView: View {
     }
 
     private var shouldShowComposerSummaryRow: Bool {
-        vm.isVoiceModeActiveForCurrentThread || shouldShowComposerStatusSummary || !vm.draftAttachments.isEmpty
+        vm.isVoiceModeActiveForCurrentThread || shouldShowComposerStatusSummary
     }
 
     private var composerStatusSummaryText: String {
@@ -2030,21 +2059,18 @@ private struct ComposerActionButtonLabel: View {
     }
 }
 
-private struct ComposerPillButtonLabel: View {
+private struct ComposerTrayButtonLabel: View {
     let systemImage: String
-    let text: String
     let tint: Color
     let fill: Color
-    let minWidth: CGFloat
 
     var body: some View {
-        Label(text, systemImage: systemImage)
-            .font(.subheadline.weight(.semibold))
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(tint)
-            .padding(.horizontal, 14)
-            .frame(minWidth: minWidth, minHeight: 40)
+            .frame(width: 36, height: 36)
             .background(
-                Capsule()
+                Circle()
                     .fill(fill)
             )
     }
