@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+resolve_repo_root() {
+  if [[ -n "${MOBAILE_REPO_ROOT:-}" ]]; then
+    printf "%s\n" "${MOBAILE_REPO_ROOT}"
+    return
+  fi
+
+  python3 - "${BASH_SOURCE[0]}" <<'PY'
+from pathlib import Path
+import sys
+
+print(Path(sys.argv[1]).resolve().parent.parent)
+PY
+}
+
+usage() {
+  cat <<'EOF'
+Usage: mobaile [command]
+
+Commands:
+  status   Show backend status and pairing readiness
+  pair     Generate or surface the pairing QR image
+  logs     Show backend service logs
+  restart  Restart the backend service
+  start    Start the backend service
+  stop     Stop the backend service
+  config   Print important config paths and current values
+  help     Show this help
+EOF
+}
+
+read_env_value() {
+  local env_file="$1"
+  local key="$2"
+  local default_value="${3:-}"
+
+  python3 - "${env_file}" "${key}" "${default_value}" <<'PY'
+from pathlib import Path
+import sys
+
+env_path = Path(sys.argv[1])
+target_key = sys.argv[2]
+default_value = sys.argv[3]
+
+if not env_path.exists():
+    print(default_value)
+    raise SystemExit(0)
+
+value = default_value
+for line in env_path.read_text(encoding="utf-8").splitlines():
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in line:
+        continue
+    key, raw_value = line.split("=", 1)
+    if key.strip() != target_key:
+        continue
+    value = raw_value.strip().strip("\"'")
+
+print(value)
+PY
+}
+
+read_pairing_value() {
+  local pairing_file="$1"
+  local field_name="$2"
+  local default_value="${3:-}"
+
+  python3 - "${pairing_file}" "${field_name}" "${default_value}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+pairing_path = Path(sys.argv[1])
+field_name = sys.argv[2]
+default_value = sys.argv[3]
+
+if not pairing_path.exists():
+    print(default_value)
+    raise SystemExit(0)
+
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except json.JSONDecodeError:
+    print(default_value)
+    raise SystemExit(0)
+
+value = payload.get(field_name, default_value)
+if value is None:
+    value = default_value
+
+print(str(value))
+PY
+}
+
+friendly_security_label() {
+  case "$1" in
+    full-access) printf "Full Access\n" ;;
+    *) printf "Safe\n" ;;
+  esac
+}
+
+friendly_phone_access_label() {
+  case "$1" in
+    wifi) printf "On this Wi-Fi\n" ;;
+    local) printf "This computer only\n" ;;
+    *) printf "Anywhere with Tailscale\n" ;;
+  esac
+}
+
+service_script_path() {
+  local repo_root="$1"
+
+  case "$(uname -s)" in
+    Darwin) printf "%s\n" "${repo_root}/scripts/service_macos.sh" ;;
+    Linux) printf "%s\n" "${repo_root}/scripts/service_linux.sh" ;;
+    *)
+      echo "Unsupported platform: $(uname -s)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+service_state_label() {
+  local repo_root="$1"
+  local override="${MOBAILE_TEST_SERVICE_STATE:-}"
+
+  if [[ -n "${override}" ]]; then
+    case "${override}" in
+      running|started|active) printf "Running\n" ;;
+      *) printf "Stopped\n" ;;
+    esac
+    return
+  fi
+
+  local service_script
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ ! -f "${service_script}" ]]; then
+    printf "Stopped\n"
+    return
+  fi
+
+  local status_output lowered
+  status_output="$(bash "${service_script}" status 2>&1 || true)"
+  lowered="$(printf "%s" "${status_output}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ "${lowered}" == *"not loaded"* ]] || [[ "${lowered}" == *"inactive"* ]] || [[ "${lowered}" == *"dead"* ]] || [[ "${lowered}" == *"failed"* ]] || [[ "${lowered}" == *"could not be found"* ]]; then
+    printf "Stopped\n"
+    return
+  fi
+
+  if [[ "${lowered}" == *"running"* ]] || [[ "${lowered}" == *"active"* ]] || [[ "${lowered}" == *"pid ="* ]] || [[ "${lowered}" == *"state = running"* ]]; then
+    printf "Running\n"
+    return
+  fi
+
+  printf "Stopped\n"
+}
+
+pairing_status_label() {
+  local pairing_file="$1"
+
+  python3 - "${pairing_file}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+pairing_path = Path(sys.argv[1])
+if not pairing_path.exists():
+    print("Not ready")
+    raise SystemExit(0)
+
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except json.JSONDecodeError:
+    print("Not ready")
+    raise SystemExit(0)
+
+server_url = str(payload.get("server_url", "")).strip()
+pair_code = str(payload.get("pair_code", "")).strip()
+print("Ready" if server_url and pair_code else "Not ready")
+PY
+}
+
+pairing_qr_path() {
+  local backend_dir="$1"
+  printf "%s\n" "${MOBAILE_TEST_PAIRING_QR:-${backend_dir}/pairing-qr.png}"
+}
+
+pairing_qr_label() {
+  local backend_dir="$1"
+  local qr_path
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+
+  if [[ -f "${qr_path}" ]]; then
+    printf "Ready (%s)\n" "${qr_path}"
+  else
+    printf "Not ready\n"
+  fi
+}
+
+open_file_if_possible() {
+  local path="$1"
+
+  if [[ "${MOBAILE_SKIP_OPEN:-0}" == "1" ]]; then
+    return
+  fi
+
+  if command -v open >/dev/null 2>&1; then
+    open "${path}" >/dev/null 2>&1 || true
+    return
+  fi
+
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "${path}" >/dev/null 2>&1 || true
+  fi
+}
+
+status_command() {
+  local repo_root="$1"
+  local backend_dir="${repo_root}/backend"
+  local env_file="${backend_dir}/.env"
+  local pairing_file="${backend_dir}/pairing.json"
+  local security_mode phone_access_mode server_url
+
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
+
+  cat <<EOF
+MOBaiLE: $(service_state_label "${repo_root}")
+Security: $(friendly_security_label "${security_mode}")
+Phone access: $(friendly_phone_access_label "${phone_access_mode}")
+Phone pairing: $(pairing_status_label "${pairing_file}")
+URL: ${server_url}
+Pairing QR: $(pairing_qr_label "${backend_dir}")
+
+Quick actions:
+  mobaile pair
+  mobaile restart
+  mobaile logs
+  mobaile config
+EOF
+}
+
+pair_command() {
+  local repo_root="$1"
+  local backend_dir="${repo_root}/backend"
+  local pairing_file="${backend_dir}/pairing.json"
+  local qr_path
+
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+
+  if [[ -n "${MOBAILE_TEST_PAIRING_QR:-}" ]]; then
+    mkdir -p "$(dirname "${qr_path}")"
+    : > "${qr_path}"
+  else
+    if [[ ! -f "${pairing_file}" ]]; then
+      echo "Pairing is not ready. Missing ${pairing_file}." >&2
+      echo "Run mobaile status after the backend is configured." >&2
+      exit 1
+    fi
+
+    if [[ ! -f "${repo_root}/scripts/pairing_qr.sh" ]]; then
+      echo "Missing pairing QR helper: ${repo_root}/scripts/pairing_qr.sh" >&2
+      exit 1
+    fi
+
+    bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}"
+  fi
+
+  cat <<EOF
+Pairing QR: ${qr_path}
+URL: $(read_pairing_value "${pairing_file}" "server_url" "Not ready")
+Phone pairing: $(pairing_status_label "${pairing_file}")
+EOF
+
+  if [[ -f "${qr_path}" ]]; then
+    open_file_if_possible "${qr_path}"
+  else
+    echo "QR image is not available yet at ${qr_path}."
+  fi
+}
+
+delegate_service_command() {
+  local repo_root="$1"
+  local command_name="$2"
+  local service_script
+
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ ! -f "${service_script}" ]]; then
+    echo "Missing service helper: ${service_script}" >&2
+    exit 1
+  fi
+
+  exec bash "${service_script}" "${command_name}"
+}
+
+config_command() {
+  local repo_root="$1"
+  local backend_dir="${repo_root}/backend"
+  local env_file="${backend_dir}/.env"
+  local pairing_file="${backend_dir}/pairing.json"
+  local qr_path service_script security_mode phone_access_mode api_token server_url
+
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+  service_script="$(service_script_path "${repo_root}")"
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  api_token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
+  server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
+
+  cat <<EOF
+MOBaiLE configuration
+
+Repo root: ${repo_root}
+Backend dir: ${backend_dir}
+Env file: ${env_file} $( [[ -f "${env_file}" ]] && printf "(present)" || printf "(missing)" )
+Pairing file: ${pairing_file} $( [[ -f "${pairing_file}" ]] && printf "(present)" || printf "(missing)" )
+Pairing QR image: ${qr_path} $( [[ -f "${qr_path}" ]] && printf "(present)" || printf "(missing)" )
+Service helper: ${service_script}
+
+Security mode: $(friendly_security_label "${security_mode}") (${security_mode})
+Phone access mode: $(friendly_phone_access_label "${phone_access_mode}") (${phone_access_mode})
+API token: $( [[ -n "${api_token}" ]] && printf "Configured" || printf "Missing" )
+Server URL: ${server_url}
+Phone pairing: $(pairing_status_label "${pairing_file}")
+EOF
+}
+
+main() {
+  local repo_root command_name
+  repo_root="$(resolve_repo_root)"
+  command_name="${1:-status}"
+
+  case "${command_name}" in
+    status) status_command "${repo_root}" ;;
+    pair) pair_command "${repo_root}" ;;
+    logs|restart|start|stop) delegate_service_command "${repo_root}" "${command_name}" ;;
+    config) config_command "${repo_root}" ;;
+    -h|--help|help) usage ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
