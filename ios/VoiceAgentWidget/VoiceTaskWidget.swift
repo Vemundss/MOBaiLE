@@ -25,7 +25,7 @@ private struct VoiceTaskWidgetView: View {
     @Environment(\.widgetFamily) private var family
 
     private var startVoiceURL: URL {
-        URL(string: "mobaile://shortcut?action=start-voice")!
+        URL(string: "\(WidgetURLSchemeConfiguration.activeScheme)://shortcut?action=start-voice")!
     }
 
     var body: some View {

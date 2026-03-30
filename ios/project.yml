@@ -17,7 +17,7 @@ targets:
     info:
       path: VoiceAgentApp/Info.plist
       properties:
-        CFBundleDisplayName: MOBaiLE
+        CFBundleDisplayName: $(APP_DISPLAY_NAME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
@@ -32,21 +32,27 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         ITSAppUsesNonExemptEncryption: false
+        MOBaiLEURLScheme: $(MOBAILE_URL_SCHEME)
         CFBundleURLTypes:
           - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes:
-              - mobaile
+              - $(MOBAILE_URL_SCHEME)
     settings:
       base:
+        APP_DISPLAY_NAME: MOBaiLE
+        MOBAILE_URL_SCHEME: mobaile
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp
-        CURRENT_PROJECT_VERSION: 4
+        CURRENT_PROJECT_VERSION: 5
         MARKETING_VERSION: 1.0.1
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: G9VZ6PWF3Z
         TARGETED_DEVICE_FAMILY: "1"
       configs:
         Debug:
+          APP_DISPLAY_NAME: MOBaiLE Dev
           INFOPLIST_FILE: VoiceAgentApp/Info-Debug.plist
+          MOBAILE_URL_SCHEME: mobaile-dev
+          PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.dev
         Release:
           INFOPLIST_FILE: VoiceAgentApp/Info.plist
 
@@ -76,16 +82,22 @@ targets:
         CFBundleDisplayName: MOBaiLE Widget
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        MOBaiLEURLScheme: $(MOBAILE_URL_SCHEME)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
+        MOBAILE_URL_SCHEME: mobaile
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.widget
-        CURRENT_PROJECT_VERSION: 4
+        CURRENT_PROJECT_VERSION: 5
         MARKETING_VERSION: 1.0.1
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: G9VZ6PWF3Z
         TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Debug:
+          MOBAILE_URL_SCHEME: mobaile-dev
+          PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.dev.widget
 
 schemes:
   VoiceAgentApp:

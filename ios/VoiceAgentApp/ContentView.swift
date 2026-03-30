@@ -232,7 +232,7 @@ struct ContentView: View {
     }
 
     private func handleShortcutURL(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), scheme == "mobaile" else { return false }
+        guard let scheme = url.scheme?.lowercased(), MOBaiLEURLSchemeConfiguration.acceptedSchemes.contains(scheme) else { return false }
         guard let host = url.host?.lowercased(), host == "shortcut" else { return false }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         let action = components.queryItems?.first(where: { $0.name == "action" })?.value?.lowercased() ?? ""

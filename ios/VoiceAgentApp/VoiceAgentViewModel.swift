@@ -2367,7 +2367,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     func applyPairingURL(_ url: URL) {
-        guard let scheme = url.scheme?.lowercased(), scheme == "mobaile" else { return }
+        guard let scheme = url.scheme?.lowercased(), MOBaiLEURLSchemeConfiguration.acceptedSchemes.contains(scheme) else { return }
         guard let host = url.host?.lowercased(), host == "pair" else { return }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
 

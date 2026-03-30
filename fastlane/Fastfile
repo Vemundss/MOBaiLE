@@ -36,6 +36,15 @@ def current_release_version
   JSON.parse(run_version_script("show", "--json"))
 end
 
+def release_from_options(options)
+  current = current_release_version
+
+  {
+    marketing_version: present?(options[:version]) ? options[:version].to_s.strip : current.fetch("marketing_version"),
+    build_number: present?(options[:build]) ? options[:build].to_i : current.fetch("build_number")
+  }
+end
+
 def update_release_version(version:, build:)
   run_version_script("set", "--version", version, "--build", build)
 end
@@ -184,25 +193,34 @@ platform :ios do
 
   desc "Build and upload an App Store Connect release build"
   lane :release do |options|
-    release = prepare_release(options)
     auth_options = upload_auth_options
+    skip_build = bool_option(options[:skip_build], default: false)
+    release = skip_build ? release_from_options(options) : prepare_release(options)
 
-    build_app(
-      project: IOS_PROJECT_PATH,
-      scheme: IOS_SCHEME,
-      export_method: "app-store",
-      clean: true,
-      output_directory: release_artifact_directory,
-      output_name: "MOBaiLE-#{release[:marketing_version]}-#{release[:build_number]}.ipa",
-      xcargs: "-allowProvisioningUpdates"
-    )
+    unless skip_build
+      build_app(
+        project: IOS_PROJECT_PATH,
+        scheme: IOS_SCHEME,
+        export_method: "app-store",
+        clean: true,
+        output_directory: release_artifact_directory,
+        output_name: "MOBaiLE-#{release[:marketing_version]}-#{release[:build_number]}.ipa",
+        xcargs: "-allowProvisioningUpdates"
+      )
+    end
 
     upload_to_app_store(
       force: true,
+      app_version: release[:marketing_version],
+      skip_binary_upload: bool_option(options[:skip_binary_upload], default: skip_build),
       skip_metadata: bool_option(options[:skip_metadata], default: false),
       skip_screenshots: bool_option(options[:skip_screenshots], default: false),
       submit_for_review: bool_option(options[:submit_for_review], default: false),
       automatic_release: bool_option(options[:automatic_release], default: false),
+      overwrite_screenshots: bool_option(options[:overwrite_screenshots], default: false),
+      sync_screenshots: bool_option(options[:sync_screenshots], default: false),
+      run_precheck_before_submit: bool_option(options[:run_precheck_before_submit], default: false),
+      precheck_include_in_app_purchases: bool_option(options[:precheck_include_in_app_purchases], default: false),
       **auth_options
     )
 

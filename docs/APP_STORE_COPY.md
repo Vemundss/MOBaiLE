@@ -5,7 +5,7 @@ This file is the copy pack for the current MOBaiLE App Store submission.
 ## Listing Metadata
 
 - Name: `MOBaiLE`
-- Subtitle: `Your own computer, in your pocket`
+- Subtitle: `Your computer in your pocket`
 - Promotional text:
   `Start work from iPhone, run it on your own Mac or Linux machine, and follow every step live.`
 - Keywords:
@@ -49,13 +49,17 @@ MOBaiLE is a client for a backend you configure and control. The app does not ex
 
 MOBaiLE is an iPhone client for a paired backend that runs on the user's own machine. The app does not execute code on-device.
 
-Review setup:
+Basic review:
+1. Open the app and inspect onboarding, settings, thread list, and voice/chat UI.
+2. Microphone access is optional and only needed for voice input.
+3. Local-network access is only used when the paired backend is on the same network.
+
+Functional review:
 1. Open the app.
 2. Go to Settings.
-3. Enter Server URL: `<ADD_REVIEW_BACKEND_URL>`
-4. Enter API Token: `<ADD_REVIEW_API_TOKEN>`
-5. Keep Session ID as `iphone-app`.
-6. Return to the main screen and send:
+3. Enter the review backend URL and API token supplied for App Review.
+4. Keep Session ID as `iphone-app`.
+5. Return to the main screen and send:
    `create a hello world python script and run it`
 
 Expected behavior:
