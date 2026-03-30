@@ -22,12 +22,23 @@ You do not need to understand agents, Xcode, or backend internals to use the app
 
 This is the shortest path:
 
-1. Make sure your backend is already running.
-2. Open `backend/pairing-qr.png` on your computer.
+1. On the computer you want MOBaiLE to use, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
+```
+
+2. Open `backend/pairing-qr.png` on that computer.
 3. Scan it with the iPhone camera.
 4. Open the `mobaile://pair...` link.
 5. Confirm the pairing inside MOBaiLE.
 6. Send a prompt or tap the mic button.
+
+Already inside this repo? The equivalent setup is:
+
+```bash
+bash ./scripts/install_backend.sh --mode safe --expose-network
+```
 
 Manual fallback inside app Settings:
 

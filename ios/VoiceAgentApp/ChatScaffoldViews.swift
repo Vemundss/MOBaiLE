@@ -100,6 +100,7 @@ struct ConversationEmptyStateView: View {
     let statusText: String
     let canRetryLastPrompt: Bool
     let runtimeContext: EmptyStateRuntimeContext?
+    let onOpenSetupGuide: () -> Void
     let onOpenSettings: () -> Void
     let onRetryLastPrompt: () -> Void
     let onStartVoiceMode: () -> Void
@@ -212,9 +213,9 @@ struct ConversationEmptyStateView: View {
                             .frame(width: 44, height: 44)
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Connect MOBaiLE")
+                            Text("Set up your computer first")
                                 .font(.title3.weight(.semibold))
-                            Text("Pair your backend once, then keep prompts, recording, and results in one thread.")
+                            Text("MOBaiLE is the remote control. Start the backend on your Mac or Linux machine, then scan one pairing QR.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -226,34 +227,67 @@ struct ConversationEmptyStateView: View {
                     ConnectionBadge(isConnected: isConfigured, statusText: statusText)
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("What you unlock")
+                        Text("The fastest path")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        EmptyStateFeatureRow(
-                            systemImage: "mic.fill",
-                            title: "Voice-first tasks",
-                            detail: "Record a prompt hands-free and send it straight into the thread."
+                        SetupStepRow(
+                            stepNumber: 1,
+                            systemImage: "laptopcomputer",
+                            title: "Run one install command on your computer",
+                            detail: "Use the guided bootstrap flow to install the backend, start it, and prepare pairing."
                         )
-                        EmptyStateFeatureRow(
-                            systemImage: "sparkles.rectangle.stack",
-                            title: "Live run updates",
-                            detail: "Watch planning, execution, and results stream back in one place."
+                        SetupStepRow(
+                            stepNumber: 2,
+                            systemImage: "qrcode.viewfinder",
+                            title: "Scan the pairing QR with iPhone Camera",
+                            detail: "Open `backend/pairing-qr.png`, tap Open in MOBaiLE, and the app fills the connection for you."
                         )
-                        EmptyStateFeatureRow(
-                            systemImage: "folder.badge.gearshape",
-                            title: "Workspace control",
-                            detail: "Pick the repo folder and keep future runs anchored to it."
+                        SetupStepRow(
+                            stepNumber: 3,
+                            systemImage: "slider.horizontal.3",
+                            title: "Use manual fields only as a fallback",
+                            detail: "If you already have a server URL and token, you can enter them yourself in Settings."
                         )
                     }
 
-                    Button {
-                        onOpenSettings()
-                    } label: {
-                        Label("Open Settings", systemImage: "slider.horizontal.3")
-                            .frame(maxWidth: .infinity)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) {
+                            Button {
+                                onOpenSetupGuide()
+                            } label: {
+                                Label("Show Setup Steps", systemImage: "list.number")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button {
+                                onOpenSettings()
+                            } label: {
+                                Label("Enter Manually", systemImage: "slider.horizontal.3")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        VStack(spacing: 10) {
+                            Button {
+                                onOpenSetupGuide()
+                            } label: {
+                                Label("Show Setup Steps", systemImage: "list.number")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button {
+                                onOpenSettings()
+                            } label: {
+                                Label("Enter Manually", systemImage: "slider.horizontal.3")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
                 }
             }
         }
@@ -373,23 +407,32 @@ private struct CompactStarterPromptButton: View {
     }
 }
 
-private struct EmptyStateFeatureRow: View {
+private struct SetupStepRow: View {
+    let stepNumber: Int
     let systemImage: String
     let title: String
     let detail: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 28, height: 28)
-                .background(Color.accentColor.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 30, height: 30)
+                Text("\(stepNumber)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.accentColor)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
+                HStack(spacing: 8) {
+                    Image(systemName: systemImage)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                }
                 Text(detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

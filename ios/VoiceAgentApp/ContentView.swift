@@ -8,8 +8,12 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     private let privacyPolicyURL = URL(string: "https://vemundss.github.io/MOBaiLE/privacy-policy.html")!
     private let supportURL = URL(string: "https://vemundss.github.io/MOBaiLE/support.html")!
+    private let quickStartURL = URL(string: "https://github.com/vemundss/MOBaiLE#two-minute-setup")!
+    private let bootstrapInstallCommand = "curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe"
+    private let checkoutInstallCommand = "bash ./scripts/install_backend.sh --mode safe --expose-network"
     @StateObject private var vm = VoiceAgentViewModel()
     @State private var showConnectionSettings = false
+    @State private var showSetupGuide = false
     @State private var showLogs = false
     @State private var showThreads = false
     @State private var showAttachmentOptions = false
@@ -20,7 +24,10 @@ struct ContentView: View {
     @State private var newDirectoryName = ""
     @State private var isCreatingDirectory = false
     @State private var trustPairHost = false
+    @State private var openSettingsAfterSetupGuide = false
+    @State private var expandManualConnectionOnNextSettingsOpen = false
     @State private var showAdvancedSettings = false
+    @State private var showManualConnectionFields = false
     @State private var settingsConnectionState: SettingsConnectionState = .idle
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -86,6 +93,14 @@ struct ContentView: View {
 
     private var modalSheetView: some View {
         baseNavigationView
+            .sheet(isPresented: $showSetupGuide, onDismiss: {
+                if openSettingsAfterSetupGuide {
+                    openSettingsAfterSetupGuide = false
+                    showConnectionSettings = true
+                }
+            }) {
+                setupGuideSheet
+            }
             .sheet(isPresented: $showConnectionSettings) {
                 settingsSheet
             }
@@ -144,7 +159,8 @@ struct ContentView: View {
             }
             .onChange(of: showConnectionSettings) {
                 if showConnectionSettings {
-                    resetSettingsSheetState()
+                    resetSettingsSheetState(expandManualConnection: expandManualConnectionOnNextSettingsOpen)
+                    expandManualConnectionOnNextSettingsOpen = false
                 }
             }
             .onChange(of: showWorkspaceBrowser) {
@@ -294,6 +310,9 @@ struct ContentView: View {
                             statusText: headerStatusText,
                             canRetryLastPrompt: vm.canRetryLastPrompt,
                             runtimeContext: emptyStateRuntimeContext,
+                            onOpenSetupGuide: {
+                                showSetupGuide = true
+                            },
                             onOpenSettings: {
                                 showConnectionSettings = true
                             },
@@ -372,134 +391,183 @@ struct ContentView: View {
     private var settingsSheet: some View {
         NavigationStack {
             Form {
+                if !vm.hasConfiguredConnection {
+                    Section {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Label("You only need to do this once", systemImage: "list.number")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                SetupGuideStepSummaryRow(
+                                    stepNumber: 1,
+                                    title: "Install MOBaiLE on your computer",
+                                    detail: "Run one bootstrap command on your Mac or Linux machine. It installs the backend, starts the service when possible, and prepares pairing."
+                                )
+                                SetupGuideStepSummaryRow(
+                                    stepNumber: 2,
+                                    title: "Scan the pairing QR",
+                                    detail: "Open `backend/pairing-qr.png` on the computer, scan it with iPhone Camera, then tap Open in MOBaiLE."
+                                )
+                            }
+
+                            Button {
+                                showSetupGuide = true
+                            } label: {
+                                Label("Show Setup Guide", systemImage: "arrow.right.circle.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.vertical, 4)
+                    } header: {
+                        Text("Getting Started")
+                    } footer: {
+                        Text("Fastest path: use QR pairing. Manual fields below are only the fallback.")
+                    }
+                }
+
                 Section {
-                    TextField("Server URL", text: $vm.serverURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.footnote.monospaced())
-                    SecureField("API Token", text: $vm.apiToken)
-                        .font(.footnote.monospaced())
+                    if vm.hasConfiguredConnection {
+                        connectionFields
+                    } else {
+                        DisclosureGroup("Already have a server URL and token?", isExpanded: $showManualConnectionFields) {
+                            VStack(spacing: 14) {
+                                connectionFields
+                            }
+                            .padding(.top, 8)
+                        }
+                    }
                 } header: {
-                    Text("Connection")
+                    Text(vm.hasConfiguredConnection ? "Connection" : "Manual Connection")
                 } footer: {
-                    Text("Server URL and token are the only required setup.")
+                    Text(
+                        vm.hasConfiguredConnection
+                            ? "Server URL and token are the only required setup."
+                            : "Most people should pair by QR instead of typing these fields."
+                    )
                 }
 
                 Section {
                     settingsConnectionCard
                 }
 
-                Section {
-                    Picker("Executor", selection: $vm.executor) {
-                        ForEach(vm.selectableExecutors, id: \.self) { option in
-                            Text(option.capitalized).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    if vm.effectiveExecutor == "codex" {
-                        TextField("Codex model", text: $vm.codexModelOverride)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .font(.footnote.monospaced())
-
-                        Picker("Codex effort", selection: $vm.codexReasoningEffort) {
-                            Text("Backend default").tag("")
-                            ForEach(vm.backendCodexReasoningEffortOptions, id: \.self) { option in
-                                Text(option.uppercased()).tag(option)
+                if vm.hasConfiguredConnection {
+                    Section {
+                        Picker("Executor", selection: $vm.executor) {
+                            ForEach(vm.selectableExecutors, id: \.self) { option in
+                                Text(option.capitalized).tag(option)
                             }
                         }
-                    } else if vm.effectiveExecutor == "claude" {
-                        TextField("Claude model", text: $vm.claudeModelOverride)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .font(.footnote.monospaced())
-                    }
-                } header: {
-                    Text("Agent Runtime")
-                } footer: {
-                    Text(agentRuntimeFooterText)
-                }
+                        .pickerStyle(.segmented)
 
-                Section {
-                    Picker("Agent guidance", selection: $vm.agentGuidanceMode) {
-                        Text("Guided").tag("guided")
-                        Text("Minimal").tag("minimal")
-                    }
-                    .pickerStyle(.segmented)
-                } header: {
-                    Text("Conversation Style")
-                } footer: {
-                    Text(vm.agentGuidanceMode == "minimal"
-                        ? "Minimal keeps chat focused on final results."
-                        : "Guided adds short progress updates and clearer result context.")
-                }
+                        if vm.effectiveExecutor == "codex" {
+                            TextField("Codex model", text: $vm.codexModelOverride)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.footnote.monospaced())
 
-                Section {
-                    Toggle("AirPods Click To Record", isOn: $vm.airPodsClickToRecordEnabled)
-                    Toggle("Haptic Cues", isOn: $vm.hapticCuesEnabled)
-                    Toggle("Audio Cues", isOn: $vm.audioCuesEnabled)
-                    Toggle("Auto-send After Silence", isOn: $vm.autoSendAfterSilenceEnabled)
-                    if vm.autoSendAfterSilenceEnabled {
-                        TextField("Silence seconds", text: $vm.autoSendAfterSilenceSeconds)
-                            .keyboardType(.decimalPad)
-                    }
-                } header: {
-                    Text("Voice & Feedback")
-                } footer: {
-                    Text(
-                        vm.autoSendAfterSilenceEnabled
-                            ? "AirPods click uses headset controls. Auto-send submits after the selected silence window. Voice mode always auto-sends and reopens the mic after each reply."
-                            : "AirPods click uses headset controls to start recording and stop+send. Voice mode keeps the conversation going by reopening the mic after each reply."
-                    )
-                }
-
-                Section {
-                    DisclosureGroup("Advanced Runtime", isExpanded: $showAdvancedSettings) {
-                        TextField("Session ID", text: $vm.sessionID)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("Starting directory", text: $vm.workingDirectory)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .font(.footnote.monospaced())
-                        if !vm.backendWorkdirRoot.isEmpty {
-                            Button {
-                                vm.workingDirectory = vm.backendWorkdirRoot
-                            } label: {
-                                Label("Use Backend Root", systemImage: "arrow.down.to.line.compact")
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(vm.workingDirectory == vm.backendWorkdirRoot)
-                        }
-                        Toggle("Developer Mode", isOn: $vm.developerMode)
-                            .onChange(of: vm.developerMode) { _, enabled in
-                                if !enabled && vm.executor == "local" {
-                                    vm.executor = vm.backendDefaultExecutor
+                            Picker("Codex effort", selection: $vm.codexReasoningEffort) {
+                                Text("Backend default").tag("")
+                                ForEach(vm.backendCodexReasoningEffortOptions, id: \.self) { option in
+                                    Text(option.uppercased()).tag(option)
                                 }
                             }
-                        TextField("Timeout seconds", text: $vm.runTimeoutSeconds)
-                            .keyboardType(.numberPad)
-                        Toggle("Hide Hidden Folders", isOn: $vm.hideDotFoldersInBrowser)
-                        if !vm.backendWorkdirRoot.isEmpty {
-                            LabeledContent("Backend Root", value: vm.backendWorkdirRoot)
+                        } else if vm.effectiveExecutor == "claude" {
+                            TextField("Claude model", text: $vm.claudeModelOverride)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
                                 .font(.footnote.monospaced())
                         }
-                        LabeledContent("Backend Mode", value: vm.backendSecurityMode)
-                        ForEach(vm.backendExecutorModelRows, id: \.id) { row in
-                            LabeledContent("\(row.title) Model", value: row.model)
-                        }
-                        if !vm.backendCodexReasoningEffort.isEmpty {
-                            LabeledContent("Codex Effort", value: vm.backendCodexReasoningEffort.uppercased())
-                        }
+                    } header: {
+                        Text("Agent Runtime")
+                    } footer: {
+                        Text(agentRuntimeFooterText)
                     }
-                } footer: {
-                    Text(vm.developerMode
-                        ? "Advanced Runtime overrides backend defaults and exposes the internal local fallback."
-                        : "Advanced Runtime overrides backend defaults when you need them.")
+
+                    Section {
+                        Picker("Agent guidance", selection: $vm.agentGuidanceMode) {
+                            Text("Guided").tag("guided")
+                            Text("Minimal").tag("minimal")
+                        }
+                        .pickerStyle(.segmented)
+                    } header: {
+                        Text("Conversation Style")
+                    } footer: {
+                        Text(vm.agentGuidanceMode == "minimal"
+                            ? "Minimal keeps chat focused on final results."
+                            : "Guided adds short progress updates and clearer result context.")
+                    }
+
+                    Section {
+                        Toggle("AirPods Click To Record", isOn: $vm.airPodsClickToRecordEnabled)
+                        Toggle("Haptic Cues", isOn: $vm.hapticCuesEnabled)
+                        Toggle("Audio Cues", isOn: $vm.audioCuesEnabled)
+                        Toggle("Auto-send After Silence", isOn: $vm.autoSendAfterSilenceEnabled)
+                        if vm.autoSendAfterSilenceEnabled {
+                            TextField("Silence seconds", text: $vm.autoSendAfterSilenceSeconds)
+                                .keyboardType(.decimalPad)
+                        }
+                    } header: {
+                        Text("Voice & Feedback")
+                    } footer: {
+                        Text(
+                            vm.autoSendAfterSilenceEnabled
+                                ? "AirPods click uses headset controls. Auto-send submits after the selected silence window. Voice mode always auto-sends and reopens the mic after each reply."
+                                : "AirPods click uses headset controls to start recording and stop+send. Voice mode keeps the conversation going by reopening the mic after each reply."
+                        )
+                    }
+
+                    Section {
+                        DisclosureGroup("Advanced Runtime", isExpanded: $showAdvancedSettings) {
+                            TextField("Session ID", text: $vm.sessionID)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            TextField("Starting directory", text: $vm.workingDirectory)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.footnote.monospaced())
+                            if !vm.backendWorkdirRoot.isEmpty {
+                                Button {
+                                    vm.workingDirectory = vm.backendWorkdirRoot
+                                } label: {
+                                    Label("Use Backend Root", systemImage: "arrow.down.to.line.compact")
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(vm.workingDirectory == vm.backendWorkdirRoot)
+                            }
+                            Toggle("Developer Mode", isOn: $vm.developerMode)
+                                .onChange(of: vm.developerMode) { _, enabled in
+                                    if !enabled && vm.executor == "local" {
+                                        vm.executor = vm.backendDefaultExecutor
+                                    }
+                                }
+                            TextField("Timeout seconds", text: $vm.runTimeoutSeconds)
+                                .keyboardType(.numberPad)
+                            Toggle("Hide Hidden Folders", isOn: $vm.hideDotFoldersInBrowser)
+                            if !vm.backendWorkdirRoot.isEmpty {
+                                LabeledContent("Backend Root", value: vm.backendWorkdirRoot)
+                                    .font(.footnote.monospaced())
+                            }
+                            LabeledContent("Backend Mode", value: vm.backendSecurityMode)
+                            ForEach(vm.backendExecutorModelRows, id: \.id) { row in
+                                LabeledContent("\(row.title) Model", value: row.model)
+                            }
+                            if !vm.backendCodexReasoningEffort.isEmpty {
+                                LabeledContent("Codex Effort", value: vm.backendCodexReasoningEffort.uppercased())
+                            }
+                        }
+                    } footer: {
+                        Text(vm.developerMode
+                            ? "Advanced Runtime overrides backend defaults and exposes the internal local fallback."
+                            : "Advanced Runtime overrides backend defaults when you need them.")
+                    }
                 }
 
                 Section("Support") {
+                    if !vm.hasConfiguredConnection {
+                        Link("Quick Start", destination: quickStartURL)
+                    }
                     Link("Privacy Policy", destination: privacyPolicyURL)
                     Link("Support", destination: supportURL)
                 }
@@ -518,6 +586,32 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var setupGuideSheet: some View {
+        SetupGuideSheet(
+            bootstrapInstallCommand: bootstrapInstallCommand,
+            checkoutInstallCommand: checkoutInstallCommand,
+            quickStartURL: quickStartURL,
+            supportURL: supportURL,
+            onManualSetup: {
+                expandManualConnectionOnNextSettingsOpen = true
+                openSettingsAfterSetupGuide = true
+                showSetupGuide = false
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var connectionFields: some View {
+        Group {
+            TextField("Server URL", text: $vm.serverURL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.footnote.monospaced())
+            SecureField("API Token", text: $vm.apiToken)
+                .font(.footnote.monospaced())
         }
     }
 
@@ -603,7 +697,7 @@ struct ContentView: View {
     private var settingsConnectionTitle: String {
         switch settingsConnectionState {
         case .idle:
-            return vm.hasConfiguredConnection ? "Verify connection" : "Connection required"
+            return vm.hasConfiguredConnection ? "Verify connection" : "Waiting for pairing"
         case .checking:
             return "Checking connection"
         case .success:
@@ -618,7 +712,7 @@ struct ContentView: View {
         case .idle:
             return vm.hasConfiguredConnection
                 ? "Check after editing either field."
-                : "Add a server URL and API token to enable prompts, recording, and live updates."
+                : "Use QR pairing for the fastest setup, or expand the manual section if you already have connection details."
         case .checking:
             return "Checking the current backend session."
         case let .success(message), let .failure(message):
@@ -652,8 +746,9 @@ struct ContentView: View {
         }
     }
 
-    private func resetSettingsSheetState() {
+    private func resetSettingsSheetState(expandManualConnection: Bool = false) {
         showAdvancedSettings = false
+        showManualConnectionFields = expandManualConnection
         settingsConnectionState = .idle
     }
 
@@ -1409,7 +1504,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Finish setup to start a run")
                     .font(.subheadline.weight(.semibold))
-                Text("Add your backend URL and token once. After that, prompts, recording, and workspace tools are ready.")
+                Text("Run one host install command, then scan the pairing QR. Manual connection fields are only the fallback.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1480,9 +1575,9 @@ struct ContentView: View {
                 .accessibilityLabel("Browse workspace \(runtimeDirectoryLabel)")
             } else {
                 Button {
-                    showConnectionSettings = true
+                    showSetupGuide = true
                 } label: {
-                    Label("Setup", systemImage: "slider.horizontal.3")
+                    Label("Setup Guide", systemImage: "list.number")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -1736,6 +1831,8 @@ struct ContentView: View {
             .lowercased()
 
         switch raw {
+        case "setup":
+            showSetupGuide = true
         case "settings":
             showConnectionSettings = true
         case "threads":
@@ -2371,6 +2468,182 @@ private struct PairingConfirmationSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct SetupGuideSheet: View {
+    let bootstrapInstallCommand: String
+    let checkoutInstallCommand: String
+    let quickStartURL: URL
+    let supportURL: URL
+    let onManualSetup: () -> Void
+
+    @State private var copiedLabel: String?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Two-minute setup", systemImage: "sparkles")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                        Text("Start on your computer. Pair once. Then the app is ready.")
+                            .font(.title3.weight(.semibold))
+                        Text("MOBaiLE does not run code on iPhone. It connects to a backend on your own Mac or Linux machine.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        SetupGuideStepSummaryRow(
+                            stepNumber: 1,
+                            title: "Run the guided install on your computer",
+                            detail: "This is the easiest path on a fresh host. It installs the backend, starts the service when possible, and prepares pairing."
+                        )
+                        SetupGuideCommandBlock(command: bootstrapInstallCommand)
+
+                        HStack(spacing: 10) {
+                            Button(copiedLabel == "bootstrap" ? "Copied" : "Copy Command") {
+                                UIPasteboard.general.string = bootstrapInstallCommand
+                                copiedLabel = "bootstrap"
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Spacer(minLength: 0)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Already inside this repo?")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(checkoutInstallCommand)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        SetupGuideStepSummaryRow(
+                            stepNumber: 2,
+                            title: "Scan the pairing QR with iPhone Camera",
+                            detail: "After install, open `backend/pairing-qr.png` on the computer. Camera opens the pairing link and MOBaiLE fills the connection for you."
+                        )
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("What to do next")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text("1. Open `backend/pairing-qr.png` on the computer.")
+                            Text("2. Scan it with iPhone Camera.")
+                            Text("3. Tap Open in MOBaiLE.")
+                        }
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Manual fallback", systemImage: "slider.horizontal.3")
+                            .font(.subheadline.weight(.semibold))
+                        Text("If the QR flow is not available, open Settings and paste the `server_url` from `backend/pairing.json` plus `VOICE_AGENT_API_TOKEN` from `backend/.env`.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button("Enter URL and Token Manually") {
+                            onManualSetup()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(Color(.tertiarySystemBackground))
+                    )
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Link("Open Full Quick Start", destination: quickStartURL)
+                        Link("Open Support", destination: supportURL)
+                    }
+                    .font(.footnote.weight(.semibold))
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Setup Guide")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct SetupGuideStepSummaryRow: View {
+    let stepNumber: Int
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 28, height: 28)
+                Text("\(stepNumber)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct SetupGuideCommandBlock: View {
+    let command: String
+
+    var body: some View {
+        Text(command)
+            .font(.footnote.monospaced())
+            .foregroundStyle(.primary)
+            .textSelection(.enabled)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.14), lineWidth: 1)
+        )
     }
 }
 

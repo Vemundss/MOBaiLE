@@ -4,48 +4,55 @@ This is the canonical operator/setup document for the repo. If another document 
 
 This document explains how to run the backend that MOBaiLE pairs with on your own Mac or Linux computer.
 
-## Quick Setup (recommended)
+## Two-Minute Setup
 
-Use this path if you want a working backend quickly on a host you control.
+If you want the iPhone app working with the least friction, do this first.
 
-From project root:
+### Step 1. Install on the computer you want MOBaiLE to use
 
-```bash
-bash ./scripts/install_backend.sh --mode safe
-bash ./scripts/doctor.sh
-bash ./scripts/service_macos.sh install   # macOS
-# or on Linux:
-bash ./scripts/service_linux.sh install
-```
-
-Fresh host/server bootstrap (single command after clone):
+Fresh host or easiest path:
 
 ```bash
-bash ./scripts/bootstrap_server.sh --mode safe
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
 ```
 
-Autonomous trusted-host setup:
+This path:
+
+- installs the backend into `~/MOBaiLE`
+- exposes it for phone pairing
+- installs and starts a background service when supported
+- writes `backend/pairing.json`
+- generates `backend/pairing-qr.png`
+
+If you are already inside this repo instead of bootstrapping a fresh host:
 
 ```bash
-bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
+bash ./scripts/install_backend.sh --mode safe --expose-network
 ```
+
+### Step 2. Pair the iPhone
+
+1. Open `backend/pairing-qr.png` on the computer.
+2. Scan it with iPhone Camera.
+3. Tap `Open in MOBaiLE`.
+4. Send a small prompt to confirm the thread works.
+
+### Step 3. Reach for advanced setup only when you need it
+
+- Local-only testing on the same machine: `bash ./scripts/install_backend.sh --mode safe`
+- Trusted private host with more autonomy: `bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack`
+- Stable public hostname: set `VOICE_AGENT_PUBLIC_SERVER_URL` in `backend/.env` or pass `--public-url https://your-host`
 
 `install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
-If Tailscale MagicDNS is available, pairing now prefers the stable `*.ts.net` hostname automatically before raw `100.x` or LAN IPs.
-For a stable public endpoint, set `VOICE_AGENT_PUBLIC_SERVER_URL` in `backend/.env` or pass `--public-url https://your-host` during install. MOBaiLE will prefer that URL and keep Tailscale/LAN fallbacks alongside it.
+If Tailscale MagicDNS is available, pairing prefers the stable `*.ts.net` hostname automatically before raw `100.x` or LAN IPs.
 The iPhone app only talks to this backend. It does not run code on-device.
+
 Safe mode defaults:
 - restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
 - restricted file reads (`VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false`)
 - workdir constrained to default root
 
-Full-access mode:
-
-```bash
-bash ./scripts/install_backend.sh --mode full-access
-```
-
-Use only on trusted private hosts.
+Use `full-access` only on trusted private hosts.
 All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 
 ## Prerequisites

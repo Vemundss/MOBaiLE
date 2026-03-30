@@ -13,6 +13,11 @@ BRANCH="${BRANCH_DEFAULT}"
 MODE="${MODE_DEFAULT}"
 AUTONOMY_STACK="${AUTONOMY_STACK_DEFAULT}"
 
+step() {
+  echo
+  echo "== ${1} =="
+}
+
 usage() {
   cat <<EOF
 Usage: bash ./scripts/bootstrap_server.sh [--repo-url <url>] [--dir <path>] [--branch <name>] [--mode safe|full-access] [--with-autonomy-stack|--skip-autonomy-stack]
@@ -115,9 +120,14 @@ main() {
   require_cmd curl
   ensure_uv
 
+  echo "MOBaiLE guided bootstrap"
+  echo "This is the quickest way to install the backend on a computer and prepare QR pairing for the iPhone app."
+
+  step "Cloning or updating the repository"
   clone_or_update_repo
 
   cd "${INSTALL_DIR}"
+  step "Installing the backend"
   local install_cmd=(bash ./scripts/install_backend.sh --mode "${MODE}" --expose-network)
   if [[ "${AUTONOMY_STACK}" == "true" ]]; then
     install_cmd+=(--with-autonomy-stack)
@@ -126,6 +136,7 @@ main() {
   fi
   "${install_cmd[@]}"
 
+  step "Configuring background service"
   if [[ "$(uname -s)" == "Darwin" ]]; then
     bash ./scripts/service_macos.sh install
   elif [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
@@ -140,13 +151,20 @@ main() {
     echo "  cd \"${INSTALL_DIR}/backend\" && bash ./run_backend.sh"
   fi
 
+  step "Running checks and preparing pairing"
   bash ./scripts/doctor.sh || true
   bash ./scripts/pairing_qr.sh || true
 
   echo
   echo "Bootstrap complete."
-  echo "If service installation succeeded, backend should now run automatically."
-  echo "Scan backend/pairing-qr.png with iPhone Camera and open in MOBaiLE."
+  echo "If service installation succeeded, the backend should now stay up automatically."
+  echo
+  echo "Next on your computer:"
+  echo "  1. Open ${INSTALL_DIR}/backend/pairing-qr.png"
+  echo
+  echo "Next on your iPhone:"
+  echo "  1. Scan the QR with Camera"
+  echo "  2. Tap Open in MOBaiLE"
 }
 
 main "$@"

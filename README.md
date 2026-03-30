@@ -52,60 +52,38 @@
 - `check my calendar today and summarize conflicts`
 - `fix the failing test and explain the patch`
 
-## Quick Start
+## Two-Minute Setup
 
-Choose the shortest path that matches how you want to use MOBaiLE.
+If your goal is simply "make the iPhone app work", use this path first.
 
-### What you need
-
-- a Mac or Linux computer you control
-- an iPhone with MOBaiLE installed
-- the backend running on that computer
-- Tailscale only if you want access away from your local network
-
-### Safe local backend
-
-If the backend machine already has `python3`:
-
-```bash
-bash ./scripts/install_backend.sh --mode safe
-cd backend
-bash ./run_backend.sh
-curl http://127.0.0.1:8000/health
-```
-
-`install_backend.sh` installs `uv` automatically if it is missing.
-
-### Bootstrap into `~/MOBaiLE`
-
-If you want a no-clone setup flow on a fresh host:
+### 1. On the computer you want MOBaiLE to use, run one command
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
 ```
 
-This installs into `~/MOBaiLE`. Use `install_backend.sh` when you want to run from the current checkout instead.
+What this does:
 
-### Trusted private host with more autonomy
+- installs the backend into `~/MOBaiLE`
+- starts a background service when supported
+- runs the basic checks
+- writes `backend/pairing.json`
+- generates `backend/pairing-qr.png`
 
-For a more capable private setup:
+### 2. On your iPhone, scan the pairing QR
 
-```bash
-bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack
-# or:
-npm run setup:server:auto
-```
+1. Open `backend/pairing-qr.png` on the computer.
+2. Scan it with iPhone Camera.
+3. Tap `Open in MOBaiLE`.
+4. Send a small prompt such as `create and run a hello script`.
 
-If neither Codex nor Claude CLI is installed, MOBaiLE still keeps the internal `local` executor available for smoke and development text requests.
+### 3. Use the fallback only if you need it
 
-### Open the iPhone app
+- Already working from this checkout: run `bash ./scripts/install_backend.sh --mode safe --expose-network`
+- Local simulator-only testing: run `bash ./scripts/install_backend.sh --mode safe`
+- Trusted private host with more autonomy: run `bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack`
 
-```bash
-cd ios
-open VoiceAgentApp.xcodeproj
-```
-
-Run `xcodegen generate` only after editing `ios/project.yml` or if the checked-in Xcode project gets out of sync.
+The app only needs two connection values in the end: a reachable `server_url` and the backend token. QR pairing fills those for you automatically.
 
 Need more detail? See [`docs/USAGE.md`](docs/USAGE.md), [`docs/AUTONOMY_STACK.md`](docs/AUTONOMY_STACK.md), [`backend/README.md`](backend/README.md), [`ios/README.md`](ios/README.md), and [`scripts/README.md`](scripts/README.md).
 

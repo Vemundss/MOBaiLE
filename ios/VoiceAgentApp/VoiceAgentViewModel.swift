@@ -605,7 +605,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             return
         }
         guard hasConfiguredConnection else {
-            statusText = "Set server URL and token first."
+            statusText = "Run setup on your computer or enter connection details first."
             return
         }
         errorText = ""
@@ -927,7 +927,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         runPhaseText = "Idle"
         runStartedAt = nil
         runEndedAt = nil
-        statusText = hasConfiguredConnection ? "Ready for prompts" : "Set server URL and token first."
+        statusText = hasConfiguredConnection ? "Ready for prompts" : "Run setup on your computer or enter connection details first."
     }
 
     func toggleVoiceMode() async {
@@ -946,7 +946,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     func toggleRecordingFromHeadsetControl() async {
         guard airPodsClickToRecordEnabled else { return }
         guard hasConfiguredConnection else {
-            statusText = "Set server URL and token first."
+            statusText = "Run setup on your computer or enter connection details first."
             return
         }
         if isRecording {
@@ -1014,7 +1014,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func beginVoiceMode() async {
         guard hasConfiguredConnection else {
-            statusText = "Set server URL and token first."
+            statusText = "Run setup on your computer or enter connection details first."
             return
         }
         if activeThreadID == nil {

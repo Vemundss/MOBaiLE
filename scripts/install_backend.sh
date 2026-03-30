@@ -12,6 +12,11 @@ EXPOSE_NETWORK="false"
 PROVISION_AUTONOMY_STACK="auto"
 PUBLIC_SERVER_URL=""
 
+step() {
+  echo
+  echo "== ${1} =="
+}
+
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -368,6 +373,9 @@ main() {
   require_cmd python3
   ensure_uv
 
+  echo "MOBaiLE backend setup"
+  echo "This will prepare the backend, create pairing details, and get the host ready for the iPhone app."
+
   local token
   token="$(gen_token)"
   local pair_code
@@ -376,7 +384,7 @@ main() {
   pair_code_expires_at="$(pair_code_expiry)"
   write_env_file "${token}"
 
-  echo "Syncing backend environment with uv..."
+  step "Installing backend dependencies"
   (
     cd "${BACKEND_DIR}"
     uv sync
@@ -391,10 +399,11 @@ main() {
   fi
 
   if [[ "${PROVISION_AUTONOMY_STACK}" == "true" ]]; then
-    echo "Provisioning Codex autonomy stack..."
+    step "Provisioning autonomy extras"
     python3 "${REPO_ROOT}/scripts/provision_codex_autonomy.py" --mode "${SECURITY_MODE}" || true
   fi
 
+  step "Writing pairing details"
   local server_url
   server_url="$(detect_url)"
 
@@ -408,6 +417,13 @@ main() {
 }
 EOF
 
+  local pairing_qr_path=""
+  if command -v qrencode >/dev/null 2>&1; then
+    if bash "${REPO_ROOT}/scripts/pairing_qr.sh" >/dev/null 2>&1; then
+      pairing_qr_path="${REPO_ROOT}/backend/pairing-qr.png"
+    fi
+  fi
+
   local has_codex="false"
   local has_claude="false"
   if command -v codex >/dev/null 2>&1; then
@@ -418,20 +434,32 @@ EOF
   fi
 
   echo
-  echo "Backend install complete."
+  echo "Setup complete."
   echo
-  echo "Start server:"
-  echo "  cd \"${BACKEND_DIR}\""
-  echo "  bash ./run_backend.sh"
+  echo "What you have now:"
+  echo "  backend config: ${ENV_FILE}"
+  echo "  pairing file:   ${PAIRING_FILE}"
+  if [[ -n "${pairing_qr_path}" ]]; then
+    echo "  pairing QR:     ${pairing_qr_path}"
+  fi
+  echo "  server URL:     ${server_url}"
   echo
-  echo "Install always-on service:"
-  echo "  # macOS"
-  echo "  bash ./scripts/service_macos.sh install"
-  echo "  # Linux (systemd user service)"
-  echo "  bash ./scripts/service_linux.sh install"
+  echo "Next on your computer:"
+  echo "  1. Start the backend:"
+  echo "     cd \"${BACKEND_DIR}\" && bash ./run_backend.sh"
+  echo "  2. Or install the always-on service:"
+  echo "     bash ./scripts/service_macos.sh install"
+  echo "     bash ./scripts/service_linux.sh install"
   echo
-  echo "Pairing info written to:"
-  echo "  ${PAIRING_FILE}"
+  echo "Next on your iPhone:"
+  if [[ -n "${pairing_qr_path}" ]]; then
+    echo "  1. Open backend/pairing-qr.png on the computer."
+  else
+    echo "  1. Generate the pairing QR on the computer:"
+    echo "     bash ./scripts/pairing_qr.sh"
+  fi
+  echo "  2. Scan it with iPhone Camera."
+  echo "  3. Tap Open in MOBaiLE."
   echo
   echo "Runtime security mode:"
   echo "  ${SECURITY_MODE}"
@@ -458,8 +486,8 @@ EOF
   echo "  # token is stored in backend/.env (not printed)"
   if [[ "${EXPOSE_NETWORK}" != "true" ]]; then
     echo
-    echo "Remote phone access is disabled in local-only mode."
-    echo "Re-run with --expose-network to pair over LAN/Tailscale."
+    echo "This install is local-only."
+    echo "A real iPhone cannot reach 127.0.0.1, so re-run with --expose-network if you want phone pairing over LAN or Tailscale."
   fi
   echo
   if [[ "${has_codex}" == "true" || "${has_claude}" == "true" ]]; then
@@ -469,10 +497,6 @@ EOF
   else
     echo "No Codex/Claude CLI detected. MOBaiLE will keep only the internal local smoke/dev fallback available."
   fi
-  echo
-  echo "Generate pairing QR deep link (recommended):"
-  echo "  bash ./scripts/pairing_qr.sh"
-  echo "  # then scan with iPhone Camera and open in MOBaiLE"
   echo
   echo "Re-provision the autonomous Codex stack later:"
   echo "  python3 ./scripts/provision_codex_autonomy.py --mode ${SECURITY_MODE}"
