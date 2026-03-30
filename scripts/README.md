@@ -19,7 +19,8 @@ bash ./scripts/install.sh
 
 The installer asks three simple questions. The normal answers are `Full Access`,
 `Anywhere with Tailscale`, and `Yes` for the background service. After setup, use
-`mobaile status` to check the connection.
+`mobaile status` to check the connection. If your shell does not find it yet, run
+`~/.local/bin/mobaile status`.
 
 ## Install and Bootstrap
 

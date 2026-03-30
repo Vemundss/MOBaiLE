@@ -2546,7 +2546,7 @@ private struct SetupGuideSheet: View {
                             Text("1. Open `backend/pairing-qr.png` on the computer.")
                             Text("2. Scan it with iPhone Camera.")
                             Text("3. Tap Open in MOBaiLE.")
-                            Text("4. Later, run `mobaile status` on the computer if you want to check the connection.")
+                            Text("4. Later, run `mobaile status` on the computer. If your shell does not find it yet, run `~/.local/bin/mobaile status`.")
                         }
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)

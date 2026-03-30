@@ -159,6 +159,28 @@ background_service_label() {
   esac
 }
 
+path_has_user_local_bin() {
+  local target="${HOME}/.local/bin"
+  local entry
+  local old_ifs="${IFS}"
+  IFS=':'
+  for entry in ${PATH}; do
+    if [[ -n "${entry}" && "${entry}" == "${target}" ]]; then
+      IFS="${old_ifs}"
+      return 0
+    fi
+  done
+  IFS="${old_ifs}"
+  return 1
+}
+
+print_status_follow_up() {
+  echo '  2. Run `mobaile status` any time to check the connection.'
+  if ! path_has_user_local_bin; then
+    echo '     If your shell does not find it yet, run `~/.local/bin/mobaile status`.'
+  fi
+}
+
 print_command() {
   echo "  $(format_command "$@")"
 }
@@ -422,7 +444,7 @@ print_product_summary() {
   echo
   echo "Next:"
   echo "  1. Scan the QR on this computer with your iPhone."
-  echo '  2. Run `mobaile status` any time to check the connection.'
+  print_status_follow_up
 }
 
 print_dry_run_summary() {

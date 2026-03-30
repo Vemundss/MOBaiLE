@@ -47,6 +47,8 @@ bash ./scripts/install.sh
 mobaile status
 ```
 
+If your shell does not find it yet, run `~/.local/bin/mobaile status`.
+
 ### Step 4. Reach for fallback or advanced setup only when you need it
 
 - Local-only testing on the same machine: `bash ./scripts/install_backend.sh --mode safe --phone-access local`

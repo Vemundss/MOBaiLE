@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/insta
 4. Scan it with the iPhone camera.
 5. Open the `mobaile://pair...` link.
 6. Confirm the pairing inside MOBaiLE.
-7. Later, run `mobaile status` on the computer if you want to check the connection.
+7. Later, run `mobaile status` on the computer if you want to check the connection. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 8. Send a prompt or tap the mic button.
 
 Already inside this repo? Run:
@@ -102,7 +102,7 @@ The checked-in project does not hard-code a development team, so Xcode should le
 - App on real iPhone cannot reach backend:
   - do not use `127.0.0.1`
   - use a LAN or Tailscale URL
-  - run `mobaile status` on the computer and confirm the pairing URL looks right
+  - run `mobaile status` on the computer, or `~/.local/bin/mobaile status` if needed, and confirm the pairing URL looks right
 
 - Real iPhone shows `App Transport Security requires the use of a secure connection`:
   - Debug builds allow plain `http://` backend URLs
