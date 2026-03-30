@@ -211,7 +211,7 @@ ensure_checkout() {
 
   CHECKOUT="${target}"
 
-  if [[ -d "${target}/.git" ]]; then
+  if [[ -d "${target}" ]]; then
     validate_checkout_or_fail "${target}"
   fi
 

@@ -267,3 +267,19 @@ def test_install_script_raw_existing_invalid_checkout_fails(tmp_path: Path):
     assert result.returncode != 0
     assert "is not a valid MOBaiLE checkout" in result.stderr
     assert "scripts/install.sh" in result.stderr
+
+
+def test_install_script_raw_existing_directory_without_git_fails(tmp_path: Path):
+    home = tmp_path / "home"
+    invalid_checkout = home / "MOBaiLE"
+    invalid_checkout.mkdir(parents=True, exist_ok=True)
+
+    result = run_install_script(
+        home,
+        non_interactive=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert result.returncode != 0
+    assert "is not a valid MOBaiLE checkout" in result.stderr
+    assert "scripts/install.sh" in result.stderr
