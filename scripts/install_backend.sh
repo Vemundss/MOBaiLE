@@ -9,6 +9,7 @@ PAIRING_FILE="${BACKEND_DIR}/pairing.json"
 SECURITY_MODE="safe"
 PAIR_CODE_TTL_MIN="30"
 EXPOSE_NETWORK="false"
+PHONE_ACCESS_MODE=""
 PROVISION_AUTONOMY_STACK="auto"
 PUBLIC_SERVER_URL=""
 
@@ -67,97 +68,57 @@ print((datetime.now(timezone.utc) + timedelta(minutes=ttl)).isoformat().replace(
 PY
 }
 
-detect_lan_ip() {
-  local ip=""
+write_pairing_details() {
+  local bind_host="$1"
 
-  if command -v ipconfig >/dev/null 2>&1; then
-    local iface
-    for iface in en0 en1 en2; do
-      ip="$(ipconfig getifaddr "${iface}" 2>/dev/null || true)"
-      if [[ -n "${ip}" ]]; then
-        printf "%s" "${ip}"
-        return
-      fi
-    done
-  fi
-
-  if command -v hostname >/dev/null 2>&1; then
-    local candidate
-    for candidate in $(hostname -I 2>/dev/null || true); do
-      if [[ "${candidate}" != 127.* && "${candidate}" != "::1" ]]; then
-        printf "%s" "${candidate}"
-        return
-      fi
-    done
-  fi
-
-  if command -v ip >/dev/null 2>&1; then
-    ip="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
-    if [[ -n "${ip}" && "${ip}" != 127.* ]]; then
-      printf "%s" "${ip}"
-      return
-    fi
-  fi
-}
-
-detect_tailscale_dns_name() {
-  if ! command -v tailscale >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
-    return
-  fi
-
-  tailscale status --json 2>/dev/null | python3 - <<'PY'
+  (
+    cd "${BACKEND_DIR}"
+    PAIRING_FILE="${PAIRING_FILE}" \
+    PAIR_CODE="${PAIR_CODE}" \
+    PAIR_CODE_EXPIRES_AT="${PAIR_CODE_EXPIRES_AT}" \
+    BIND_HOST="${bind_host}" \
+    BIND_PORT="8000" \
+    PUBLIC_SERVER_URL="${PUBLIC_SERVER_URL%/}" \
+    PHONE_ACCESS_MODE="${PHONE_ACCESS_MODE}" \
+    uv run python - <<'PY'
 import json
-import sys
+import os
+from pathlib import Path
 
-try:
-    payload = json.load(sys.stdin)
-except json.JSONDecodeError:
-    raise SystemExit(0)
+from app.pairing_url import refresh_pairing_server_url
 
-self_node = payload.get("Self")
-if not isinstance(self_node, dict):
-    raise SystemExit(0)
-
-name = str(self_node.get("DNSName", "")).strip().rstrip(".").lower()
-if name.endswith(".ts.net"):
-    print(name)
+pairing_file = Path(os.environ["PAIRING_FILE"])
+payload = {
+    "session_id": "iphone-app",
+    "pair_code": os.environ["PAIR_CODE"],
+    "pair_code_expires_at": os.environ["PAIR_CODE_EXPIRES_AT"],
+}
+pairing_file.parent.mkdir(parents=True, exist_ok=True)
+pairing_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+refresh_pairing_server_url(
+    pairing_file,
+    bind_host=os.environ["BIND_HOST"],
+    bind_port=int(os.environ["BIND_PORT"]),
+    public_server_url=os.environ.get("PUBLIC_SERVER_URL", ""),
+    phone_access_mode=os.environ["PHONE_ACCESS_MODE"],
+)
 PY
+  )
 }
 
-detect_url() {
-  if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
-    printf "%s" "${PUBLIC_SERVER_URL%/}"
-    return
-  fi
-  if [[ "${EXPOSE_NETWORK}" != "true" ]]; then
-    printf "http://127.0.0.1:8000"
-    return
-  fi
-  local url=""
-  if command -v tailscale >/dev/null 2>&1; then
-    local ts_dns
-    ts_dns="$(detect_tailscale_dns_name || true)"
-    if [[ -n "${ts_dns}" ]]; then
-      url="http://${ts_dns}:8000"
-    fi
-  fi
-  if [[ -z "${url}" ]] && command -v tailscale >/dev/null 2>&1; then
-    local ts_ip
-    ts_ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
-    if [[ -n "${ts_ip}" ]]; then
-      url="http://${ts_ip}:8000"
-    fi
-  fi
-  if [[ -z "${url}" ]]; then
-    local lan_ip
-    lan_ip="$(detect_lan_ip)"
-    if [[ -n "${lan_ip}" ]]; then
-      url="http://${lan_ip}:8000"
-    else
-      url="http://127.0.0.1:8000"
-    fi
-  fi
-  printf "%s" "${url}"
+read_pairing_value() {
+  local key="$1"
+
+  PAIRING_FILE="${PAIRING_FILE}" PAIRING_KEY="${key}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+payload = json.loads(Path(os.environ["PAIRING_FILE"]).read_text(encoding="utf-8"))
+value = payload.get(os.environ["PAIRING_KEY"], "")
+if isinstance(value, str):
+    print(value)
+PY
 }
 
 write_env_file() {
@@ -166,12 +127,13 @@ write_env_file() {
   local allow_abs_reads="false"
   local host_value="127.0.0.1"
   local public_url_value="${PUBLIC_SERVER_URL%/}"
+  local phone_access_value="${PHONE_ACCESS_MODE}"
   local codex_home_value="~/.codex"
   local codex_search_value="true"
   local context_file_value="../.mobaile/AGENT_CONTEXT.md"
   local playwright_output_value="data/playwright"
   local playwright_profile_value="data/playwright-profile"
-  if [[ "${EXPOSE_NETWORK}" == "true" ]]; then
+  if [[ "${PHONE_ACCESS_MODE}" != "local" ]]; then
     host_value="0.0.0.0"
   fi
   if [[ "${SECURITY_MODE}" == "full-access" ]]; then
@@ -188,6 +150,7 @@ write_env_file() {
       -v reads="${allow_abs_reads}" \
       -v host="${host_value}" \
       -v public_url="${public_url_value}" \
+      -v phone_access="${phone_access_value}" \
       '
       BEGIN {
         seen_mode=0
@@ -195,6 +158,7 @@ write_env_file() {
         seen_reads=0
         seen_host=0
         seen_public_url=0
+        seen_phone_access=0
         seen_codex_home=0
         seen_codex_search=0
         seen_context_file=0
@@ -216,6 +180,11 @@ write_env_file() {
         if (public_url != "") {
           print "VOICE_AGENT_PUBLIC_SERVER_URL=" public_url
         }
+        next
+      }
+      /^VOICE_AGENT_PHONE_ACCESS_MODE=/ {
+        print "VOICE_AGENT_PHONE_ACCESS_MODE=" phone_access
+        seen_phone_access=1
         next
       }
       /^VOICE_AGENT_CODEX_UNRESTRICTED=/ {
@@ -262,6 +231,7 @@ write_env_file() {
         if (!seen_host) print "VOICE_AGENT_HOST=" host
         if (!seen_mode) print "VOICE_AGENT_SECURITY_MODE=" mode
         if (!seen_public_url && public_url != "") print "VOICE_AGENT_PUBLIC_SERVER_URL=" public_url
+        if (!seen_phone_access) print "VOICE_AGENT_PHONE_ACCESS_MODE=" phone_access
         if (!seen_codex) print "VOICE_AGENT_CODEX_UNRESTRICTED=" codex
         if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
         if (!seen_codex_home) print "VOICE_AGENT_CODEX_HOME=" codex_home
@@ -286,6 +256,7 @@ VOICE_AGENT_API_TOKEN=${token}
 VOICE_AGENT_HOST=${host_value}
 VOICE_AGENT_PORT=8000
 VOICE_AGENT_SECURITY_MODE=${SECURITY_MODE}
+VOICE_AGENT_PHONE_ACCESS_MODE=${phone_access_value}
 EOF
   if [[ -n "${public_url_value}" ]]; then
     cat >> "${ENV_FILE}" <<EOF
@@ -342,6 +313,10 @@ main() {
         PUBLIC_SERVER_URL="$2"
         shift 2
         ;;
+      --phone-access)
+        PHONE_ACCESS_MODE="$2"
+        shift 2
+        ;;
       --expose-network)
         EXPOSE_NETWORK="true"
         shift
@@ -355,7 +330,7 @@ main() {
         shift
         ;;
       -h|--help)
-        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--public-url <https://host[:port]>] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
+        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--public-url <https://host[:port]>] [--phone-access tailscale|wifi|local] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
         exit 0
         ;;
       *)
@@ -368,6 +343,22 @@ main() {
   if [[ "${SECURITY_MODE}" != "safe" && "${SECURITY_MODE}" != "full-access" ]]; then
     echo "Invalid --mode '${SECURITY_MODE}'. Expected safe or full-access." >&2
     exit 1
+  fi
+  if [[ -n "${PHONE_ACCESS_MODE}" && "${PHONE_ACCESS_MODE}" != "tailscale" && "${PHONE_ACCESS_MODE}" != "wifi" && "${PHONE_ACCESS_MODE}" != "local" ]]; then
+    echo "Invalid --phone-access '${PHONE_ACCESS_MODE}'. Expected tailscale, wifi, or local." >&2
+    exit 1
+  fi
+  if [[ -z "${PHONE_ACCESS_MODE}" ]]; then
+    if [[ "${EXPOSE_NETWORK}" == "true" ]]; then
+      PHONE_ACCESS_MODE="tailscale"
+    else
+      PHONE_ACCESS_MODE="local"
+    fi
+  fi
+  if [[ "${PHONE_ACCESS_MODE}" == "local" ]]; then
+    EXPOSE_NETWORK="false"
+  else
+    EXPOSE_NETWORK="true"
   fi
 
   require_cmd python3
@@ -382,6 +373,8 @@ main() {
   pair_code="$(gen_pair_code)"
   local pair_code_expires_at
   pair_code_expires_at="$(pair_code_expiry)"
+  PAIR_CODE="${pair_code}"
+  PAIR_CODE_EXPIRES_AT="${pair_code_expires_at}"
   write_env_file "${token}"
 
   step "Installing backend dependencies"
@@ -404,18 +397,13 @@ main() {
   fi
 
   step "Writing pairing details"
+  local bind_host="127.0.0.1"
+  if [[ "${PHONE_ACCESS_MODE}" != "local" ]]; then
+    bind_host="0.0.0.0"
+  fi
+  write_pairing_details "${bind_host}"
   local server_url
-  server_url="$(detect_url)"
-
-  cat > "${PAIRING_FILE}" <<EOF
-{
-  "server_url": "${server_url}",
-  "server_urls": ["${server_url}"],
-  "session_id": "iphone-app",
-  "pair_code": "${pair_code}",
-  "pair_code_expires_at": "${pair_code_expires_at}"
-}
-EOF
+  server_url="$(read_pairing_value "server_url")"
 
   local pairing_qr_path=""
   if command -v qrencode >/dev/null 2>&1; then
@@ -475,6 +463,8 @@ EOF
   else
     echo "  127.0.0.1 (local-only)"
   fi
+  echo "Phone access mode:"
+  echo "  ${PHONE_ACCESS_MODE}"
   echo
   echo "Use in iOS app onboarding:"
   echo "  server_url: ${server_url}"
@@ -484,10 +474,10 @@ EOF
   echo "  pair_code: ${pair_code} (expires ${pair_code_expires_at})"
   echo "  session_id: iphone-app"
   echo "  # token is stored in backend/.env (not printed)"
-  if [[ "${EXPOSE_NETWORK}" != "true" ]]; then
+  if [[ "${PHONE_ACCESS_MODE}" == "local" ]]; then
     echo
     echo "This install is local-only."
-    echo "A real iPhone cannot reach 127.0.0.1, so re-run with --expose-network if you want phone pairing over LAN or Tailscale."
+    echo "A real iPhone cannot reach 127.0.0.1, so re-run with --phone-access wifi or --phone-access tailscale if you want phone pairing beyond this computer."
   fi
   echo
   if [[ "${has_codex}" == "true" || "${has_claude}" == "true" ]]; then
@@ -500,7 +490,7 @@ EOF
   echo
   echo "Re-provision the autonomous Codex stack later:"
   echo "  python3 ./scripts/provision_codex_autonomy.py --mode ${SECURITY_MODE}"
-  if [[ "${EXPOSE_NETWORK}" == "true" && "${server_url}" == "http://127.0.0.1:8000" ]]; then
+  if [[ "${PHONE_ACCESS_MODE}" != "local" && "${server_url}" == "http://127.0.0.1:8000" ]]; then
     echo
     echo "Warning: could not detect a LAN/Tailscale IP, so pairing URL still points to 127.0.0.1." >&2
     echo "Set server_url manually in the app if your machine is reachable at another address." >&2

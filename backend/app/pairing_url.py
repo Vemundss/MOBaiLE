@@ -5,7 +5,11 @@ import json
 import socket
 import subprocess
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
+
+PhoneAccessMode = Literal["tailscale", "wifi", "local"]
+PHONE_ACCESS_MODE_OPTIONS = ("tailscale", "wifi", "local")
 
 
 def refresh_pairing_server_url(
@@ -14,6 +18,7 @@ def refresh_pairing_server_url(
     bind_host: str,
     bind_port: int,
     public_server_url: str = "",
+    phone_access_mode: PhoneAccessMode = "tailscale",
 ) -> None:
     if not pairing_file.exists():
         return
@@ -29,6 +34,7 @@ def refresh_pairing_server_url(
         bind_host=bind_host,
         bind_port=bind_port,
         public_server_url=public_server_url,
+        phone_access_mode=phone_access_mode,
     )
 
     preferred: list[str] = []
@@ -55,8 +61,19 @@ def refresh_pairing_server_url(
     pairing_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def detect_server_url(*, bind_host: str, bind_port: int) -> str:
-    urls = detect_server_urls(bind_host=bind_host, bind_port=bind_port)
+def detect_server_url(
+    *,
+    bind_host: str,
+    bind_port: int,
+    public_server_url: str = "",
+    phone_access_mode: PhoneAccessMode = "tailscale",
+) -> str:
+    urls = detect_server_urls(
+        bind_host=bind_host,
+        bind_port=bind_port,
+        public_server_url=public_server_url,
+        phone_access_mode=phone_access_mode,
+    )
     if urls:
         return urls[0]
     return f"http://127.0.0.1:{bind_port}"
@@ -67,6 +84,7 @@ def detect_server_urls(
     bind_host: str,
     bind_port: int,
     public_server_url: str = "",
+    phone_access_mode: PhoneAccessMode = "tailscale",
 ) -> list[str]:
     candidates: list[str] = []
     explicit_public_url = _normalize_server_url(public_server_url)
@@ -74,7 +92,20 @@ def detect_server_urls(
         candidates.append(explicit_public_url)
 
     host = bind_host.strip().lower()
-    if not host or host in {"0.0.0.0", "::", "[::]"}:
+    normalized_phone_access_mode = _normalize_phone_access_mode(phone_access_mode)
+    if normalized_phone_access_mode == "local":
+        candidates.append(_loopback_server_url(bind_port))
+        return _dedupe_server_urls(candidates)
+
+    if _is_network_exposed_host(host):
+        if normalized_phone_access_mode == "wifi":
+            lan_ip = detect_lan_ip()
+            if lan_ip:
+                candidates.append(f"http://{lan_ip}:{bind_port}")
+            else:
+                candidates.append(_loopback_server_url(bind_port))
+            return _dedupe_server_urls(candidates)
+
         tailscale_dns_name = detect_tailscale_dns_name()
         if tailscale_dns_name:
             candidates.append(f"http://{tailscale_dns_name}:{bind_port}")
@@ -84,12 +115,12 @@ def detect_server_urls(
         lan_ip = detect_lan_ip()
         if lan_ip:
             candidates.append(f"http://{lan_ip}:{bind_port}")
-        if not candidates:
-            candidates.append(f"http://127.0.0.1:{bind_port}")
+        if len(candidates) == (1 if explicit_public_url else 0):
+            candidates.append(_loopback_server_url(bind_port))
         return _dedupe_server_urls(candidates)
 
-    if host in {"localhost", "::1"} or host.startswith("127."):
-        candidates.append(f"http://127.0.0.1:{bind_port}")
+    if _is_loopback_host(host):
+        candidates.append(_loopback_server_url(bind_port))
         return _dedupe_server_urls(candidates)
 
     candidates.append(f"http://{bind_host.strip()}:{bind_port}")
@@ -180,6 +211,25 @@ def _read_pairing_server_urls(payload: dict[str, object]) -> list[str]:
             if normalized:
                 urls.append(normalized)
     return _dedupe_server_urls(urls)
+
+
+def _normalize_phone_access_mode(phone_access_mode: str) -> PhoneAccessMode:
+    normalized = phone_access_mode.strip().lower()
+    if normalized not in PHONE_ACCESS_MODE_OPTIONS:
+        return "tailscale"
+    return normalized  # type: ignore[return-value]
+
+
+def _is_network_exposed_host(host: str) -> bool:
+    return not host or host in {"0.0.0.0", "::", "[::]"}
+
+
+def _is_loopback_host(host: str) -> bool:
+    return host in {"localhost", "::1", "[::1]"} or host.startswith("127.")
+
+
+def _loopback_server_url(bind_port: int) -> str:
+    return f"http://127.0.0.1:{bind_port}"
 
 
 def _normalize_server_url(server_url: str) -> str:

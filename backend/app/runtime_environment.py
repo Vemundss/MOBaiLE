@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+from typing import Literal
 
 from app.agent_runtime import build_agent_prompt
 from app.agent_runtime import context_leak_markers
@@ -27,6 +28,8 @@ AGENT_HOME_HINTS: dict[AgentExecutorName, str] = {
 }
 
 CODEX_REASONING_EFFORT_OPTIONS = ("minimal", "low", "medium", "high", "xhigh")
+PHONE_ACCESS_MODE_OPTIONS = ("tailscale", "wifi", "local")
+PhoneAccessMode = Literal["tailscale", "wifi", "local"]
 
 
 def _resolve_path_value(raw_value: str, *, base_dir: Path) -> Path:
@@ -73,12 +76,20 @@ def _read_non_negative_int_env(name: str, default: int) -> int:
     return max(0, parsed)
 
 
+def _read_phone_access_mode_env() -> PhoneAccessMode:
+    raw_value = os.getenv("VOICE_AGENT_PHONE_ACCESS_MODE", "tailscale").strip().lower()
+    if raw_value not in PHONE_ACCESS_MODE_OPTIONS:
+        return "tailscale"
+    return raw_value  # type: ignore[return-value]
+
+
 @dataclass(frozen=True)
 class RuntimeEnvironment:
     backend_root: Path
     host: str
     port: int
     public_server_url: str
+    phone_access_mode: PhoneAccessMode
     default_workdir: Path
     security_mode: str
     full_access_mode: bool
@@ -131,6 +142,7 @@ class RuntimeEnvironment:
         except ValueError:
             port = 8000
         public_server_url = os.getenv("VOICE_AGENT_PUBLIC_SERVER_URL", "").strip()
+        phone_access_mode = _read_phone_access_mode_env()
         default_workdir = Path(
             os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))
         ).expanduser().resolve()
@@ -276,6 +288,7 @@ class RuntimeEnvironment:
             host=host,
             port=port,
             public_server_url=public_server_url,
+            phone_access_mode=phone_access_mode,
             default_workdir=default_workdir,
             security_mode=security_mode,
             full_access_mode=full_access_mode,

@@ -43,6 +43,14 @@ def test_runtime_environment_defaults_to_safe_and_no_agent_timeout(monkeypatch, 
     assert env.claude_timeout_sec == 0
 
 
+def test_runtime_environment_reads_phone_access_mode(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("VOICE_AGENT_PHONE_ACCESS_MODE", "wifi")
+
+    env = RuntimeEnvironment.from_env(tmp_path)
+
+    assert env.phone_access_mode == "wifi"
+
+
 def test_load_runtime_context_falls_back_to_hidden_mobaile_dir(tmp_path: Path):
     hidden = tmp_path / ".mobaile" / "AGENT_CONTEXT.md"
     hidden.parent.mkdir(parents=True, exist_ok=True)

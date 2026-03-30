@@ -34,6 +34,22 @@ def test_detect_server_url_keeps_loopback_for_local_only_backend(monkeypatch):
     assert resolved == "http://127.0.0.1:8000"
 
 
+def test_detect_server_urls_wifi_mode_prefers_lan_only(monkeypatch):
+    module = importlib.import_module("app.pairing_url")
+    module = importlib.reload(module)
+    monkeypatch.setattr(module, "detect_tailscale_dns_name", lambda: "mobaile.tail6a5903.ts.net")
+    monkeypatch.setattr(module, "detect_tailscale_ip", lambda: "100.111.99.51")
+    monkeypatch.setattr(module, "detect_lan_ip", lambda: "192.168.1.20")
+
+    resolved = module.detect_server_urls(
+        bind_host="0.0.0.0",
+        bind_port=8000,
+        phone_access_mode="wifi",
+    )
+
+    assert resolved == ["http://192.168.1.20:8000"]
+
+
 def test_detect_tailscale_dns_name_reads_status_json(monkeypatch):
     module = importlib.import_module("app.pairing_url")
     module = importlib.reload(module)

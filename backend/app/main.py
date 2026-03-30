@@ -74,6 +74,7 @@ refresh_pairing_server_url(
     bind_host=ENV.host,
     bind_port=ENV.port,
     public_server_url=ENV.public_server_url,
+    phone_access_mode=ENV.phone_access_mode,
 )
 TRANSCRIBER = Transcriber()
 RUN_STORE = RunStore(ENV.db_path)
