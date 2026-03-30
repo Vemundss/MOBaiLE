@@ -29,6 +29,11 @@ COPY = {
     },
 }
 
+FALLBACK_SCREENSHOT_SIZES = {
+    (1320, 2868): (1290, 2796),
+    (2868, 1320): (2796, 1290),
+}
+
 
 def font(size: int, bold: bool = False):
     candidates = []
@@ -134,6 +139,10 @@ def compose(source: Path, destination: Path) -> None:
     canvas.alpha_composite(panel, dest=(screen_x, screen_y))
     mask = rounded_mask(screenshot.size, 46)
     canvas.paste(screenshot, (screen_x, screen_y), mask)
+
+    normalized_size = FALLBACK_SCREENSHOT_SIZES.get(canvas.size)
+    if normalized_size is not None:
+        canvas = canvas.resize(normalized_size, Image.Resampling.LANCZOS)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     canvas.convert("RGB").save(destination, optimize=True)
