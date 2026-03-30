@@ -36,6 +36,7 @@ def refresh_pairing_server_url(
         public_server_url=public_server_url,
         phone_access_mode=phone_access_mode,
     )
+    normalized_phone_access_mode = _normalize_phone_access_mode(phone_access_mode)
 
     preferred: list[str] = []
     explicit_public_url = _normalize_server_url(public_server_url)
@@ -43,6 +44,14 @@ def refresh_pairing_server_url(
         preferred.append(explicit_public_url)
 
     next_urls = _dedupe_server_urls(preferred + detected)
+    if (
+        not explicit_public_url
+        and normalized_phone_access_mode in {"tailscale", "wifi"}
+        and _is_loopback_only_server_urls(detected, bind_port=bind_port)
+    ):
+        fallback_urls = _matching_previous_server_urls(payload, phone_access_mode=normalized_phone_access_mode)
+        if fallback_urls:
+            next_urls = _dedupe_server_urls(fallback_urls + detected)
     if not next_urls and current:
         next_urls = [current]
     if not next_urls:
@@ -210,6 +219,17 @@ def _read_pairing_server_urls(payload: dict[str, object]) -> list[str]:
     return _dedupe_server_urls(urls)
 
 
+def _matching_previous_server_urls(payload: dict[str, object], *, phone_access_mode: PhoneAccessMode) -> list[str]:
+    candidates: list[str] = []
+    current = _normalize_server_url(str(payload.get("server_url", "")))
+    if current and _server_url_matches_mode(current, phone_access_mode=phone_access_mode):
+        candidates.append(current)
+    for url in _read_pairing_server_urls(payload):
+        if _server_url_matches_mode(url, phone_access_mode=phone_access_mode):
+            candidates.append(url)
+    return _dedupe_server_urls(candidates)
+
+
 def _normalize_phone_access_mode(phone_access_mode: str) -> PhoneAccessMode:
     normalized = phone_access_mode.strip().lower()
     if normalized not in PHONE_ACCESS_MODE_OPTIONS:
@@ -227,6 +247,11 @@ def _is_loopback_host(host: str) -> bool:
 
 def _loopback_server_url(bind_port: int) -> str:
     return f"http://127.0.0.1:{bind_port}"
+
+
+def _is_loopback_only_server_urls(urls: list[str], *, bind_port: int) -> bool:
+    normalized = _dedupe_server_urls(urls)
+    return normalized == [_loopback_server_url(bind_port)]
 
 
 def _normalize_server_url(server_url: str) -> str:
@@ -261,6 +286,23 @@ def _dedupe_server_urls(urls: list[str]) -> list[str]:
     return ordered
 
 
+def _server_url_matches_mode(server_url: str, *, phone_access_mode: PhoneAccessMode) -> bool:
+    try:
+        parsed = urlparse(server_url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return False
+    if phone_access_mode == "tailscale":
+        return host.endswith(".ts.net") or _is_tailscale_ipv4(host)
+    if phone_access_mode == "wifi":
+        if host.endswith(".local"):
+            return True
+        return _is_private_non_loopback_ipv4(host)
+    return False
+
+
 def _is_ipv4(value: str) -> bool:
     try:
         return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
@@ -274,6 +316,14 @@ def _is_private_or_loopback_ipv4(value: str) -> bool:
     except ValueError:
         return False
     return bool(addr.is_loopback or addr.is_private)
+
+
+def _is_private_non_loopback_ipv4(value: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return bool(addr.is_private and not addr.is_loopback)
 
 
 def _is_tailscale_ipv4(value: str) -> bool:
