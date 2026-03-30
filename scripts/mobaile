@@ -163,6 +163,7 @@ pairing_status_label() {
 
   python3 - "${pairing_file}" <<'PY'
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
@@ -179,7 +180,22 @@ except json.JSONDecodeError:
 
 server_url = str(payload.get("server_url", "")).strip()
 pair_code = str(payload.get("pair_code", "")).strip()
-print("Ready" if server_url and pair_code else "Not ready")
+expires_at = str(payload.get("pair_code_expires_at", "")).strip()
+
+if not server_url or not pair_code:
+    print("Not ready")
+    raise SystemExit(0)
+
+if expires_at:
+    try:
+        parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is not None and parsed <= datetime.now(timezone.utc):
+        print("Not ready")
+        raise SystemExit(0)
+
+print("Ready")
 PY
 }
 
