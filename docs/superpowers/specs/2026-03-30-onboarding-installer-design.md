@@ -13,7 +13,7 @@ The chosen direction is:
 - one stable post-install control command
 - simpler top-level README language that mirrors the wizard
 
-This keeps setup as lightweight as `happy` while avoiding a separate host GUI in v1.
+This keeps setup lightweight while avoiding a separate host GUI in v1.
 
 ## Problem
 
