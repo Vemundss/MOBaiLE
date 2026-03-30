@@ -68,8 +68,13 @@ normalize_existing_path() {
 
 validate_checkout_or_fail() {
   local checkout_path="$1"
+  local require_git="${2:-false}"
   local missing=()
   local required_file
+
+  if [[ "${require_git}" == "true" && ! -d "${checkout_path}/.git" ]]; then
+    missing+=(".git")
+  fi
 
   while IFS= read -r required_file; do
     [[ -f "${checkout_path}/${required_file}" ]] || missing+=("${required_file}")
@@ -212,7 +217,7 @@ ensure_checkout() {
   CHECKOUT="${target}"
 
   if [[ -d "${target}" ]]; then
-    validate_checkout_or_fail "${target}"
+    validate_checkout_or_fail "${target}" "true"
   fi
 
   if [[ "${DRY_RUN}" == "true" ]]; then

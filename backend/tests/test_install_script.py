@@ -16,8 +16,7 @@ def write_executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def make_checkout(tmp_path: Path) -> Path:
-    checkout = tmp_path / "repo"
+def populate_checkout_scripts(checkout: Path) -> None:
     scripts_dir = checkout / "scripts"
     backend_dir = checkout / "backend"
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -57,6 +56,11 @@ def make_checkout(tmp_path: Path) -> Path:
         ),
     )
     write_executable(scripts_dir / "mobaile", "#!/usr/bin/env bash\n")
+
+
+def make_checkout(tmp_path: Path) -> Path:
+    checkout = tmp_path / "repo"
+    populate_checkout_scripts(checkout)
     return checkout
 
 
@@ -272,7 +276,7 @@ def test_install_script_raw_existing_invalid_checkout_fails(tmp_path: Path):
 def test_install_script_raw_existing_directory_without_git_fails(tmp_path: Path):
     home = tmp_path / "home"
     invalid_checkout = home / "MOBaiLE"
-    invalid_checkout.mkdir(parents=True, exist_ok=True)
+    populate_checkout_scripts(invalid_checkout)
 
     result = run_install_script(
         home,
@@ -282,4 +286,4 @@ def test_install_script_raw_existing_directory_without_git_fails(tmp_path: Path)
 
     assert result.returncode != 0
     assert "is not a valid MOBaiLE checkout" in result.stderr
-    assert "scripts/install.sh" in result.stderr
+    assert ".git" in result.stderr
