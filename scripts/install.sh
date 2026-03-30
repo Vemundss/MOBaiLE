@@ -45,6 +45,15 @@ require_cmd() {
   fi
 }
 
+checkout_required_files() {
+  cat <<'EOF'
+scripts/install.sh
+scripts/install_backend.sh
+scripts/pairing_qr.sh
+scripts/mobaile
+EOF
+}
+
 normalize_existing_path() {
   local path="$1"
   if [[ -d "${path}" ]]; then
@@ -55,6 +64,22 @@ normalize_existing_path() {
     return
   fi
   printf "%s\n" "${path}"
+}
+
+validate_checkout_or_fail() {
+  local checkout_path="$1"
+  local missing=()
+  local required_file
+
+  while IFS= read -r required_file; do
+    [[ -f "${checkout_path}/${required_file}" ]] || missing+=("${required_file}")
+  done < <(checkout_required_files)
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    return
+  fi
+
+  fail "Existing checkout at ${checkout_path} is not a valid MOBaiLE checkout. Missing: ${missing[*]}"
 }
 
 validate_mode() {
@@ -173,9 +198,7 @@ build_reexec_args() {
 ensure_checkout() {
   if [[ -n "${CHECKOUT}" ]]; then
     CHECKOUT="$(normalize_existing_path "${CHECKOUT}")"
-    [[ -f "${CHECKOUT}/scripts/install_backend.sh" ]] || fail "Missing ${CHECKOUT}/scripts/install_backend.sh"
-    [[ -f "${CHECKOUT}/scripts/pairing_qr.sh" ]] || fail "Missing ${CHECKOUT}/scripts/pairing_qr.sh"
-    [[ -f "${CHECKOUT}/scripts/mobaile" ]] || fail "Missing ${CHECKOUT}/scripts/mobaile"
+    validate_checkout_or_fail "${CHECKOUT}"
     return
   fi
 
@@ -187,6 +210,10 @@ ensure_checkout() {
   done < <(build_reexec_args)
 
   CHECKOUT="${target}"
+
+  if [[ -d "${target}/.git" ]]; then
+    validate_checkout_or_fail "${target}"
+  fi
 
   if [[ "${DRY_RUN}" == "true" ]]; then
     step "Checkout"
@@ -213,6 +240,18 @@ ensure_checkout() {
   fi
 
   exec bash "${target}/scripts/install.sh" "${reexec_args[@]}"
+}
+
+enable_non_interactive_defaults_if_needed() {
+  if [[ "${NON_INTERACTIVE}" == "true" ]]; then
+    return
+  fi
+  if [[ -t 0 ]]; then
+    return
+  fi
+
+  echo "No interactive terminal detected. Using recommended defaults."
+  NON_INTERACTIVE="true"
 }
 
 prompt_with_default() {
@@ -526,6 +565,7 @@ main() {
   validate_background_service
   validate_public_server_url
 
+  enable_non_interactive_defaults_if_needed
   ensure_checkout
   echo "MOBaiLE runs on this computer. Your iPhone connects to it."
   run_wizard

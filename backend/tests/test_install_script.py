@@ -61,27 +61,30 @@ def make_checkout(tmp_path: Path) -> Path:
 
 
 def run_install_script(
-    checkout: Path,
     home: Path,
     *args: str,
+    checkout: Path | None = None,
+    non_interactive: bool = True,
     dry_run: bool = True,
     extra_env: dict[str, str] | None = None,
+    stdin: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     home.mkdir(parents=True, exist_ok=True)
     command = [
         "bash",
         str(PROJECT_ROOT / "scripts" / "install.sh"),
-        "--checkout",
-        str(checkout),
-        "--non-interactive",
     ]
+    if checkout is not None:
+        command.extend(["--checkout", str(checkout)])
+    if non_interactive:
+        command.append("--non-interactive")
     if dry_run:
         command.append("--dry-run")
     command.extend(args)
     env = {
         **os.environ,
         "HOME": str(home),
-        "MOBAILE_TEST_CHECKOUT": str(checkout),
+        "MOBAILE_TEST_CHECKOUT": str(checkout or ""),
         "MOBAILE_TEST_LOG": str(tmp_log_path(home)),
     }
     if extra_env:
@@ -92,6 +95,7 @@ def run_install_script(
         text=True,
         check=False,
         env=env,
+        stdin=stdin,
     )
 
 
@@ -136,7 +140,7 @@ def test_install_script_defaults_to_full_access_and_tailscale(tmp_path: Path):
     checkout = make_checkout(tmp_path)
     home = tmp_path / "home"
 
-    result = run_install_script(checkout, home)
+    result = run_install_script(home, checkout=checkout)
 
     assert result.returncode == 0
     assert "MOBaiLE runs on this computer. Your iPhone connects to it." in result.stdout
@@ -161,12 +165,12 @@ def test_install_script_can_switch_to_wifi_without_background_service(tmp_path: 
     home = tmp_path / "home"
 
     result = run_install_script(
-        checkout,
         home,
         "--phone-access",
         "wifi",
         "--background-service",
         "no",
+        checkout=checkout,
     )
 
     assert result.returncode == 0
@@ -189,10 +193,10 @@ def test_install_script_real_run_opens_qr_and_prints_final_summary(tmp_path: Pat
     make_fake_openers(fake_bin, log_path)
 
     result = run_install_script(
-        checkout,
         home,
         "--background-service",
         "no",
+        checkout=checkout,
         dry_run=False,
         extra_env={
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
@@ -217,3 +221,49 @@ def test_install_script_real_run_opens_qr_and_prints_final_summary(tmp_path: Pat
         assert f"open {checkout}/backend/pairing-qr.png" in log_contents
     elif system == "Linux":
         assert f"xdg-open {checkout}/backend/pairing-qr.png" in log_contents
+
+
+def test_install_script_raw_dry_run_preserves_args_in_reexec_command(tmp_path: Path):
+    home = tmp_path / "home"
+
+    result = run_install_script(
+        home,
+        "--phone-access",
+        "wifi",
+        "--background-service",
+        "no",
+        "--public-url",
+        "https://demo.mobaile.app",
+        non_interactive=False,
+        stdin=subprocess.DEVNULL,
+    )
+
+    target_checkout = home / "MOBaiLE"
+
+    assert result.returncode == 0
+    assert "No interactive terminal detected. Using recommended defaults." in result.stdout
+    assert f"git clone https://github.com/vemundss/MOBaiLE.git {target_checkout}" in result.stdout
+    assert f"bash {target_checkout}/scripts/install.sh" in result.stdout
+    assert f"--checkout {target_checkout}" in result.stdout
+    assert "--mode full-access" in result.stdout
+    assert "--phone-access wifi" in result.stdout
+    assert "--background-service no" in result.stdout
+    assert "--public-url https://demo.mobaile.app" in result.stdout
+    assert "--non-interactive" in result.stdout
+    assert "--dry-run" in result.stdout
+
+
+def test_install_script_raw_existing_invalid_checkout_fails(tmp_path: Path):
+    home = tmp_path / "home"
+    invalid_checkout = home / "MOBaiLE"
+    (invalid_checkout / ".git").mkdir(parents=True, exist_ok=True)
+
+    result = run_install_script(
+        home,
+        non_interactive=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert result.returncode != 0
+    assert "is not a valid MOBaiLE checkout" in result.stderr
+    assert "scripts/install.sh" in result.stderr
