@@ -20,6 +20,8 @@
   CLI tests for the new `mobaile` wrapper using temp repos and env overrides.
 - Create: `/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/backend/tests/test_install_script.py`
   Non-interactive/dry-run tests for the public install wizard.
+- Create: `/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/backend/tests/test_install_backend_script.py`
+  Lightweight script-level regression coverage for `scripts/install_backend.sh`.
 - Modify: `/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/backend/app/pairing_url.py`
   Add explicit phone access mode handling so pairing URLs can prefer Tailscale or LAN deterministically.
 - Modify: `/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/backend/app/runtime_environment.py`
@@ -77,6 +79,18 @@ def test_runtime_environment_reads_phone_access_mode(monkeypatch, tmp_path: Path
     env = RuntimeEnvironment.from_env(tmp_path)
 
     assert env.phone_access_mode == "wifi"
+```
+
+Add refresh regression coverage too:
+
+```python
+def test_refresh_pairing_server_url_preserves_same_mode_remote_url_on_degraded_wifi_detection(monkeypatch, tmp_path: Path):
+    ...
+```
+
+```python
+def test_install_backend_script_persists_phone_access_mode_and_pairing_urls(tmp_path: Path):
+    ...
 ```
 
 - [ ] **Step 2: Run the targeted tests to verify they fail**
@@ -221,9 +235,11 @@ PY
 
 Use `pairing_urls_json` when writing `backend/pairing.json` so `server_url` and `server_urls` stay consistent with backend startup behavior.
 
+During backend startup refresh, preserve a previously working same-mode remote URL only when current `tailscale` or `wifi` detection collapses to loopback-only. Do not preserve stale public URLs unless `public_server_url` is explicitly provided on the current run.
+
 - [ ] **Step 5: Run the expanded tests and script syntax check**
 
-Run: `cd /Users/vemundss/Library/Mobile\ Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/backend && uv run pytest tests/test_pairing_url.py tests/test_runtime_environment.py -q`
+Run: `cd /Users/vemundss/Library/Mobile\ Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/backend && uv run pytest tests/test_pairing_url.py tests/test_runtime_environment.py tests/test_install_backend_script.py -q`
 Expected: PASS
 
 Run: `bash -n /Users/vemundss/Library/Mobile\ Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/scripts/install_backend.sh`

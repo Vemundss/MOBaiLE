@@ -287,6 +287,19 @@ Wizard choices map to current config like this:
 
 The installer should no longer require the user to understand `--expose-network` directly.
 
+### Pairing refresh resilience
+
+`backend/pairing.json` should follow the current mode and explicit overrides, but backend startup should not destructively rewrite a previously working remote pairing URL to loopback just because one refresh pass cannot currently see the network.
+
+Rules:
+
+- explicit current `public_server_url` stays first when provided
+- `local` still resolves to loopback only
+- `wifi` and `tailscale` use current detection results first
+- if `wifi` or `tailscale` detection collapses to loopback-only during startup refresh, preserve a previously stored same-mode remote URL instead of overwriting the pairing file with `127.0.0.1`
+
+This keeps the pairing file aligned with intentional mode changes while avoiding avoidable breakage during transient host-network issues.
+
 ## README Simplification
 
 The top-level README should match the installer language.
@@ -328,6 +341,7 @@ Verification should cover:
 - Linux install path
 - interactive wizard prompt flow
 - each default choice path
+- degraded refresh behavior when a previously working remote URL exists
 - `mobaile status`, `pair`, `restart`, `logs`, `config`
 - README coherence with the new installer flow
 - in-app setup guide alignment with the wizard wording
