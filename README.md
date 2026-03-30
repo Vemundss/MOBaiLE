@@ -32,12 +32,35 @@
 
 > MOBaiLE is a client for a backend you run and control. It does not execute code on the iPhone.
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
+```
+
+## Set It Up
+
+If your goal is simply "make the iPhone app work", use this path first.
+
+1. Paste the install command on the Mac or Linux machine you want MOBaiLE to use.
+2. The installer asks three quick questions. Keep the defaults: `Full Access`, `Anywhere with Tailscale`, and usually `Yes` for the background service.
+3. Open the QR on that computer, scan it with iPhone Camera, and tap `Open in MOBaiLE`.
+4. Later, run `mobaile status` any time to check the connection.
+
+What the installer does:
+
+- installs or updates MOBaiLE in `~/MOBaiLE`
+- configures the backend
+- starts a background service when supported
+- writes `backend/pairing.json`
+- generates `backend/pairing-qr.png`
+
+Need more detail? See [`docs/USAGE.md`](docs/USAGE.md), [`ios/README.md`](ios/README.md), [`backend/README.md`](backend/README.md), and [`scripts/README.md`](scripts/README.md).
+
 ## Why It Feels Different
 
 - **Runs against your real machine.** Use your actual repo, CLI tools, auth, files, and network instead of a toy remote environment.
 - **Keeps the run legible.** Planning, execution, summaries, and follow-up all stay in one thread instead of collapsing into a final notification.
 - **Works away from the desk.** Voice input, auto-send after silence, widgets, haptics, audio cues, and Shortcuts make it usable when your laptop is the inconvenient device.
-- **Starts safe.** Begin with `safe` mode on a trusted host, then move up to `full-access` only when that machine and workflow justify it.
+- **Lets you choose the trust level.** Use `safe` on cautious hosts, or `full-access` on a trusted private machine.
 
 ## What The Product Looks Like
 
@@ -52,52 +75,18 @@
 - `check my calendar today and summarize conflicts`
 - `fix the failing test and explain the patch`
 
-## Two-Minute Setup
+## Advanced Paths
 
-If your goal is simply "make the iPhone app work", use this path first.
+Use these only if the main installer path is not what you want.
 
-### 1. On the computer you want MOBaiLE to use, run one command
+- Already in a checkout and want to run the installer there: `bash ./scripts/install.sh`
+- Backend-only/manual path from a checkout: `bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale`
+- Local simulator-only testing: `bash ./scripts/install_backend.sh --mode safe --phone-access local`
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
-```
-
-What this does:
-
-- installs the backend into `~/MOBaiLE`
-- starts a background service when supported
-- runs the basic checks
-- writes `backend/pairing.json`
-- generates `backend/pairing-qr.png`
-
-### 2. On your iPhone, scan the pairing QR
-
-1. Open `backend/pairing-qr.png` on the computer.
-2. Scan it with iPhone Camera.
-3. Tap `Open in MOBaiLE`.
-4. Send a small prompt such as `create and run a hello script`.
-
-### 3. Use the fallback only if you need it
-
-- Already working from this checkout: run `bash ./scripts/install_backend.sh --mode safe --expose-network`
-- Local simulator-only testing: run `bash ./scripts/install_backend.sh --mode safe`
-- Trusted private host with more autonomy: run `bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack`
-
-The app only needs two connection values in the end: a reachable `server_url` and the backend token. QR pairing fills those for you automatically.
-
-Need more detail? See [`docs/USAGE.md`](docs/USAGE.md), [`docs/AUTONOMY_STACK.md`](docs/AUTONOMY_STACK.md), [`backend/README.md`](backend/README.md), [`ios/README.md`](ios/README.md), and [`scripts/README.md`](scripts/README.md).
-
-## Pair Over Tailscale
-
-This is the recommended path when you want MOBaiLE away from your desk.
-
-1. Install Tailscale on both your computer and iPhone.
-2. Bootstrap the backend on the computer.
-3. Scan the pairing QR from the phone.
-4. Turn off Wi-Fi once and confirm a prompt works over cellular.
+The app only needs two connection values in the end: a reachable `server_url` and the backend token. QR pairing fills those automatically.
 
 <details>
-  <summary><strong>Full end-to-end setup</strong></summary>
+  <summary><strong>Full setup details</strong></summary>
 
 ### Install the essentials
 
@@ -123,30 +112,41 @@ tailscale status
 tailscale ip -4
 ```
 
-### Install and bootstrap the backend
+### Install the backend
 
-Option A, one command into `~/MOBaiLE`:
+Recommended path:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
 ```
 
-Option B, manual flow from a checkout:
+If you are already in a checkout:
 
 ```bash
-git clone https://github.com/vemundss/MOBaiLE.git
-cd MOBaiLE
-bash ./scripts/install_backend.sh --mode safe --expose-network
+bash ./scripts/install.sh
+```
+
+The installer asks three questions:
+
+1. How much access should MOBaiLE have?
+   Keep `Full Access` unless you specifically want the safer mode.
+2. Where should your phone work?
+   Keep `Anywhere with Tailscale` for the normal remote setup.
+3. Should MOBaiLE stay running in the background?
+   Keep `Yes` if this computer should stay ready for the phone.
+
+Manual backend-only path from a checkout:
+
+```bash
+bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale
 bash ./scripts/service_macos.sh install   # macOS
 # or on Linux:
 bash ./scripts/service_linux.sh install
-bash ./scripts/doctor.sh
 bash ./scripts/pairing_qr.sh
 ```
 
-What bootstrap does:
+What the installer does:
 
-- clones or updates the repo into `~/MOBaiLE`
 - installs backend dependencies and creates `backend/.env`
 - creates `backend/pairing.json` using a Tailscale URL when available
 - installs and starts a background service on macOS or Linux when supported
@@ -185,7 +185,7 @@ Manual fallback in app settings:
 - `API Token`: `VOICE_AGENT_API_TOKEN` from `backend/.env`
 - `Session ID`: keep `iphone-app` unless you want a custom one
 
-If the app works on Wi-Fi but not on cellular, verify the backend was installed with `--expose-network` and that the chosen Tailscale or public URL is reachable from the phone.
+If the app works on Wi-Fi but not on cellular, verify the chosen Tailscale or public URL is reachable from the phone.
 
 ### Validate remote use
 
@@ -256,7 +256,7 @@ pre-commit run --all-files
 - Pairing QR contains `127.0.0.1` instead of a Tailscale or LAN URL:
 
 ```bash
-bash ./scripts/install_backend.sh --mode safe --expose-network
+bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale
 bash ./scripts/pairing_qr.sh
 ```
 

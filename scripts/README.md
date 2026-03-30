@@ -3,10 +3,28 @@
 This file is an index, not the canonical setup guide. For installation, service management,
 pairing, and end-to-end usage, prefer [`docs/USAGE.md`](../docs/USAGE.md).
 
+## Start Here
+
+Most people should start with the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
+```
+
+If you are already in a checkout, run:
+
+```bash
+bash ./scripts/install.sh
+```
+
+The installer asks three simple questions. The normal answers are `Full Access`,
+`Anywhere with Tailscale`, and `Yes` for the background service. After setup, use
+`mobaile status` to check the connection.
+
 ## Install and Bootstrap
 
-- `bootstrap_server.sh`: managed install/update into `~/MOBaiLE` by default
-- `install_backend.sh`: install and configure the backend in the current checkout
+- `install.sh`: main installer and onboarding flow
+- `install_backend.sh`: lower-level backend-only install/configure path for the current checkout
 - `set_security_mode.sh`: switch an existing `backend/.env` between `safe` and `full-access`
 - `rotate_api_token.sh`: rotate `VOICE_AGENT_API_TOKEN` and refresh pairing code exports
 

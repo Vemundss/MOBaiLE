@@ -4,30 +4,34 @@ This is the canonical operator/setup document for the repo. If another document 
 
 This document explains how to run the backend that MOBaiLE pairs with on your own Mac or Linux computer.
 
-## Two-Minute Setup
+## Set It Up
 
 If you want the iPhone app working with the least friction, do this first.
 
-### Step 1. Install on the computer you want MOBaiLE to use
-
-Fresh host or easiest path:
+### Step 1. Run the installer on the computer you want MOBaiLE to use
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
 ```
+
+The installer asks three quick questions. For the normal setup, keep the defaults:
+
+- `Full Access`
+- `Anywhere with Tailscale`
+- `Yes` for the background service
 
 This path:
 
-- installs the backend into `~/MOBaiLE`
-- exposes it for phone pairing
+- installs or updates MOBaiLE in `~/MOBaiLE`
+- configures the backend for phone pairing
 - installs and starts a background service when supported
 - writes `backend/pairing.json`
 - generates `backend/pairing-qr.png`
 
-If you are already inside this repo instead of bootstrapping a fresh host:
+If you are already inside this repo and want to run the installer there:
 
 ```bash
-bash ./scripts/install_backend.sh --mode safe --expose-network
+bash ./scripts/install.sh
 ```
 
 ### Step 2. Pair the iPhone
@@ -37,12 +41,20 @@ bash ./scripts/install_backend.sh --mode safe --expose-network
 3. Tap `Open in MOBaiLE`.
 4. Send a small prompt to confirm the thread works.
 
-### Step 3. Reach for advanced setup only when you need it
+### Step 3. Later, check status with one command
 
-- Local-only testing on the same machine: `bash ./scripts/install_backend.sh --mode safe`
-- Trusted private host with more autonomy: `bash ./scripts/install_backend.sh --mode full-access --with-autonomy-stack`
+```bash
+mobaile status
+```
+
+### Step 4. Reach for fallback or advanced setup only when you need it
+
+- Local-only testing on the same machine: `bash ./scripts/install_backend.sh --mode safe --phone-access local`
+- Backend-only/manual install from a checkout: `bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale`
 - Stable public hostname: set `VOICE_AGENT_PUBLIC_SERVER_URL` in `backend/.env` or pass `--public-url https://your-host`
+- Trusted private host with more autonomy: use `--with-autonomy-stack` after the backend install path above
 
+`install.sh` is the main setup entry point. `install_backend.sh` is the lower-level backend-only path.
 `install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
 If Tailscale MagicDNS is available, pairing prefers the stable `*.ts.net` hostname automatically before raw `100.x` or LAN IPs.
 The iPhone app only talks to this backend. It does not run code on-device.
@@ -61,7 +73,7 @@ All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 - Python 3.11+
 - `uv` (auto-installed by `install_backend.sh` if missing)
 
-If you are setting this up for the iPhone app, you also need a reachable backend URL. For local testing that can be `127.0.0.1`; for a real phone it should be a LAN, Tailscale, or other reachable host URL.
+If you are setting this up for the iPhone app, you also need a reachable backend URL. For local testing that can be `127.0.0.1`; for a real phone it should be a Tailscale, LAN, or other reachable host URL.
 
 Check versions:
 

@@ -18,26 +18,29 @@ The app does not execute code on the phone. It forwards your prompt, audio, atta
 
 You do not need to understand agents, Xcode, or backend internals to use the app once it is paired.
 
-## If You Just Want To Use MOBaiLE
+## Set It Up
 
 This is the shortest path:
 
 1. On the computer you want MOBaiLE to use, run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe
+curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
 ```
 
-2. Open `backend/pairing-qr.png` on that computer.
-3. Scan it with the iPhone camera.
-4. Open the `mobaile://pair...` link.
-5. Confirm the pairing inside MOBaiLE.
-6. Send a prompt or tap the mic button.
+2. Keep the default answers in the installer:
+   `Full Access`, `Anywhere with Tailscale`, and usually `Yes` for the background service.
+3. Open `backend/pairing-qr.png` on that computer.
+4. Scan it with the iPhone camera.
+5. Open the `mobaile://pair...` link.
+6. Confirm the pairing inside MOBaiLE.
+7. Later, run `mobaile status` on the computer if you want to check the connection.
+8. Send a prompt or tap the mic button.
 
-Already inside this repo? The equivalent setup is:
+Already inside this repo? Run:
 
 ```bash
-bash ./scripts/install_backend.sh --mode safe --expose-network
+bash ./scripts/install.sh
 ```
 
 Manual fallback inside app Settings:
@@ -99,7 +102,7 @@ The checked-in project does not hard-code a development team, so Xcode should le
 - App on real iPhone cannot reach backend:
   - do not use `127.0.0.1`
   - use a LAN or Tailscale URL
-  - make sure the backend was installed with `--expose-network`
+  - run `mobaile status` on the computer and confirm the pairing URL looks right
 
 - Real iPhone shows `App Transport Security requires the use of a secure connection`:
   - Debug builds allow plain `http://` backend URLs

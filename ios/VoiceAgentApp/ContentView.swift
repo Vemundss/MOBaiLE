@@ -8,9 +8,9 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     private let privacyPolicyURL = URL(string: "https://vemundss.github.io/MOBaiLE/privacy-policy.html")!
     private let supportURL = URL(string: "https://vemundss.github.io/MOBaiLE/support.html")!
-    private let quickStartURL = URL(string: "https://github.com/vemundss/MOBaiLE#two-minute-setup")!
-    private let bootstrapInstallCommand = "curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/bootstrap_server.sh | bash -s -- --mode safe"
-    private let checkoutInstallCommand = "bash ./scripts/install_backend.sh --mode safe --expose-network"
+    private let quickStartURL = URL(string: "https://github.com/vemundss/MOBaiLE#set-it-up")!
+    private let bootstrapInstallCommand = "curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash"
+    private let checkoutInstallCommand = "bash ./scripts/install.sh"
     @StateObject private var vm = VoiceAgentViewModel()
     @State private var showConnectionSettings = false
     @State private var showSetupGuide = false
@@ -402,7 +402,7 @@ struct ContentView: View {
                                 SetupGuideStepSummaryRow(
                                     stepNumber: 1,
                                     title: "Install MOBaiLE on your computer",
-                                    detail: "Run one bootstrap command on your Mac or Linux machine. It installs the backend, starts the service when possible, and prepares pairing."
+                                    detail: "Run one install command on your Mac or Linux machine. The installer asks three quick questions. Keep the default answers for the normal setup."
                                 )
                                 SetupGuideStepSummaryRow(
                                     stepNumber: 2,
@@ -423,7 +423,7 @@ struct ContentView: View {
                     } header: {
                         Text("Getting Started")
                     } footer: {
-                        Text("Fastest path: use QR pairing. Manual fields below are only the fallback.")
+                        Text("Fastest path: run the installer, keep the defaults, then use QR pairing. Manual fields below are only the fallback.")
                     }
                 }
 
@@ -444,7 +444,7 @@ struct ContentView: View {
                     Text(
                         vm.hasConfiguredConnection
                             ? "Server URL and token are the only required setup."
-                            : "Most people should pair by QR instead of typing these fields."
+                            : "Most people should pair by QR instead of typing these fallback fields."
                     )
                 }
 
@@ -566,7 +566,7 @@ struct ContentView: View {
 
                 Section("Support") {
                     if !vm.hasConfiguredConnection {
-                        Link("Quick Start", destination: quickStartURL)
+                        Link("Set It Up", destination: quickStartURL)
                     }
                     Link("Privacy Policy", destination: privacyPolicyURL)
                     Link("Support", destination: supportURL)
@@ -712,7 +712,7 @@ struct ContentView: View {
         case .idle:
             return vm.hasConfiguredConnection
                 ? "Check after editing either field."
-                : "Use QR pairing for the fastest setup, or expand the manual section if you already have connection details."
+                : "Use the installer and QR pairing for the fastest setup, or expand the manual fallback section if you already have connection details."
         case .checking:
             return "Checking the current backend session."
         case let .success(message), let .failure(message):
@@ -1504,7 +1504,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Finish setup to start a run")
                     .font(.subheadline.weight(.semibold))
-                Text("Run one host install command, then scan the pairing QR. Manual connection fields are only the fallback.")
+                Text("Run one install command on your computer, keep the default answers, then scan the pairing QR. Manual connection fields are only the fallback.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2486,7 +2486,7 @@ private struct SetupGuideSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Two-minute setup", systemImage: "sparkles")
+                        Label("Set it up", systemImage: "sparkles")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Color.accentColor)
                         Text("Start on your computer. Pair once. Then the app is ready.")
@@ -2500,8 +2500,8 @@ private struct SetupGuideSheet: View {
                     VStack(alignment: .leading, spacing: 12) {
                         SetupGuideStepSummaryRow(
                             stepNumber: 1,
-                            title: "Run the guided install on your computer",
-                            detail: "This is the easiest path on a fresh host. It installs the backend, starts the service when possible, and prepares pairing."
+                            title: "Run the installer on your computer",
+                            detail: "This is the easiest path. The installer asks three quick questions. For the normal setup, keep `Full Access`, `Anywhere with Tailscale`, and `Yes` for the background service."
                         )
                         SetupGuideCommandBlock(command: bootstrapInstallCommand)
 
@@ -2546,6 +2546,7 @@ private struct SetupGuideSheet: View {
                             Text("1. Open `backend/pairing-qr.png` on the computer.")
                             Text("2. Scan it with iPhone Camera.")
                             Text("3. Tap Open in MOBaiLE.")
+                            Text("4. Later, run `mobaile status` on the computer if you want to check the connection.")
                         }
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2559,7 +2560,7 @@ private struct SetupGuideSheet: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("Manual fallback", systemImage: "slider.horizontal.3")
                             .font(.subheadline.weight(.semibold))
-                        Text("If the QR flow is not available, open Settings and paste the `server_url` from `backend/pairing.json` plus `VOICE_AGENT_API_TOKEN` from `backend/.env`.")
+                        Text("If QR pairing is not available, open Settings and paste the `server_url` from `backend/pairing.json` plus `VOICE_AGENT_API_TOKEN` from `backend/.env`.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -2576,7 +2577,7 @@ private struct SetupGuideSheet: View {
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Link("Open Full Quick Start", destination: quickStartURL)
+                        Link("Open Set It Up", destination: quickStartURL)
                         Link("Open Support", destination: supportURL)
                     }
                     .font(.footnote.weight(.semibold))
@@ -2584,7 +2585,7 @@ private struct SetupGuideSheet: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Setup Guide")
+            .navigationTitle("Set It Up")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
