@@ -66,6 +66,24 @@ normalize_existing_path() {
   printf "%s\n" "${path}"
 }
 
+resolve_script_checkout() {
+  local script_dir
+  local repo_root
+
+  script_dir="$(
+    cd "$(dirname "${BASH_SOURCE[0]}")"
+    pwd -P
+  )"
+  repo_root="$(
+    cd "${script_dir}/.."
+    pwd -P
+  )"
+
+  if [[ -d "${repo_root}" ]]; then
+    printf "%s\n" "${repo_root}"
+  fi
+}
+
 validate_checkout_or_fail() {
   local checkout_path="$1"
   local require_git="${2:-false}"
@@ -85,6 +103,22 @@ validate_checkout_or_fail() {
   fi
 
   fail "Existing checkout at ${checkout_path} is not a valid MOBaiLE checkout. Missing: ${missing[*]}"
+}
+
+checkout_looks_valid() {
+  local checkout_path="$1"
+  local require_git="${2:-false}"
+  local required_file
+
+  if [[ "${require_git}" == "true" && ! -d "${checkout_path}/.git" ]]; then
+    return 1
+  fi
+
+  while IFS= read -r required_file; do
+    [[ -f "${checkout_path}/${required_file}" ]] || return 1
+  done < <(checkout_required_files)
+
+  return 0
 }
 
 validate_mode() {
@@ -227,6 +261,16 @@ ensure_checkout() {
     CHECKOUT="$(normalize_existing_path "${CHECKOUT}")"
     validate_checkout_or_fail "${CHECKOUT}"
     return
+  fi
+
+  local script_checkout=""
+  script_checkout="$(resolve_script_checkout)"
+  if [[ -n "${script_checkout}" ]]; then
+    script_checkout="$(normalize_existing_path "${script_checkout}")"
+    if checkout_looks_valid "${script_checkout}"; then
+      CHECKOUT="${script_checkout}"
+      return
+    fi
   fi
 
   local target="${CHECKOUT_DEFAULT}"
@@ -454,6 +498,7 @@ print_dry_run_summary() {
     bash "${CHECKOUT}/scripts/install_backend.sh"
     --mode "${MODE}"
     --phone-access "${PHONE_ACCESS_MODE}"
+    --skip-autonomy-stack
   )
   if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
     install_backend_cmd+=(--public-url "${PUBLIC_SERVER_URL}")
@@ -510,6 +555,7 @@ run_install() {
     bash "${CHECKOUT}/scripts/install_backend.sh"
     --mode "${MODE}"
     --phone-access "${PHONE_ACCESS_MODE}"
+    --skip-autonomy-stack
   )
   local service_script
   service_script="$(service_script_path)"

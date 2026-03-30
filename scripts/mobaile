@@ -101,11 +101,28 @@ friendly_security_label() {
   esac
 }
 
-friendly_phone_access_label() {
+is_public_https_url() {
   case "$1" in
+    https://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+friendly_phone_access_label() {
+  local phone_access_mode="$1"
+  local public_server_url="${2:-}"
+  local pairing_server_url="${3:-}"
+
+  case "${phone_access_mode}" in
     wifi) printf "On this Wi-Fi\n" ;;
     local) printf "This computer only\n" ;;
-    *) printf "Anywhere with Tailscale\n" ;;
+    *)
+      if is_public_https_url "${public_server_url}" || is_public_https_url "${pairing_server_url}"; then
+        printf "Public URL\n"
+      else
+        printf "Anywhere with Tailscale\n"
+      fi
+      ;;
   esac
 }
 
@@ -238,16 +255,17 @@ status_command() {
   local backend_dir="${repo_root}/backend"
   local env_file="${backend_dir}/.env"
   local pairing_file="${backend_dir}/pairing.json"
-  local security_mode phone_access_mode server_url
+  local security_mode phone_access_mode public_server_url server_url
 
   security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
   phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
   server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
 
   cat <<EOF
 MOBaiLE: $(service_state_label "${repo_root}")
 Security: $(friendly_security_label "${security_mode}")
-Phone access: $(friendly_phone_access_label "${phone_access_mode}")
+Phone access: $(friendly_phone_access_label "${phone_access_mode}" "${public_server_url}" "${server_url}")
 Phone pairing: $(pairing_status_label "${pairing_file}")
 URL: ${server_url}
 Pairing QR: $(pairing_qr_label "${backend_dir}")
@@ -318,12 +336,13 @@ config_command() {
   local backend_dir="${repo_root}/backend"
   local env_file="${backend_dir}/.env"
   local pairing_file="${backend_dir}/pairing.json"
-  local qr_path service_script security_mode phone_access_mode api_token server_url
+  local qr_path service_script security_mode phone_access_mode public_server_url api_token server_url
 
   qr_path="$(pairing_qr_path "${backend_dir}")"
   service_script="$(service_script_path "${repo_root}")"
   security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
   phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
   api_token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
   server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
 
@@ -338,7 +357,7 @@ Pairing QR image: ${qr_path} $( [[ -f "${qr_path}" ]] && printf "(present)" || p
 Service helper: ${service_script}
 
 Security mode: $(friendly_security_label "${security_mode}") (${security_mode})
-Phone access mode: $(friendly_phone_access_label "${phone_access_mode}") (${phone_access_mode})
+Phone access mode: $(friendly_phone_access_label "${phone_access_mode}" "${public_server_url}" "${server_url}") (${phone_access_mode})
 API token: $( [[ -n "${api_token}" ]] && printf "Configured" || printf "Missing" )
 Server URL: ${server_url}
 Phone pairing: $(pairing_status_label "${pairing_file}")

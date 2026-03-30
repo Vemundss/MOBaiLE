@@ -16,13 +16,17 @@ def write_executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def populate_checkout_scripts(checkout: Path) -> None:
+def populate_checkout_scripts(checkout: Path, *, install_script_source: Path | None = None) -> None:
     scripts_dir = checkout / "scripts"
     backend_dir = checkout / "backend"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     backend_dir.mkdir(parents=True, exist_ok=True)
 
-    write_executable(scripts_dir / "install.sh", "#!/usr/bin/env bash\n")
+    if install_script_source is None:
+        install_script_contents = "#!/usr/bin/env bash\n"
+    else:
+        install_script_contents = install_script_source.read_text(encoding="utf-8")
+    write_executable(scripts_dir / "install.sh", install_script_contents)
     write_executable(
         scripts_dir / "install_backend.sh",
         textwrap.dedent(
@@ -58,15 +62,29 @@ def populate_checkout_scripts(checkout: Path) -> None:
     write_executable(scripts_dir / "mobaile", "#!/usr/bin/env bash\n")
 
 
-def make_checkout(tmp_path: Path) -> Path:
+def make_checkout(tmp_path: Path, *, real_install_script: bool = False) -> Path:
     checkout = tmp_path / "repo"
-    populate_checkout_scripts(checkout)
+    populate_checkout_scripts(
+        checkout,
+        install_script_source=(PROJECT_ROOT / "scripts" / "install.sh") if real_install_script else None,
+    )
     return checkout
+
+
+def make_standalone_install_script(tmp_path: Path) -> Path:
+    script_path = tmp_path / "standalone" / "install.sh"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    write_executable(
+        script_path,
+        (PROJECT_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8"),
+    )
+    return script_path
 
 
 def run_install_script(
     home: Path,
     *args: str,
+    script_path: Path | None = None,
     checkout: Path | None = None,
     non_interactive: bool = True,
     dry_run: bool = True,
@@ -76,7 +94,7 @@ def run_install_script(
     home.mkdir(parents=True, exist_ok=True)
     command = [
         "bash",
-        str(PROJECT_ROOT / "scripts" / "install.sh"),
+        str(script_path or (PROJECT_ROOT / "scripts" / "install.sh")),
     ]
     if checkout is not None:
         command.extend(["--checkout", str(checkout)])
@@ -155,7 +173,7 @@ def test_install_script_defaults_to_full_access_and_tailscale(tmp_path: Path):
     assert "Next:" in result.stdout
     assert "Scan the QR on this computer with your iPhone." in result.stdout
     assert "Run `mobaile status` any time to check the connection." in result.stdout
-    assert "--mode full-access --phone-access tailscale" in result.stdout
+    assert "--mode full-access --phone-access tailscale --skip-autonomy-stack" in result.stdout
     assert "ln -sfn" in result.stdout
     assert "pairing_qr.sh" in result.stdout
     service_phrase = expected_service_phrase()
@@ -182,11 +200,28 @@ def test_install_script_can_switch_to_wifi_without_background_service(tmp_path: 
     assert "Security: Full Access" in result.stdout
     assert "Phone access: On this Wi-Fi" in result.stdout
     assert "Background service: No" in result.stdout
-    assert "--mode full-access --phone-access wifi" in result.stdout
+    assert "--mode full-access --phone-access wifi --skip-autonomy-stack" in result.stdout
     assert "pairing_qr.sh" in result.stdout
     assert "service_macos.sh install" not in result.stdout
     assert "service_linux.sh install" not in result.stdout
     assert not (home / ".local" / "bin" / "mobaile").exists()
+
+
+def test_install_script_uses_in_checkout_repo_when_run_inside_checkout(tmp_path: Path):
+    checkout = make_checkout(tmp_path, real_install_script=True)
+    home = tmp_path / "home"
+
+    result = run_install_script(
+        home,
+        script_path=checkout / "scripts" / "install.sh",
+    )
+
+    assert result.returncode == 0
+    assert "Dry run." in result.stdout
+    assert f"bash {checkout}/scripts/install_backend.sh" in result.stdout
+    assert "--skip-autonomy-stack" in result.stdout
+    assert "git clone" not in result.stdout
+    assert f"bash {home / 'MOBaiLE' / 'scripts' / 'install.sh'}" not in result.stdout
 
 
 def test_install_script_real_run_opens_qr_and_prints_final_summary(tmp_path: Path):
@@ -218,7 +253,7 @@ def test_install_script_real_run_opens_qr_and_prints_final_summary(tmp_path: Pat
     assert (checkout / "backend" / "pairing-qr.png").exists()
 
     log_contents = log_path.read_text(encoding="utf-8")
-    assert "install_backend --mode full-access --phone-access tailscale" in log_contents
+    assert "install_backend --mode full-access --phone-access tailscale --skip-autonomy-stack" in log_contents
     assert "pairing_qr " in log_contents
     system = platform.system()
     if system == "Darwin":
@@ -229,6 +264,7 @@ def test_install_script_real_run_opens_qr_and_prints_final_summary(tmp_path: Pat
 
 def test_install_script_raw_dry_run_preserves_args_in_reexec_command(tmp_path: Path):
     home = tmp_path / "home"
+    script_path = make_standalone_install_script(tmp_path)
 
     result = run_install_script(
         home,
@@ -238,6 +274,7 @@ def test_install_script_raw_dry_run_preserves_args_in_reexec_command(tmp_path: P
         "no",
         "--public-url",
         "https://demo.mobaile.app",
+        script_path=script_path,
         non_interactive=False,
         stdin=subprocess.DEVNULL,
     )
@@ -259,11 +296,13 @@ def test_install_script_raw_dry_run_preserves_args_in_reexec_command(tmp_path: P
 
 def test_install_script_raw_existing_invalid_checkout_fails(tmp_path: Path):
     home = tmp_path / "home"
+    script_path = make_standalone_install_script(tmp_path)
     invalid_checkout = home / "MOBaiLE"
     (invalid_checkout / ".git").mkdir(parents=True, exist_ok=True)
 
     result = run_install_script(
         home,
+        script_path=script_path,
         non_interactive=True,
         stdin=subprocess.DEVNULL,
     )
@@ -275,11 +314,13 @@ def test_install_script_raw_existing_invalid_checkout_fails(tmp_path: Path):
 
 def test_install_script_raw_existing_directory_without_git_fails(tmp_path: Path):
     home = tmp_path / "home"
+    script_path = make_standalone_install_script(tmp_path)
     invalid_checkout = home / "MOBaiLE"
     populate_checkout_scripts(invalid_checkout)
 
     result = run_install_script(
         home,
+        script_path=script_path,
         non_interactive=True,
         stdin=subprocess.DEVNULL,
     )
