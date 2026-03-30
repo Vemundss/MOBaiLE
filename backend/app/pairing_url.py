@@ -36,14 +36,19 @@ def refresh_pairing_server_url(
         public_server_url=public_server_url,
         phone_access_mode=phone_access_mode,
     )
+    normalized_phone_access_mode = _normalize_phone_access_mode(phone_access_mode)
 
     preferred: list[str] = []
     explicit_public_url = _normalize_server_url(public_server_url)
     if explicit_public_url:
         preferred.append(explicit_public_url)
-    if current and _should_preserve_server_url(current):
+    if current and _should_preserve_server_url_for_mode(current, normalized_phone_access_mode):
         preferred.append(current)
-    preferred.extend(url for url in _read_pairing_server_urls(payload) if _should_preserve_server_url(url))
+    preferred.extend(
+        url
+        for url in _read_pairing_server_urls(payload)
+        if _should_preserve_server_url_for_mode(url, normalized_phone_access_mode)
+    )
 
     next_urls = _dedupe_server_urls(preferred + detected)
     if not next_urls and current:
@@ -283,6 +288,19 @@ def _should_preserve_server_url(server_url: str) -> bool:
     if _is_private_or_loopback_ipv4(host):
         return False
     return not _is_ipv4(host)
+
+
+def _should_preserve_server_url_for_mode(server_url: str, phone_access_mode: PhoneAccessMode) -> bool:
+    if not _should_preserve_server_url(server_url):
+        return False
+    if phone_access_mode == "tailscale":
+        return True
+    try:
+        parsed = urlparse(server_url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    return bool(host) and not host.endswith(".ts.net")
 
 
 def _is_ipv4(value: str) -> bool:
