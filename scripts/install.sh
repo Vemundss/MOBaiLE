@@ -101,6 +101,34 @@ format_command() {
   printf "%s\n" "${formatted}"
 }
 
+mode_label() {
+  case "${MODE}" in
+    full-access) printf "Full Access\n" ;;
+    safe) printf "Safer setup\n" ;;
+  esac
+}
+
+phone_access_label() {
+  case "${PHONE_ACCESS_MODE}" in
+    tailscale)
+      if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
+        printf "Public URL\n"
+      else
+        printf "Anywhere with Tailscale\n"
+      fi
+      ;;
+    wifi) printf "On this Wi-Fi\n" ;;
+    local) printf "This computer only\n" ;;
+  esac
+}
+
+background_service_label() {
+  case "${BACKGROUND_SERVICE}" in
+    yes) printf "Yes\n" ;;
+    no) printf "No\n" ;;
+  esac
+}
+
 print_command() {
   echo "  $(format_command "$@")"
 }
@@ -335,6 +363,24 @@ run_wizard() {
   choose_background_service
 }
 
+print_product_summary() {
+  local heading="$1"
+
+  echo
+  echo "${heading}"
+  echo
+  echo "Security: $(mode_label)"
+  echo "Phone access: $(phone_access_label)"
+  echo "Background service: $(background_service_label)"
+  if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
+    echo "Public URL: ${PUBLIC_SERVER_URL}"
+  fi
+  echo
+  echo "Next:"
+  echo "  1. Scan the QR on this computer with your iPhone."
+  echo '  2. Run `mobaile status` any time to check the connection.'
+}
+
 print_dry_run_summary() {
   local service_script
   service_script="$(service_script_path)"
@@ -347,17 +393,7 @@ print_dry_run_summary() {
     install_backend_cmd+=(--public-url "${PUBLIC_SERVER_URL}")
   fi
 
-  echo
-  echo "Resolved choices:"
-  echo "  checkout: ${CHECKOUT}"
-  echo "  mode: ${MODE}"
-  echo "  phone_access: ${PHONE_ACCESS_MODE}"
-  if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
-    echo "  public_server_url: ${PUBLIC_SERVER_URL}"
-  else
-    echo "  public_server_url: (none)"
-  fi
-  echo "  background_service: ${BACKGROUND_SERVICE}"
+  print_product_summary "Dry run."
 
   echo
   echo "Commands:"
@@ -372,6 +408,30 @@ print_dry_run_summary() {
     fi
   fi
   print_command bash "${CHECKOUT}/scripts/pairing_qr.sh"
+}
+
+open_qr_if_possible() {
+  local qr_path="${CHECKOUT}/backend/pairing-qr.png"
+
+  if [[ "${MOBAILE_SKIP_OPEN:-0}" == "1" ]]; then
+    return
+  fi
+  if [[ ! -f "${qr_path}" ]]; then
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      if command -v open >/dev/null 2>&1; then
+        open "${qr_path}" >/dev/null 2>&1 || true
+      fi
+      ;;
+    Linux)
+      if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "${qr_path}" >/dev/null 2>&1 || true
+      fi
+      ;;
+  esac
 }
 
 install_wrapper() {
@@ -415,6 +475,8 @@ run_install() {
 
   step "Preparing pairing QR"
   bash "${CHECKOUT}/scripts/pairing_qr.sh"
+  open_qr_if_possible
+  print_product_summary "Done."
 }
 
 main() {
