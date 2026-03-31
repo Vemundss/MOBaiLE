@@ -162,13 +162,13 @@ service_state_label() {
   status_output="$(bash "${service_script}" status 2>&1 || true)"
   lowered="$(printf "%s" "${status_output}" | tr '[:upper:]' '[:lower:]')"
 
-  if [[ "${lowered}" == *"not loaded"* ]] || [[ "${lowered}" == *"inactive"* ]] || [[ "${lowered}" == *"dead"* ]] || [[ "${lowered}" == *"failed"* ]] || [[ "${lowered}" == *"could not be found"* ]]; then
-    printf "Stopped\n"
+  if [[ "${lowered}" == *"running"* ]] || [[ "${lowered}" == *"active"* ]] || [[ "${lowered}" == *"pid ="* ]] || [[ "${lowered}" == *"state = running"* ]]; then
+    printf "Running\n"
     return
   fi
 
-  if [[ "${lowered}" == *"running"* ]] || [[ "${lowered}" == *"active"* ]] || [[ "${lowered}" == *"pid ="* ]] || [[ "${lowered}" == *"state = running"* ]]; then
-    printf "Running\n"
+  if [[ "${lowered}" == *" is not loaded"* ]] || [[ "${lowered}" == *"could not find service"* ]] || [[ "${lowered}" == *"could not be found"* ]] || [[ "${lowered}" == *"state = exited"* ]] || [[ "${lowered}" == *"state = suspended"* ]] || [[ "${lowered}" == *"failed"* ]] || [[ "${lowered}" == *"dead"* ]]; then
+    printf "Stopped\n"
     return
   fi
 

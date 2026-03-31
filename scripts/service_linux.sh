@@ -106,8 +106,25 @@ run_warmup_if_enabled() {
     echo "Warmup script missing or not executable: ${WARMUP_SCRIPT}" >&2
     return
   fi
-  echo "Running capability warmup..."
-  "${WARMUP_SCRIPT}" || true
+  local warmup_output=""
+  local warmup_status=0
+  local report_path=""
+
+  echo "Checking optional host integrations..."
+  if warmup_output="$("${WARMUP_SCRIPT}" --deep false --launch-apps false 2>&1)"; then
+    warmup_status=0
+  else
+    warmup_status=$?
+  fi
+
+  report_path="$(printf "%s\n" "${warmup_output}" | awk -F': ' '/^Report path: / {print $2; exit}')"
+
+  if [[ ${warmup_status} -ne 0 ]] || [[ "${warmup_output}" == *"Readiness warning:"* ]]; then
+    echo "Some optional host integrations are not ready yet. MOBaiLE will still run."
+    if [[ -n "${report_path}" ]]; then
+      echo "Capability report: ${report_path}"
+    fi
+  fi
 }
 
 reload_systemd() {
