@@ -207,6 +207,7 @@ def test_mobaile_pair_uses_real_pairing_helper_script(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"
     scripts_dir = repo / "scripts"
+    args_log = repo / "pairing_qr_args.txt"
     backend_dir.mkdir(parents=True)
     scripts_dir.mkdir(parents=True)
     (backend_dir / "pairing.json").write_text(
@@ -214,10 +215,11 @@ def test_mobaile_pair_uses_real_pairing_helper_script(tmp_path: Path):
         encoding="utf-8",
     )
     (scripts_dir / "pairing_qr.sh").write_text(
-        """#!/usr/bin/env bash
+        f"""#!/usr/bin/env bash
 set -euo pipefail
 
 out_path=""
+args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out)
@@ -225,13 +227,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
+      args+=("$1")
       shift
       ;;
   esac
 done
 
-mkdir -p "$(dirname "${out_path}")"
-printf "stub-qr" > "${out_path}"
+printf "%s\n" "${{args[*]}}" > "{args_log}"
+mkdir -p "$(dirname "${{out_path}}")"
+printf "stub-qr" > "${{out_path}}"
 """,
         encoding="utf-8",
     )
@@ -251,3 +255,4 @@ printf "stub-qr" > "${out_path}"
     assert result.returncode == 0
     assert "Pairing QR:" in result.stdout
     assert (backend_dir / "pairing-qr.png").read_text(encoding="utf-8") == "stub-qr"
+    assert args_log.read_text(encoding="utf-8").strip() == "--quiet --no-preview"

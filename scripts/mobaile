@@ -301,7 +301,7 @@ pair_command() {
       exit 1
     fi
 
-    bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}"
+    bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}" --quiet --no-preview
   fi
 
   cat <<EOF

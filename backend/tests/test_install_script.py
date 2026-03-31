@@ -170,15 +170,18 @@ def test_install_script_defaults_to_full_access_and_tailscale(tmp_path: Path):
     assert "Security: Full Access" in result.stdout
     assert "Phone access: Anywhere with Tailscale" in result.stdout
     assert "Background service: Yes" in result.stdout
+    assert "QR image:" in result.stdout
     assert "Next:" in result.stdout
     assert "Scan the QR on this computer with your iPhone." in result.stdout
+    assert "run `mobaile pair`" in result.stdout
     assert "Run `mobaile status` any time to check the connection." in result.stdout
-    assert "--mode full-access --phone-access tailscale --skip-autonomy-stack" in result.stdout
+    assert "--mode full-access --phone-access tailscale --brief --skip-autonomy-stack" in result.stdout
     assert "ln -sfn" in result.stdout
-    assert "pairing_qr.sh" in result.stdout
+    assert "pairing_qr.sh --quiet --no-preview" in result.stdout
     service_phrase = expected_service_phrase()
     if service_phrase is not None:
         assert service_phrase in result.stdout
+    assert "VOICE_AGENT_WARMUP_ON_START=false" in result.stdout
     assert not (home / ".local" / "bin" / "mobaile").exists()
 
 
@@ -200,8 +203,8 @@ def test_install_script_can_switch_to_wifi_without_background_service(tmp_path: 
     assert "Security: Full Access" in result.stdout
     assert "Phone access: On this Wi-Fi" in result.stdout
     assert "Background service: No" in result.stdout
-    assert "--mode full-access --phone-access wifi --skip-autonomy-stack" in result.stdout
-    assert "pairing_qr.sh" in result.stdout
+    assert "--mode full-access --phone-access wifi --brief --skip-autonomy-stack" in result.stdout
+    assert "pairing_qr.sh --quiet --no-preview" in result.stdout
     assert "service_macos.sh install" not in result.stdout
     assert "service_linux.sh install" not in result.stdout
     assert not (home / ".local" / "bin" / "mobaile").exists()
@@ -219,6 +222,7 @@ def test_install_script_uses_in_checkout_repo_when_run_inside_checkout(tmp_path:
     assert result.returncode == 0
     assert "Dry run." in result.stdout
     assert f"bash {checkout}/scripts/install_backend.sh" in result.stdout
+    assert "--brief" in result.stdout
     assert "--skip-autonomy-stack" in result.stdout
     assert "git clone" not in result.stdout
     assert f"bash {home / 'MOBaiLE' / 'scripts' / 'install.sh'}" not in result.stdout
@@ -255,6 +259,7 @@ def test_install_script_from_stdin_uses_explicit_checkout_without_bash_source(tm
     assert result.returncode == 0
     assert "unbound variable" not in result.stderr
     assert f"bash {checkout}/scripts/install_backend.sh" in result.stdout
+    assert "--brief" in result.stdout
     assert "--skip-autonomy-stack" in result.stdout
 
 
@@ -281,14 +286,16 @@ def test_install_script_real_run_opens_qr_and_prints_final_summary(tmp_path: Pat
     assert "Security: Full Access" in result.stdout
     assert "Phone access: Anywhere with Tailscale" in result.stdout
     assert "Background service: No" in result.stdout
+    assert "QR image:" in result.stdout
     assert "Scan the QR on this computer with your iPhone." in result.stdout
+    assert "run `mobaile pair`" in result.stdout
     assert "Run `mobaile status` any time to check the connection." in result.stdout
     assert (home / ".local" / "bin" / "mobaile").is_symlink()
     assert (checkout / "backend" / "pairing-qr.png").exists()
 
     log_contents = log_path.read_text(encoding="utf-8")
-    assert "install_backend --mode full-access --phone-access tailscale --skip-autonomy-stack" in log_contents
-    assert "pairing_qr " in log_contents
+    assert "install_backend --mode full-access --phone-access tailscale --brief --skip-autonomy-stack" in log_contents
+    assert "pairing_qr --quiet --no-preview" in log_contents
     system = platform.system()
     if system == "Darwin":
         assert f"open {checkout}/backend/pairing-qr.png" in log_contents

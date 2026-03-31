@@ -480,6 +480,7 @@ run_wizard() {
 
 print_product_summary() {
   local heading="$1"
+  local qr_path="${CHECKOUT}/backend/pairing-qr.png"
 
   echo
   echo "${heading}"
@@ -491,8 +492,16 @@ print_product_summary() {
     echo "Public URL: ${PUBLIC_SERVER_URL}"
   fi
   echo
+  echo "QR image: ${qr_path}"
+  echo
   echo "Next:"
-  echo "  1. Scan the QR on this computer with your iPhone."
+  if [[ "${PHONE_ACCESS_MODE}" == "local" ]]; then
+    echo "  1. This install is local-only on this computer."
+    echo "  2. Re-run with On this Wi-Fi or Anywhere with Tailscale if you want to connect your iPhone."
+  else
+    echo "  1. Scan the QR on this computer with your iPhone."
+    echo "     If it did not open automatically, run \`mobaile pair\`."
+  fi
   print_status_follow_up
 }
 
@@ -503,6 +512,7 @@ print_dry_run_summary() {
     bash "${CHECKOUT}/scripts/install_backend.sh"
     --mode "${MODE}"
     --phone-access "${PHONE_ACCESS_MODE}"
+    --brief
     --skip-autonomy-stack
   )
   if [[ -n "${PUBLIC_SERVER_URL}" ]]; then
@@ -518,12 +528,12 @@ print_dry_run_summary() {
   print_command ln -sfn "${CHECKOUT}/scripts/mobaile" "${HOME}/.local/bin/mobaile"
   if [[ "${BACKGROUND_SERVICE}" == "yes" ]]; then
     if [[ -n "${service_script}" ]]; then
-      print_command bash "${service_script}" install
+      print_command env VOICE_AGENT_WARMUP_ON_START=false bash "${service_script}" install
     else
       echo "  # background service skipped on unsupported platform"
     fi
   fi
-  print_command bash "${CHECKOUT}/scripts/pairing_qr.sh"
+  print_command bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
 }
 
 open_qr_if_possible() {
@@ -560,6 +570,7 @@ run_install() {
     bash "${CHECKOUT}/scripts/install_backend.sh"
     --mode "${MODE}"
     --phone-access "${PHONE_ACCESS_MODE}"
+    --brief
     --skip-autonomy-stack
   )
   local service_script
@@ -583,7 +594,7 @@ run_install() {
   if [[ "${BACKGROUND_SERVICE}" == "yes" ]]; then
     if [[ -n "${service_script}" ]]; then
       step "Setting up background service"
-      bash "${service_script}" install
+      env VOICE_AGENT_WARMUP_ON_START=false bash "${service_script}" install
     else
       echo
       echo "Background service is not supported on $(uname -s)."
@@ -591,7 +602,7 @@ run_install() {
   fi
 
   step "Preparing pairing QR"
-  bash "${CHECKOUT}/scripts/pairing_qr.sh"
+  bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
   open_qr_if_possible
   print_product_summary "Done."
 }

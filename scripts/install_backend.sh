@@ -12,6 +12,7 @@ EXPOSE_NETWORK="false"
 PHONE_ACCESS_MODE=""
 PROVISION_AUTONOMY_STACK="auto"
 PUBLIC_SERVER_URL=""
+BRIEF_OUTPUT="false"
 
 step() {
   echo
@@ -66,6 +67,26 @@ import os
 ttl = int(os.environ["PAIR_TTL_MIN"])
 print((datetime.now(timezone.utc) + timedelta(minutes=ttl)).isoformat().replace("+00:00", "Z"))
 PY
+}
+
+run_uv_sync() {
+  local sync_output=""
+
+  if [[ "${BRIEF_OUTPUT}" == "true" ]]; then
+    if sync_output="$(
+      cd "${BACKEND_DIR}"
+      uv sync 2>&1
+    )"; then
+      return
+    fi
+    printf "%s\n" "${sync_output}" >&2
+    exit 1
+  fi
+
+  (
+    cd "${BACKEND_DIR}"
+    uv sync
+  )
 }
 
 write_pairing_details() {
@@ -141,7 +162,9 @@ write_env_file() {
     allow_abs_reads="true"
   fi
   if [[ -f "${ENV_FILE}" ]]; then
-    echo "Keeping existing ${ENV_FILE}"
+    if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
+      echo "Keeping existing ${ENV_FILE}"
+    fi
     local tmp_env
     tmp_env="$(mktemp)"
     awk \
@@ -295,7 +318,9 @@ VOICE_AGENT_DB_PATH=data/runs.db
 # Optional OpenAI transcription model when provider=openai:
 # VOICE_AGENT_TRANSCRIBE_MODEL=whisper-1
 EOF
-  echo "Created ${ENV_FILE}"
+  if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
+    echo "Created ${ENV_FILE}"
+  fi
 }
 
 main() {
@@ -317,6 +342,10 @@ main() {
         PHONE_ACCESS_MODE="$2"
         shift 2
         ;;
+      --brief)
+        BRIEF_OUTPUT="true"
+        shift
+        ;;
       --expose-network)
         EXPOSE_NETWORK="true"
         shift
@@ -330,7 +359,7 @@ main() {
         shift
         ;;
       -h|--help)
-        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--public-url <https://host[:port]>] [--phone-access tailscale|wifi|local] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
+        echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--public-url <https://host[:port]>] [--phone-access tailscale|wifi|local] [--brief] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
         exit 0
         ;;
       *)
@@ -364,8 +393,10 @@ main() {
   require_cmd python3
   ensure_uv
 
-  echo "MOBaiLE backend setup"
-  echo "This will prepare the backend, create pairing details, and get the host ready for the iPhone app."
+  if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
+    echo "MOBaiLE backend setup"
+    echo "This will prepare the backend, create pairing details, and get the host ready for the iPhone app."
+  fi
 
   local token
   token="$(gen_token)"
@@ -377,11 +408,10 @@ main() {
   PAIR_CODE_EXPIRES_AT="${pair_code_expires_at}"
   write_env_file "${token}"
 
-  step "Installing backend dependencies"
-  (
-    cd "${BACKEND_DIR}"
-    uv sync
-  )
+  if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
+    step "Installing backend dependencies"
+  fi
+  run_uv_sync
 
   if [[ "${PROVISION_AUTONOMY_STACK}" == "auto" ]]; then
     if [[ "${SECURITY_MODE}" == "full-access" ]]; then
@@ -392,11 +422,15 @@ main() {
   fi
 
   if [[ "${PROVISION_AUTONOMY_STACK}" == "true" ]]; then
-    step "Provisioning autonomy extras"
+    if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
+      step "Provisioning autonomy extras"
+    fi
     python3 "${REPO_ROOT}/scripts/provision_codex_autonomy.py" --mode "${SECURITY_MODE}" || true
   fi
 
-  step "Writing pairing details"
+  if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
+    step "Writing pairing details"
+  fi
   local bind_host="127.0.0.1"
   if [[ "${PHONE_ACCESS_MODE}" != "local" ]]; then
     bind_host="0.0.0.0"
@@ -404,6 +438,10 @@ main() {
   write_pairing_details "${bind_host}"
   local server_url
   server_url="$(read_pairing_value "server_url")"
+
+  if [[ "${BRIEF_OUTPUT}" == "true" ]]; then
+    return
+  fi
 
   local pairing_qr_path=""
   if command -v qrencode >/dev/null 2>&1; then

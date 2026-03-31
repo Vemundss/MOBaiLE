@@ -71,10 +71,16 @@ sync_runtime() {
     cp "${BACKEND_DIR}/.env" "${RUNTIME_DIR}/.env"
   fi
 
-  (
+  local sync_output=""
+  if sync_output="$(
     cd "${RUNTIME_DIR}"
-    uv sync
-  )
+    uv sync 2>&1
+  )"; then
+    return
+  fi
+
+  printf "%s\n" "${sync_output}" >&2
+  exit 1
 }
 
 write_unit() {
