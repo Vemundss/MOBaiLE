@@ -151,6 +151,11 @@ write_env_file() {
       -v host="${host_value}" \
       -v public_url="${public_url_value}" \
       -v phone_access="${phone_access_value}" \
+      -v codex_home="${codex_home_value}" \
+      -v codex_search="${codex_search_value}" \
+      -v context_file="${context_file_value}" \
+      -v playwright_output="${playwright_output_value}" \
+      -v playwright_profile="${playwright_profile_value}" \
       '
       BEGIN {
         seen_mode=0
@@ -241,11 +246,6 @@ write_env_file() {
         if (!seen_playwright_profile) print "VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=" playwright_profile
       }
       ' \
-      -v codex_home="${codex_home_value}" \
-      -v codex_search="${codex_search_value}" \
-      -v context_file="${context_file_value}" \
-      -v playwright_output="${playwright_output_value}" \
-      -v playwright_profile="${playwright_profile_value}" \
       "${ENV_FILE}" > "${tmp_env}"
     mv "${tmp_env}" "${ENV_FILE}"
     return

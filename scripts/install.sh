@@ -67,11 +67,16 @@ normalize_existing_path() {
 }
 
 resolve_script_checkout() {
+  local script_source="${BASH_SOURCE[0]-}"
   local script_dir
   local repo_root
 
+  if [[ -z "${script_source}" ]]; then
+    return
+  fi
+
   script_dir="$(
-    cd "$(dirname "${BASH_SOURCE[0]}")"
+    cd "$(dirname "${script_source}")"
     pwd -P
   )"
   repo_root="$(

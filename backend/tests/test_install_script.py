@@ -224,6 +224,40 @@ def test_install_script_uses_in_checkout_repo_when_run_inside_checkout(tmp_path:
     assert f"bash {home / 'MOBaiLE' / 'scripts' / 'install.sh'}" not in result.stdout
 
 
+def test_install_script_from_stdin_uses_explicit_checkout_without_bash_source(tmp_path: Path):
+    checkout = make_checkout(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "MOBAILE_TEST_CHECKOUT": str(checkout),
+        "MOBAILE_TEST_LOG": str(tmp_log_path(home)),
+    }
+    result = subprocess.run(
+        [
+            "bash",
+            "-s",
+            "--",
+            "--checkout",
+            str(checkout),
+            "--non-interactive",
+            "--dry-run",
+        ],
+        input=(PROJECT_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0
+    assert "unbound variable" not in result.stderr
+    assert f"bash {checkout}/scripts/install_backend.sh" in result.stdout
+    assert "--skip-autonomy-stack" in result.stdout
+
+
 def test_install_script_real_run_opens_qr_and_prints_final_summary(tmp_path: Path):
     checkout = make_checkout(tmp_path)
     home = tmp_path / "home"
