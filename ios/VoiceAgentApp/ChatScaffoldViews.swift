@@ -101,6 +101,7 @@ struct ConversationEmptyStateView: View {
     let canRetryLastPrompt: Bool
     let runtimeContext: EmptyStateRuntimeContext?
     let onOpenSetupGuide: () -> Void
+    let onOpenPairingScanner: () -> Void
     let onOpenSettings: () -> Void
     let onRetryLastPrompt: () -> Void
     let onStartVoiceMode: () -> Void
@@ -215,7 +216,7 @@ struct ConversationEmptyStateView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Set up your computer first")
                                 .font(.title3.weight(.semibold))
-                            Text("MOBaiLE is the remote control. Start the backend on your Mac or Linux machine, then scan one pairing QR.")
+                            Text("MOBaiLE is the remote control. Start the backend on your Mac or Linux machine, then scan one pairing QR in the app.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -240,8 +241,8 @@ struct ConversationEmptyStateView: View {
                         SetupStepRow(
                             stepNumber: 2,
                             systemImage: "qrcode.viewfinder",
-                            title: "Scan the pairing QR with iPhone Camera",
-                            detail: "Open `backend/pairing-qr.png`, tap Open in MOBaiLE, and the app fills the connection for you."
+                            title: "Scan the pairing QR in MOBaiLE",
+                            detail: "Open `backend/pairing-qr.png` on your computer, then tap Scan Pairing QR here and point the phone at the screen."
                         )
                         SetupStepRow(
                             stepNumber: 3,
@@ -262,9 +263,9 @@ struct ConversationEmptyStateView: View {
                             .buttonStyle(.borderedProminent)
 
                             Button {
-                                onOpenSettings()
+                                onOpenPairingScanner()
                             } label: {
-                                Label("Enter Manually", systemImage: "slider.horizontal.3")
+                                Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
@@ -280,14 +281,22 @@ struct ConversationEmptyStateView: View {
                             .buttonStyle(.borderedProminent)
 
                             Button {
-                                onOpenSettings()
+                                onOpenPairingScanner()
                             } label: {
-                                Label("Enter Manually", systemImage: "slider.horizontal.3")
+                                Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
                         }
                     }
+
+                    Button {
+                        onOpenSettings()
+                    } label: {
+                        Label("Enter Manually", systemImage: "slider.horizontal.3")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
         }

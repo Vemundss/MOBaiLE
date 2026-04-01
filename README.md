@@ -42,7 +42,7 @@ If your goal is simply "make the iPhone app work", use this path first.
 
 1. Paste the install command on the Mac or Linux machine you want MOBaiLE to use.
 2. The installer asks three quick questions. Keep the defaults: `Full Access`, `Anywhere with Tailscale`, and usually `Yes` for the background service.
-3. Open the QR on that computer, scan it with iPhone Camera, and tap `Open in MOBaiLE`.
+3. Open the QR on that computer, then in MOBaiLE tap `Scan Pairing QR` and point the phone at the screen.
 4. Later, run `mobaile status` any time to check the connection. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
 What the installer does:
@@ -175,8 +175,8 @@ bash ./scripts/pairing_qr.sh
 
 On the iPhone:
 
-1. Scan the QR with Camera.
-2. Open the `mobaile://pair...` link.
+1. Tap `Scan Pairing QR` inside MOBaiLE.
+2. Point the phone at the QR on your computer.
 3. Confirm pairing inside MOBaiLE.
 
 Manual fallback in app settings:

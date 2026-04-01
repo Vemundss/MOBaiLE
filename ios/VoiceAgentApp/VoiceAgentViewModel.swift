@@ -2366,6 +2366,24 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
+    @discardableResult
+    func applyPairingPayload(_ rawValue: String) -> Bool {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            errorText = "No pairing code found."
+            return false
+        }
+        guard let url = extractPairingURL(from: trimmed) else {
+            errorText = "This QR code is not a MOBaiLE pairing link."
+            return false
+        }
+        applyPairingURL(url)
+        if pendingPairing == nil, errorText.isEmpty {
+            errorText = "This QR code is not a valid MOBaiLE pairing link."
+        }
+        return pendingPairing != nil
+    }
+
     func applyPairingURL(_ url: URL) {
         guard let scheme = url.scheme?.lowercased(), MOBaiLEURLSchemeConfiguration.acceptedSchemes.contains(scheme) else { return }
         guard let host = url.host?.lowercased(), host == "pair" else { return }
@@ -2434,6 +2452,37 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             legacyToken: developerMode ? updatedToken : nil
         )
         errorText = ""
+    }
+
+    func extractPairingURL(from rawValue: String) -> URL? {
+        if let url = validatedPairingURLCandidate(rawValue) {
+            return url
+        }
+
+        let separators = CharacterSet.whitespacesAndNewlines
+        let trailingJunk = CharacterSet(charactersIn: ".,;:!?)]}\"'")
+
+        for token in rawValue.components(separatedBy: separators) {
+            let candidate = token.trimmingCharacters(in: trailingJunk)
+            guard !candidate.isEmpty else { continue }
+            if let url = validatedPairingURLCandidate(candidate) {
+                return url
+            }
+        }
+
+        return nil
+    }
+
+    private func validatedPairingURLCandidate(_ candidate: String) -> URL? {
+        let leadingJunk = CharacterSet(charactersIn: "\"'([<{")
+        let normalized = candidate.trimmingCharacters(in: leadingJunk)
+        guard let url = URL(string: normalized),
+              let scheme = url.scheme?.lowercased(),
+              MOBaiLEURLSchemeConfiguration.acceptedSchemes.contains(scheme),
+              url.host?.lowercased() == "pair" else {
+            return nil
+        }
+        return url
     }
 
     func cancelPendingPairing() {

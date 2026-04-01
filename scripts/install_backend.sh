@@ -484,8 +484,8 @@ main() {
     echo "  1. Generate the pairing QR on the computer:"
     echo "     bash ./scripts/pairing_qr.sh"
   fi
-  echo "  2. Scan it with iPhone Camera."
-  echo "  3. Tap Open in MOBaiLE."
+  echo "  2. In MOBaiLE, tap Scan Pairing QR."
+  echo "  3. Point the phone at the QR and confirm the pairing."
   echo
   echo "Runtime security mode:"
   echo "  ${SECURITY_MODE}"

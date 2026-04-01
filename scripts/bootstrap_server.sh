@@ -163,8 +163,8 @@ main() {
   echo "  1. Open ${INSTALL_DIR}/backend/pairing-qr.png"
   echo
   echo "Next on your iPhone:"
-  echo "  1. Scan the QR with Camera"
-  echo "  2. Tap Open in MOBaiLE"
+  echo "  1. In MOBaiLE, tap Scan Pairing QR"
+  echo "  2. Point the phone at the QR and confirm the pairing"
 }
 
 main "$@"

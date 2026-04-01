@@ -1,3 +1,6 @@
+import CoreImage
+import CoreImage.CIFilterBuiltins
+import UIKit
 import XCTest
 @testable import VoiceAgentApp
 
@@ -28,6 +31,73 @@ final class VoiceAgentModelTests: XCTestCase {
         ])
         XCTAssertEqual(vm.pendingPairing?.pairCode, "abc123")
         XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
+    }
+
+    @MainActor
+    func testApplyPairingPayloadStagesPendingPairingFromRawScannerText() {
+        let vm = VoiceAgentViewModel()
+
+        let didStage = vm.applyPairingPayload(
+            "  mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123&session_id=iphone-app  "
+        )
+
+        XCTAssertTrue(didStage)
+        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://127.0.0.1:8000")
+        XCTAssertEqual(vm.pendingPairing?.pairCode, "abc123")
+        XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
+    }
+
+    @MainActor
+    func testApplyPairingPayloadRejectsNonMobailePayload() {
+        let vm = VoiceAgentViewModel()
+
+        let didStage = vm.applyPairingPayload("https://example.com/not-a-pairing-link")
+
+        XCTAssertFalse(didStage)
+        XCTAssertNil(vm.pendingPairing)
+        XCTAssertEqual(vm.errorText, "This QR code is not a MOBaiLE pairing link.")
+    }
+
+    @MainActor
+    func testApplyPairingPayloadExtractsPairingLinkFromPastedText() {
+        let vm = VoiceAgentViewModel()
+
+        let didStage = vm.applyPairingPayload(
+            """
+            Pair this phone with:
+            mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123&session_id=iphone-app
+            """
+        )
+
+        XCTAssertTrue(didStage)
+        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://127.0.0.1:8000")
+        XCTAssertEqual(vm.pendingPairing?.pairCode, "abc123")
+        XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
+    }
+
+    func testPairingQRCodeImageDecoderDecodesGeneratedQRCode() throws {
+        let payload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123"
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(payload.utf8)
+        let outputImage = try XCTUnwrap(filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)))
+        let cgImage = try XCTUnwrap(CIContext().createCGImage(outputImage, from: outputImage.extent))
+        let pngData = try XCTUnwrap(UIImage(cgImage: cgImage).pngData())
+
+        let decodedPayload = try PairingQRCodeImageDecoder.decodePayload(from: pngData)
+
+        XCTAssertEqual(decodedPayload, payload)
+    }
+
+    func testPairingQRCodeImageDecoderRejectsImageWithoutQRCode() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { context in
+            UIColor.systemBlue.setFill()
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+        }
+        let pngData = try XCTUnwrap(image.pngData())
+
+        XCTAssertThrowsError(try PairingQRCodeImageDecoder.decodePayload(from: pngData)) { error in
+            XCTAssertEqual(error as? PairingQRCodeImageDecoder.DecodeError, .noCodeFound)
+        }
     }
 
     func testRunRecordDecoding() throws {

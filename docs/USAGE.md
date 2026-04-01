@@ -37,8 +37,8 @@ bash ./scripts/install.sh
 ### Step 2. Pair the iPhone
 
 1. Open `backend/pairing-qr.png` on the computer.
-2. Scan it with iPhone Camera.
-3. Tap `Open in MOBaiLE`.
+2. Tap `Scan Pairing QR` inside MOBaiLE.
+3. Point the phone at the QR on the computer and confirm the pairing.
 4. Send a small prompt to confirm the thread works.
 
 ### Step 3. Later, check status with one command
@@ -372,9 +372,9 @@ By default this writes:
 - QR payload format is `mobaile://pair?server_url=...&server_url=...&pair_code=...&session_id=...`
 
 Phone onboarding with QR:
-1. Open iPhone Camera and scan the generated QR.
-2. Tap the `mobaile://pair...` banner.
-3. iOS opens MOBaiLE, exchanges one-time pair code with backend, then stores API token locally.
+1. Open `backend/pairing-qr.png` on the computer.
+2. In MOBaiLE, tap `Scan Pairing QR`.
+3. Point the phone at the QR. MOBaiLE exchanges the one-time pair code with the backend and stores the API token locally.
 
 Notes:
 - App now confirms pairing details before applying server/session changes.

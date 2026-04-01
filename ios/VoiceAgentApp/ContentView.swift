@@ -14,6 +14,7 @@ struct ContentView: View {
     @StateObject private var vm = VoiceAgentViewModel()
     @State private var showConnectionSettings = false
     @State private var showSetupGuide = false
+    @State private var showPairingScanner = false
     @State private var showLogs = false
     @State private var showThreads = false
     @State private var showAttachmentOptions = false
@@ -25,6 +26,8 @@ struct ContentView: View {
     @State private var isCreatingDirectory = false
     @State private var trustPairHost = false
     @State private var openSettingsAfterSetupGuide = false
+    @State private var openPairingScannerAfterSetupGuide = false
+    @State private var openSettingsAfterPairingScanner = false
     @State private var expandManualConnectionOnNextSettingsOpen = false
     @State private var showAdvancedSettings = false
     @State private var showManualConnectionFields = false
@@ -97,9 +100,20 @@ struct ContentView: View {
                 if openSettingsAfterSetupGuide {
                     openSettingsAfterSetupGuide = false
                     showConnectionSettings = true
+                } else if openPairingScannerAfterSetupGuide {
+                    openPairingScannerAfterSetupGuide = false
+                    showPairingScanner = true
                 }
             }) {
                 setupGuideSheet
+            }
+            .sheet(isPresented: $showPairingScanner, onDismiss: {
+                if openSettingsAfterPairingScanner {
+                    openSettingsAfterPairingScanner = false
+                    showConnectionSettings = true
+                }
+            }) {
+                pairingScannerSheet
             }
             .sheet(isPresented: $showConnectionSettings) {
                 settingsSheet
@@ -269,6 +283,13 @@ struct ContentView: View {
         return true
     }
 
+    private func handlePairingScannerPayload(_ payload: String) -> String? {
+        if vm.applyPairingPayload(payload) {
+            return nil
+        }
+        return vm.errorText.isEmpty ? "That QR code is not a MOBaiLE pairing link." : vm.errorText
+    }
+
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
         case let .success(urls):
@@ -312,6 +333,9 @@ struct ContentView: View {
                             runtimeContext: emptyStateRuntimeContext,
                             onOpenSetupGuide: {
                                 showSetupGuide = true
+                            },
+                            onOpenPairingScanner: {
+                                showPairingScanner = true
                             },
                             onOpenSettings: {
                                 showConnectionSettings = true
@@ -406,18 +430,48 @@ struct ContentView: View {
                                 )
                                 SetupGuideStepSummaryRow(
                                     stepNumber: 2,
-                                    title: "Scan the pairing QR",
-                                    detail: "Open `backend/pairing-qr.png` on the computer, scan it with iPhone Camera, then tap Open in MOBaiLE."
+                                    title: "Scan the pairing QR in MOBaiLE",
+                                    detail: "Open `backend/pairing-qr.png` on the computer, then tap Scan Pairing QR here. MOBaiLE reads it directly and fills the connection for you."
                                 )
                             }
 
-                            Button {
-                                showSetupGuide = true
-                            } label: {
-                                Label("Show Setup Guide", systemImage: "arrow.right.circle.fill")
-                                    .frame(maxWidth: .infinity)
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 10) {
+                                    Button {
+                                        showPairingScanner = true
+                                    } label: {
+                                        Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+
+                                    Button {
+                                        showSetupGuide = true
+                                    } label: {
+                                        Label("Show Setup Guide", systemImage: "arrow.right.circle.fill")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+
+                                VStack(spacing: 10) {
+                                    Button {
+                                        showPairingScanner = true
+                                    } label: {
+                                        Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+
+                                    Button {
+                                        showSetupGuide = true
+                                    } label: {
+                                        Label("Show Setup Guide", systemImage: "arrow.right.circle.fill")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
                             }
-                            .buttonStyle(.borderedProminent)
                         }
                         .padding(.vertical, 4)
                     } header: {
@@ -595,10 +649,24 @@ struct ContentView: View {
             checkoutInstallCommand: checkoutInstallCommand,
             quickStartURL: quickStartURL,
             supportURL: supportURL,
+            onOpenScanner: {
+                openPairingScannerAfterSetupGuide = true
+                showSetupGuide = false
+            },
             onManualSetup: {
                 expandManualConnectionOnNextSettingsOpen = true
                 openSettingsAfterSetupGuide = true
                 showSetupGuide = false
+            }
+        )
+    }
+
+    private var pairingScannerSheet: some View {
+        PairingScannerSheet(
+            onSubmitPayload: handlePairingScannerPayload,
+            onOpenManualSetup: {
+                expandManualConnectionOnNextSettingsOpen = true
+                openSettingsAfterPairingScanner = true
             }
         )
     }
@@ -1328,7 +1396,7 @@ struct ContentView: View {
         if vm.hasConfiguredConnection {
             return "Ready for prompts"
         }
-        return "Add server URL and API token"
+        return "Scan pairing QR to connect"
     }
 
     private var activeNavigationTitle: String {
@@ -1829,10 +1897,15 @@ struct ContentView: View {
         let raw = ProcessInfo.processInfo.environment["MOBAILE_PREVIEW_PRESENTATION"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+        let previewPairingPayload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123&session_id=iphone-app"
 
         switch raw {
         case "setup":
             showSetupGuide = true
+        case "pairing-scanner":
+            showPairingScanner = true
+        case "pairing-confirmation":
+            _ = vm.applyPairingPayload(previewPairingPayload)
         case "settings":
             showConnectionSettings = true
         case "threads":
@@ -2476,6 +2549,7 @@ private struct SetupGuideSheet: View {
     let checkoutInstallCommand: String
     let quickStartURL: URL
     let supportURL: URL
+    let onOpenScanner: () -> Void
     let onManualSetup: () -> Void
 
     @State private var copiedLabel: String?
@@ -2535,8 +2609,8 @@ private struct SetupGuideSheet: View {
                     VStack(alignment: .leading, spacing: 12) {
                         SetupGuideStepSummaryRow(
                             stepNumber: 2,
-                            title: "Scan the pairing QR with iPhone Camera",
-                            detail: "After install, open `backend/pairing-qr.png` on the computer. Camera opens the pairing link and MOBaiLE fills the connection for you."
+                            title: "Scan the pairing QR in MOBaiLE",
+                            detail: "After install, open `backend/pairing-qr.png` on the computer. In MOBaiLE, tap Scan Pairing QR and point the phone at the screen."
                         )
 
                         VStack(alignment: .leading, spacing: 8) {
@@ -2544,12 +2618,20 @@ private struct SetupGuideSheet: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Text("1. Open `backend/pairing-qr.png` on the computer.")
-                            Text("2. Scan it with iPhone Camera.")
-                            Text("3. Tap Open in MOBaiLE.")
+                            Text("2. Tap Scan Pairing QR in MOBaiLE.")
+                            Text("3. Point the phone at the screen and confirm the pairing.")
                             Text("4. Later, run `mobaile status` on the computer. If your shell does not find it yet, run `~/.local/bin/mobaile status`.")
                         }
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
+
+                        Button {
+                            onOpenScanner()
+                        } label: {
+                            Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
                     .padding(16)
                     .background(
