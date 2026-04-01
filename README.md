@@ -7,11 +7,11 @@
 <p align="center"><strong>Handheld control for your own Mac or Linux machine.</strong></p>
 
 <p align="center">
-  Start a task from iPhone, run it on your own computer, and keep the whole execution thread visible while you are away from the keyboard.
+  Start a task from your iPhone, run it on your own computer, and keep the whole thread visible while you are away from the keyboard.
 </p>
 
 <p align="center">
-  This repo contains both the iPhone app and the backend it pairs with. Build from <code>ios/</code> while developing, or use TestFlight and the App Store for signed releases.
+  Use the iPhone app to control your own machine. This repo contains both the phone app and the computer-side setup if you want to build or self-host it.
 </p>
 
 <p align="center">
@@ -30,28 +30,32 @@
   <img src="docs/readme-hero.png" alt="MOBaiLE hero showing the configured start screen, a live run thread, and voice mode on iPhone" width="1200" />
 </p>
 
-> MOBaiLE is a client for a backend you run and control. It does not execute code on the iPhone.
+> MOBaiLE is the phone app. Your Mac or Linux machine does the work.
+
+Copy this on the computer you want MOBaiLE to use:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
 ```
 
-## Set It Up
+## Quick Start
 
-If your goal is simply "make the iPhone app work", use this path first.
+If you just want it working, start here.
 
-1. Paste the install command on the Mac or Linux machine you want MOBaiLE to use.
-2. The installer asks three quick questions. Keep the defaults: `Full Access`, `Anywhere with Tailscale`, and usually `Yes` for the background service.
-3. Open the QR on that computer, then in MOBaiLE tap `Scan Pairing QR` and point the phone at the screen.
-4. Later, run `mobaile status` any time to check the connection. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
+1. Paste the install command on the Mac or Linux machine you want to control.
+2. Keep the default answers unless you know you want something else.
+   Those defaults mean: use your normal tools and files, let the phone reach that machine when you are away from home, and keep MOBaiLE ready after you close the terminal.
+3. When the installer shows the pairing QR, open MOBaiLE on your iPhone and tap `Scan Pairing QR`.
+4. Point the phone at the screen and confirm the pairing.
+5. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
-What the installer does:
+What the installer does for you:
 
 - installs or updates MOBaiLE in `~/MOBaiLE`
-- configures the backend
-- starts a background service when supported
-- writes `backend/pairing.json`
-- generates `backend/pairing-qr.png`
+- gets that computer ready
+- keeps it running in the background when supported
+- creates the pairing QR
+- installs the `mobaile` command for status, pairing, and logs
 
 Need more detail? See [`docs/USAGE.md`](docs/USAGE.md), [`ios/README.md`](ios/README.md), [`backend/README.md`](backend/README.md), and [`scripts/README.md`](scripts/README.md).
 
@@ -60,7 +64,7 @@ Need more detail? See [`docs/USAGE.md`](docs/USAGE.md), [`ios/README.md`](ios/RE
 - **Runs against your real machine.** Use your actual repo, CLI tools, auth, files, and network instead of a toy remote environment.
 - **Keeps the run legible.** Planning, execution, summaries, and follow-up all stay in one thread instead of collapsing into a final notification.
 - **Works away from the desk.** Voice input, auto-send after silence, widgets, haptics, audio cues, and Shortcuts make it usable when your laptop is the inconvenient device.
-- **Lets you choose the trust level.** Use `safe` on cautious hosts, or `full-access` on a trusted private machine.
+- **Lets you choose the trust level.** Use `Safe` on a cautious host, or `Full Access` on a trusted private machine.
 
 ## What The Product Looks Like
 
@@ -75,15 +79,18 @@ Need more detail? See [`docs/USAGE.md`](docs/USAGE.md), [`ios/README.md`](ios/RE
 - `check my calendar today and summarize conflicts`
 - `fix the failing test and explain the patch`
 
-## Advanced Paths
+<details>
+  <summary><strong>Other setup paths</strong></summary>
 
-Use these only if the main installer path is not what you want.
+Use these only if the main install command is not what you want.
 
 - Already in a checkout and want to run the installer there: `bash ./scripts/install.sh`
 - Backend-only/manual path from a checkout: `bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale`
 - Local simulator-only testing: `bash ./scripts/install_backend.sh --mode safe --phone-access local`
 
-The app only needs two connection values in the end: a reachable `server_url` and the backend token. QR pairing fills those automatically.
+If you skip QR pairing, the app can also be connected manually with a reachable server address and API token.
+
+</details>
 
 <details>
   <summary><strong>Full setup details</strong></summary>
@@ -112,7 +119,7 @@ tailscale status
 tailscale ip -4
 ```
 
-### Install the backend
+### Install on the computer
 
 Recommended path:
 
@@ -128,14 +135,14 @@ bash ./scripts/install.sh
 
 The installer asks three questions:
 
-1. How much access should MOBaiLE have?
+1. How much access should MOBaiLE have on this computer?
    Keep `Full Access` unless you specifically want the safer mode.
 2. Where should your phone work?
    Keep `Anywhere with Tailscale` for the normal remote setup.
 3. Should MOBaiLE stay running in the background?
    Keep `Yes` if this computer should stay ready for the phone.
 
-Manual backend-only path from a checkout:
+Manual host-only path from a checkout:
 
 ```bash
 bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale
@@ -154,7 +161,7 @@ What the installer does:
 
 If you want a stable hostname for the iPhone, set `VOICE_AGENT_PUBLIC_SERVER_URL` before pairing. Otherwise MOBaiLE prefers the Tailscale or LAN URLs advertised in `backend/pairing.json`.
 
-### Verify backend health
+### Check that the computer is ready
 
 ```bash
 curl http://127.0.0.1:8000/health
