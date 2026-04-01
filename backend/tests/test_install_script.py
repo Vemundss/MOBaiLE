@@ -210,6 +210,23 @@ def test_install_script_can_switch_to_wifi_without_background_service(tmp_path: 
     assert not (home / ".local" / "bin" / "mobaile").exists()
 
 
+def test_install_script_local_mode_summary_uses_distinct_step_numbers(tmp_path: Path):
+    checkout = make_checkout(tmp_path)
+    home = tmp_path / "home"
+
+    result = run_install_script(
+        home,
+        "--phone-access",
+        "local",
+        checkout=checkout,
+    )
+
+    assert result.returncode == 0
+    assert "This install is local-only on this computer." in result.stdout
+    assert "  2. Re-run with On this Wi-Fi or Anywhere with Tailscale if you want to connect your iPhone." in result.stdout
+    assert "  3. Run `mobaile status` any time to check the connection." in result.stdout
+
+
 def test_install_script_uses_in_checkout_repo_when_run_inside_checkout(tmp_path: Path):
     checkout = make_checkout(tmp_path, real_install_script=True)
     home = tmp_path / "home"

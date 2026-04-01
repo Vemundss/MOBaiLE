@@ -84,5 +84,6 @@ def test_service_macos_install_summarizes_warmup_failures(tmp_path: Path):
     assert "Checking optional host integrations..." in result.stdout
     assert "Some optional host integrations are not ready yet. MOBaiLE will still run." in result.stdout
     assert f"Capability report: {report_path}" in result.stdout
+    assert "Background service installed and running." in result.stdout
     assert "Readiness failed:" not in result.stdout
     assert "- codex_cli:" not in result.stdout

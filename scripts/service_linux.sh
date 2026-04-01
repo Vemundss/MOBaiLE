@@ -52,7 +52,23 @@ EOF
   fi
 }
 
+ensure_uv_available() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  export PATH="${HOME}/.local/bin:${PATH}"
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "uv is required to sync the MOBaiLE runtime." >&2
+  echo "Install it first with the one-line installer or add ~/.local/bin to PATH." >&2
+  exit 1
+}
+
 sync_runtime() {
+  ensure_uv_available
   mkdir -p "${RUNTIME_DIR}"
   if command -v rsync >/dev/null 2>&1; then
     rsync -a --delete \
@@ -144,14 +160,14 @@ install_service() {
   systemctl --user enable "${UNIT_NAME}" >/dev/null
   systemctl --user restart "${UNIT_NAME}" >/dev/null
   run_warmup_if_enabled
-  echo "Installed and started ${UNIT_NAME}"
+  echo "Background service installed and running."
 }
 
 uninstall_service() {
   systemctl --user disable --now "${UNIT_NAME}" >/dev/null 2>&1 || true
   rm -f "${UNIT_PATH}"
   reload_systemd
-  echo "Uninstalled ${UNIT_NAME}"
+  echo "Background service removed."
 }
 
 start_service() {
@@ -164,12 +180,12 @@ start_service() {
   reload_systemd
   systemctl --user restart "${UNIT_NAME}" >/dev/null
   run_warmup_if_enabled
-  echo "Started ${UNIT_NAME}"
+  echo "Background service started."
 }
 
 stop_service() {
   systemctl --user stop "${UNIT_NAME}"
-  echo "Stopped ${UNIT_NAME}"
+  echo "Background service stopped."
 }
 
 status_service() {

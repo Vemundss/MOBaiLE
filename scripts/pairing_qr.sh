@@ -10,6 +10,15 @@ QR_SCALE="12"
 QUIET="false"
 SHOW_PREVIEW="true"
 
+ensure_uv_available() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  export PATH="${HOME}/.local/bin:${PATH}"
+  command -v uv >/dev/null 2>&1
+}
+
 usage() {
   cat <<EOF
 Usage: bash ./scripts/pairing_qr.sh [--out <path>] [--format url|json] [--scale <int>] [--quiet] [--no-preview]
@@ -149,8 +158,34 @@ if command -v qrencode >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "qrencode is not installed."
-echo "Install with: brew install qrencode"
-echo
-echo "Fallback payload (copy into your phone manually):"
-echo "${PAYLOAD}"
+if ensure_uv_available; then
+  (
+    cd "${REPO_ROOT}/backend"
+    uv run python - "${OUT_FILE}" "${PAYLOAD}" "${QR_SCALE}" <<'PY'
+import sys
+from pathlib import Path
+
+import qrcode
+
+out_path = Path(sys.argv[1])
+payload = sys.argv[2]
+scale = int(sys.argv[3])
+out_path.parent.mkdir(parents=True, exist_ok=True)
+img = qrcode.make(payload, box_size=scale, border=4)
+img.save(out_path)
+PY
+  )
+  if [[ "${QUIET}" != "true" ]]; then
+    echo "QR image written to: ${OUT_FILE}"
+    echo "Format: ${FORMAT}"
+    echo "Scale: ${QR_SCALE}"
+  fi
+  exit 0
+fi
+
+echo "Could not generate a QR image automatically." >&2
+echo "Install qrencode, or make sure uv is available in ~/.local/bin or PATH." >&2
+echo >&2
+echo "Fallback payload (copy into your phone manually):" >&2
+echo "${PAYLOAD}" >&2
+exit 1

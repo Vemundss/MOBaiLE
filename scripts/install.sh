@@ -214,7 +214,8 @@ path_has_user_local_bin() {
 }
 
 print_status_follow_up() {
-  echo '  2. Run `mobaile status` any time to check the connection.'
+  local step_number="${1:-2}"
+  echo "  ${step_number}. Run \`mobaile status\` any time to check the connection."
   if ! path_has_user_local_bin; then
     echo '     If your shell does not find it yet, run `~/.local/bin/mobaile status`.'
   fi
@@ -498,11 +499,12 @@ print_product_summary() {
   if [[ "${PHONE_ACCESS_MODE}" == "local" ]]; then
     echo "  1. This install is local-only on this computer."
     echo "  2. Re-run with On this Wi-Fi or Anywhere with Tailscale if you want to connect your iPhone."
+    print_status_follow_up 3
   else
     echo "  1. Scan the QR on this computer with your iPhone."
     echo "     If it did not open automatically, run \`mobaile pair\`."
+    print_status_follow_up 2
   fi
-  print_status_follow_up
 }
 
 print_dry_run_summary() {
