@@ -344,11 +344,14 @@ pairing_qr_path() {
 
 pairing_qr_label() {
   local backend_dir="$1"
+  local pairing_file="${backend_dir}/pairing.json"
   local qr_path
   qr_path="$(pairing_qr_path "${backend_dir}")"
 
   if [[ -f "${qr_path}" ]]; then
     printf "Ready (%s)\n" "${qr_path}"
+  elif [[ "$(pairing_status_label "${pairing_file}")" == "Ready" ]]; then
+    printf "Available via mobaile pair\n"
   else
     printf "Not ready\n"
   fi
