@@ -151,6 +151,89 @@ struct ChatThread: Identifiable, Equatable, Codable {
     }
 }
 
+enum ChatThreadPresentationStatus: Equatable {
+    case running
+    case needsInput
+    case completed
+    case failed
+    case cancelled
+    case ready
+    case draft
+    case saved
+
+    var label: String {
+        switch self {
+        case .running:
+            return "Running"
+        case .needsInput:
+            return "Needs Input"
+        case .completed:
+            return "Completed"
+        case .failed:
+            return "Failed"
+        case .cancelled:
+            return "Cancelled"
+        case .ready:
+            return "Ready"
+        case .draft:
+            return "Draft"
+        case .saved:
+            return "Saved"
+        }
+    }
+}
+
+extension ChatThread {
+    var hasDraftState: Bool {
+        !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draftAttachments.isEmpty
+    }
+
+    var presentationStatus: ChatThreadPresentationStatus {
+        let lower = statusText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if lower.contains("running")
+            || lower.contains("starting")
+            || lower.contains("planning")
+            || lower.contains("execut")
+            || lower.contains("summar")
+            || lower.contains("recording") {
+            return .running
+        }
+
+        if pendingHumanUnblock != nil || lower.contains("input") || lower.contains("blocked") {
+            return .needsInput
+        }
+
+        if lower.contains("complete") {
+            return .completed
+        }
+
+        if lower.contains("fail") || lower.contains("reject") {
+            return .failed
+        }
+
+        if lower.contains("cancel") {
+            return .cancelled
+        }
+
+        if lower.contains("ready") {
+            return .ready
+        }
+
+        if hasDraftState {
+            return .draft
+        }
+
+        if !runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .saved
+        }
+
+        return .ready
+    }
+}
+
 struct UtteranceRequest: Encodable {
     let sessionId: String
     let threadID: String?

@@ -22,6 +22,7 @@ Usage: mobaile [command]
 Commands:
   status   Show backend status and pairing readiness
   pair     Generate or surface the pairing QR image
+  update   Check for or install newer MOBaiLE updates
   logs     Show backend service logs
   restart  Restart the backend service
   start    Start the backend service
@@ -137,6 +138,95 @@ service_script_path() {
       exit 1
       ;;
   esac
+}
+
+service_install_preference() {
+  case "$(uname -s)" in
+    Darwin)
+      [[ -f "${HOME}/Library/LaunchAgents/com.mobile.voiceagent.backend.plist" ]] && printf "yes\n" || printf "no\n"
+      ;;
+    Linux)
+      [[ -f "${HOME}/.config/systemd/user/mobaile-backend.service" ]] && printf "yes\n" || printf "no\n"
+      ;;
+    *)
+      printf "no\n"
+      ;;
+  esac
+}
+
+git_checkout_or_fail() {
+  local repo_root="$1"
+  if ! command -v git >/dev/null 2>&1; then
+    echo "git is required for mobaile update." >&2
+    exit 1
+  fi
+  if [[ ! -d "${repo_root}/.git" ]]; then
+    echo "mobaile update only works from a git checkout." >&2
+    exit 1
+  fi
+}
+
+git_current_branch() {
+  local repo_root="$1"
+  git -C "${repo_root}" branch --show-current 2>/dev/null
+}
+
+git_origin_url() {
+  local repo_root="$1"
+  git -C "${repo_root}" remote get-url origin 2>/dev/null || true
+}
+
+remote_is_update_source() {
+  local remote_url="$1"
+
+  if [[ "${MOBAILE_TEST_ALLOW_ANY_UPDATE_REMOTE:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  case "${remote_url}" in
+    https://github.com/Vemundss/MOBaiLE.git|https://github.com/vemundss/MOBaiLE.git|git@github.com:Vemundss/MOBaiLE.git|git@github.com:vemundss/MOBaiLE.git|ssh://git@github.com/Vemundss/MOBaiLE.git|ssh://git@github.com/vemundss/MOBaiLE.git)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+git_short_ref() {
+  local repo_root="$1"
+  local ref="$2"
+  git -C "${repo_root}" rev-parse --short "${ref}" 2>/dev/null
+}
+
+git_worktree_dirty() {
+  local repo_root="$1"
+  if [[ -n "$(git -C "${repo_root}" status --short 2>/dev/null)" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+fetch_update_refs() {
+  local repo_root="$1"
+  git -C "${repo_root}" fetch --all --prune >/dev/null 2>&1
+}
+
+print_update_status() {
+  local repo_root="$1"
+  local branch="$2"
+  local local_ref="$3"
+  local remote_ref="$4"
+
+  echo "Current branch: ${branch}"
+  echo "Current version: ${local_ref}"
+  echo "Latest main: ${remote_ref}"
+
+  if [[ "${local_ref}" == "${remote_ref}" ]]; then
+    echo "MOBaiLE is up to date."
+  else
+    echo "Update available."
+  fi
 }
 
 service_state_label() {
@@ -272,6 +362,7 @@ Pairing QR: $(pairing_qr_label "${backend_dir}")
 
 Quick actions:
   mobaile pair
+  mobaile update
   mobaile restart
   mobaile logs
   mobaile config
@@ -364,6 +455,76 @@ Phone pairing: $(pairing_status_label "${pairing_file}")
 EOF
 }
 
+update_command() {
+  local repo_root="$1"
+  local update_mode="${2:-apply}"
+  local env_file="${repo_root}/backend/.env"
+  local branch remote_url local_ref remote_ref security_mode phone_access_mode public_server_url background_service
+
+  git_checkout_or_fail "${repo_root}"
+  branch="$(git_current_branch "${repo_root}")"
+  remote_url="$(git_origin_url "${repo_root}")"
+
+  if [[ -z "${remote_url}" ]]; then
+    echo "Could not find an origin remote for this checkout." >&2
+    exit 1
+  fi
+  if ! remote_is_update_source "${remote_url}"; then
+    echo "Refusing to auto-update from an unrecognized remote: ${remote_url}" >&2
+    exit 1
+  fi
+
+  fetch_update_refs "${repo_root}"
+  local_ref="$(git_short_ref "${repo_root}" "HEAD")"
+  remote_ref="$(git_short_ref "${repo_root}" "origin/main")"
+  if [[ -z "${remote_ref}" ]]; then
+    echo "Could not resolve origin/main for this checkout." >&2
+    exit 1
+  fi
+
+  if [[ "${update_mode}" == "check" ]]; then
+    print_update_status "${repo_root}" "${branch:-detached}" "${local_ref}" "${remote_ref}"
+    return
+  fi
+
+  if [[ "${branch}" != "main" ]]; then
+    echo "mobaile update only supports the main branch. Current branch: ${branch:-detached}." >&2
+    exit 1
+  fi
+  if git_worktree_dirty "${repo_root}"; then
+    echo "mobaile update requires a clean checkout. Commit or stash local changes first." >&2
+    exit 1
+  fi
+
+  if [[ "${local_ref}" == "${remote_ref}" ]]; then
+    echo "MOBaiLE is already up to date (${local_ref})."
+    return
+  fi
+
+  echo "Updating MOBaiLE from ${local_ref} to ${remote_ref}..."
+  git -C "${repo_root}" pull --ff-only >/dev/null
+
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
+  background_service="$(service_install_preference)"
+
+  local install_args=(
+    bash "${repo_root}/scripts/install.sh"
+    --checkout "${repo_root}"
+    --non-interactive
+    --mode "${security_mode}"
+    --phone-access "${phone_access_mode}"
+    --background-service "${background_service}"
+  )
+  if [[ -n "${public_server_url}" ]]; then
+    install_args+=(--public-url "${public_server_url}")
+  fi
+
+  "${install_args[@]}"
+  echo "Updated MOBaiLE to $(git_short_ref "${repo_root}" "HEAD")."
+}
+
 main() {
   local repo_root command_name
   repo_root="$(resolve_repo_root)"
@@ -372,6 +533,17 @@ main() {
   case "${command_name}" in
     status) status_command "${repo_root}" ;;
     pair) pair_command "${repo_root}" ;;
+    update)
+      shift || true
+      case "${1:-}" in
+        "" ) update_command "${repo_root}" "apply" ;;
+        --check|check) update_command "${repo_root}" "check" ;;
+        *)
+          echo "Usage: mobaile update [--check]" >&2
+          exit 1
+          ;;
+      esac
+      ;;
     logs|restart|start|stop) delegate_service_command "${repo_root}" "${command_name}" ;;
     config) config_command "${repo_root}" ;;
     -h|--help|help) usage ;;

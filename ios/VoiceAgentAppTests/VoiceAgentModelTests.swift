@@ -249,6 +249,60 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertNil(decoded.pendingHumanUnblock)
     }
 
+    func testChatThreadPresentationStatusMarksFreshThreadReady() {
+        let thread = ChatThread(
+            id: UUID(),
+            title: "New Chat",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "",
+            summaryText: "",
+            transcriptText: "",
+            statusText: "Idle",
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex"
+        )
+
+        XCTAssertEqual(thread.presentationStatus, .ready)
+    }
+
+    func testChatThreadPresentationStatusPrefersNeedsInputOverDraft() {
+        let thread = ChatThread(
+            id: UUID(),
+            title: "Blocked",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "run-123",
+            summaryText: "",
+            transcriptText: "",
+            statusText: "Blocked on human input",
+            pendingHumanUnblock: HumanUnblockRequest(instructions: "Approve login"),
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex",
+            draftText: "I completed the login step."
+        )
+
+        XCTAssertEqual(thread.presentationStatus, .needsInput)
+    }
+
+    func testChatThreadPresentationStatusMarksDraftWhenUnsavedInputExists() {
+        let thread = ChatThread(
+            id: UUID(),
+            title: "Draft",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "",
+            summaryText: "",
+            transcriptText: "",
+            statusText: "Idle",
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex",
+            draftText: "review the latest build"
+        )
+
+        XCTAssertEqual(thread.presentationStatus, .draft)
+    }
+
     func testSessionContextDecodingIncludesLatestRunState() throws {
         let json = """
         {

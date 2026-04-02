@@ -49,6 +49,8 @@ If you just want it working, start here.
 4. Point the phone at the screen and confirm the pairing.
 5. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
+When you want the latest CLI/backend updates later, run `mobaile update`.
+
 What the installer does for you:
 
 - installs or updates MOBaiLE in `~/MOBaiLE`
@@ -130,7 +132,7 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/insta
 If you are already in a checkout:
 
 ```bash
-bash ./scripts/install.sh
+bash ./scripts/install.sh --checkout "$PWD"
 ```
 
 The installer asks three questions:

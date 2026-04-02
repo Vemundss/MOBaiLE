@@ -14,13 +14,14 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/insta
 If you are already in a checkout, run:
 
 ```bash
-bash ./scripts/install.sh
+bash ./scripts/install.sh --checkout "$PWD"
 ```
 
 The installer asks three simple questions. The normal answers are `Full Access`,
 `Anywhere with Tailscale`, and `Yes` for the background service. After setup, use
 `mobaile status` to check the connection. If your shell does not find it yet, run
-`~/.local/bin/mobaile status`.
+`~/.local/bin/mobaile status`. When you want the latest installed version later,
+run `mobaile update`.
 
 ## Install and Bootstrap
 

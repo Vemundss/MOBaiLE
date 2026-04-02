@@ -29,6 +29,7 @@ targets:
         NSMicrophoneUsageDescription: MOBaiLE needs microphone access so you can dictate requests to your paired backend.
         NSSpeechRecognitionUsageDescription: MOBaiLE uses Speech Recognition to turn your spoken request into text before sending it.
         NSLocalNetworkUsageDescription: MOBaiLE can connect to your paired backend on your local network.
+        NSCameraUsageDescription: MOBaiLE uses the camera to scan the pairing QR shown on your computer.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         ITSAppUsesNonExemptEncryption: false
@@ -71,6 +72,22 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.tests
 
+  VoiceAgentAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - VoiceAgentAppUITests
+    dependencies:
+      - target: VoiceAgentApp
+    info:
+      path: VoiceAgentAppUITests/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceAgentAppUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.uitests
+        TEST_TARGET_NAME: VoiceAgentApp
+
   VoiceTaskWidgetExtension:
     type: app-extension
     platform: iOS
@@ -105,6 +122,8 @@ schemes:
       targets:
         VoiceAgentApp: all
         VoiceAgentAppTests: [test]
+        VoiceAgentAppUITests: [test]
     test:
       targets:
         - VoiceAgentAppTests
+        - VoiceAgentAppUITests

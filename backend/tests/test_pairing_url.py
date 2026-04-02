@@ -138,6 +138,46 @@ def test_refresh_pairing_server_url_discards_stale_public_url_without_override(m
     ]
 
 
+def test_refresh_pairing_server_url_preserves_configured_public_url_list(monkeypatch, tmp_path: Path):
+    module = importlib.import_module("app.pairing_url")
+    module = importlib.reload(module)
+    monkeypatch.setattr(
+        module,
+        "detect_server_urls",
+        lambda **_: [
+            "http://mobaile.tail6a5903.ts.net:8000",
+            "http://100.111.99.51:8000",
+        ],
+    )
+
+    pairing_file = tmp_path / "pairing.json"
+    pairing_file.write_text(
+        json.dumps(
+            {
+                "server_url": "https://relay.example.com",
+                "server_urls": [
+                    "https://relay.example.com",
+                    "http://100.111.99.51:8000",
+                ],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    module.refresh_pairing_server_url(pairing_file, bind_host="0.0.0.0", bind_port=8000)
+
+    updated = json.loads(pairing_file.read_text(encoding="utf-8"))
+    assert updated["server_url"] == "https://relay.example.com"
+    assert updated["server_urls"] == [
+        "https://relay.example.com",
+        "http://mobaile.tail6a5903.ts.net:8000",
+        "http://100.111.99.51:8000",
+    ]
+
+
 def test_refresh_pairing_server_url_prefers_explicit_public_override(monkeypatch, tmp_path: Path):
     module = importlib.import_module("app.pairing_url")
     module = importlib.reload(module)

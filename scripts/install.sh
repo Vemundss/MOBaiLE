@@ -27,7 +27,7 @@ usage() {
 Usage: bash ./scripts/install.sh [options]
 
 Options:
-  --checkout <path>            Use an existing checkout
+  --checkout <path>            Use that checkout instead of the managed install
   --non-interactive            Skip prompts and use flags/defaults
   --dry-run                    Print choices and commands without changing anything
   --phone-access <mode>        tailscale, wifi, or local
@@ -64,29 +64,6 @@ normalize_existing_path() {
     return
   fi
   printf "%s\n" "${path}"
-}
-
-resolve_script_checkout() {
-  local script_source="${BASH_SOURCE[0]-}"
-  local script_dir
-  local repo_root
-
-  if [[ -z "${script_source}" ]]; then
-    return
-  fi
-
-  script_dir="$(
-    cd "$(dirname "${script_source}")"
-    pwd -P
-  )"
-  repo_root="$(
-    cd "${script_dir}/.."
-    pwd -P
-  )"
-
-  if [[ -d "${repo_root}" ]]; then
-    printf "%s\n" "${repo_root}"
-  fi
 }
 
 validate_checkout_or_fail() {
@@ -267,16 +244,6 @@ ensure_checkout() {
     CHECKOUT="$(normalize_existing_path "${CHECKOUT}")"
     validate_checkout_or_fail "${CHECKOUT}"
     return
-  fi
-
-  local script_checkout=""
-  script_checkout="$(resolve_script_checkout)"
-  if [[ -n "${script_checkout}" ]]; then
-    script_checkout="$(normalize_existing_path "${script_checkout}")"
-    if checkout_looks_valid "${script_checkout}"; then
-      CHECKOUT="${script_checkout}"
-      return
-    fi
   fi
 
   local target="${CHECKOUT_DEFAULT}"

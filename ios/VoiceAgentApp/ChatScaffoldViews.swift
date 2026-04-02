@@ -772,49 +772,31 @@ struct ThreadsView: View {
                 return trimmed
             }
         }
+        if thread.presentationStatus == .ready {
+            return "Ready for a new prompt."
+        }
         return "No messages yet."
     }
 
     private func threadStatusText(for thread: ChatThread) -> String {
-        let lower = thread.statusText.lowercased()
-        if lower.contains("running") || lower.contains("starting") {
-            return "Running"
-        }
-        if hasDraftState(thread) {
-            return "Draft"
-        }
-        if lower.contains("complete") {
-            return "Completed"
-        }
-        if lower.contains("fail") || lower.contains("reject") {
-            return "Failed"
-        }
-        if lower.contains("cancel") {
-            return "Cancelled"
-        }
-        if thread.summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Draft"
-        }
-        return "Saved"
+        thread.presentationStatus.label
     }
 
     private func threadStatusColor(for thread: ChatThread) -> Color {
-        switch threadStatusText(for: thread) {
-        case "Running":
+        switch thread.presentationStatus {
+        case .running:
             return .blue
-        case "Completed":
+        case .completed:
             return .green
-        case "Failed", "Cancelled":
+        case .failed, .cancelled:
             return .red
-        case "Draft":
+        case .needsInput, .draft:
             return .orange
+        case .ready:
+            return .blue
         default:
             return .secondary
         }
-    }
-
-    private func hasDraftState(_ thread: ChatThread) -> Bool {
-        !thread.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !thread.draftAttachments.isEmpty
     }
 
     private func draftPreview(for thread: ChatThread) -> String? {

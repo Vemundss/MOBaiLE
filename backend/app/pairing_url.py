@@ -42,6 +42,8 @@ def refresh_pairing_server_url(
     explicit_public_url = _normalize_server_url(public_server_url)
     if explicit_public_url:
         preferred.append(explicit_public_url)
+    elif normalized_phone_access_mode == "tailscale" and isinstance(payload.get("server_urls"), list):
+        preferred.extend(_previous_public_server_urls(payload))
 
     next_urls = _dedupe_server_urls(preferred + detected)
     if (
@@ -230,6 +232,14 @@ def _matching_previous_server_urls(payload: dict[str, object], *, phone_access_m
     return _dedupe_server_urls(candidates)
 
 
+def _previous_public_server_urls(payload: dict[str, object]) -> list[str]:
+    return [
+        url
+        for url in _read_pairing_server_urls(payload)
+        if _is_public_server_url(url)
+    ]
+
+
 def _normalize_phone_access_mode(phone_access_mode: str) -> PhoneAccessMode:
     normalized = phone_access_mode.strip().lower()
     if normalized not in PHONE_ACCESS_MODE_OPTIONS:
@@ -301,6 +311,23 @@ def _server_url_matches_mode(server_url: str, *, phone_access_mode: PhoneAccessM
             return True
         return _is_private_non_loopback_ipv4(host)
     return False
+
+
+def _is_public_server_url(server_url: str) -> bool:
+    try:
+        parsed = urlparse(server_url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return False
+    if host.endswith(".local") or _is_loopback_host(host):
+        return False
+    if _is_tailscale_ipv4(host) or host.endswith(".ts.net"):
+        return False
+    if _is_private_non_loopback_ipv4(host):
+        return False
+    return True
 
 
 def _is_ipv4(value: str) -> bool:

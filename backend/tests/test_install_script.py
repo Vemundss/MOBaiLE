@@ -227,13 +227,30 @@ def test_install_script_local_mode_summary_uses_distinct_step_numbers(tmp_path: 
     assert "  3. Run `mobaile status` any time to check the connection." in result.stdout
 
 
-def test_install_script_uses_in_checkout_repo_when_run_inside_checkout(tmp_path: Path):
+def test_install_script_defaults_to_managed_install_when_run_inside_checkout(tmp_path: Path):
     checkout = make_checkout(tmp_path, real_install_script=True)
     home = tmp_path / "home"
 
     result = run_install_script(
         home,
         script_path=checkout / "scripts" / "install.sh",
+    )
+
+    assert result.returncode == 0
+    assert "Dry run." in result.stdout
+    assert f"git clone https://github.com/vemundss/MOBaiLE.git {home / 'MOBaiLE'}" in result.stdout
+    assert f"bash {home / 'MOBaiLE' / 'scripts' / 'install.sh'}" in result.stdout
+    assert f"--checkout {home / 'MOBaiLE'}" in result.stdout
+
+
+def test_install_script_uses_explicit_checkout_when_requested(tmp_path: Path):
+    checkout = make_checkout(tmp_path, real_install_script=True)
+    home = tmp_path / "home"
+
+    result = run_install_script(
+        home,
+        script_path=checkout / "scripts" / "install.sh",
+        checkout=checkout,
     )
 
     assert result.returncode == 0

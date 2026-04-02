@@ -35,6 +35,20 @@
                ReferencedContainer = "container:VoiceAgentApp.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "8F72C13F7D55CFB0648EFD74"
+               BuildableName = "VoiceAgentAppUITests.xctest"
+               BlueprintName = "VoiceAgentAppUITests"
+               ReferencedContainer = "container:VoiceAgentApp.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -61,6 +75,17 @@
                BlueprintIdentifier = "AAAEC7C4F1E1176758AFBF6B"
                BuildableName = "VoiceAgentAppTests.xctest"
                BlueprintName = "VoiceAgentAppTests"
+               ReferencedContainer = "container:VoiceAgentApp.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "8F72C13F7D55CFB0648EFD74"
+               BuildableName = "VoiceAgentAppUITests.xctest"
+               BlueprintName = "VoiceAgentAppUITests"
                ReferencedContainer = "container:VoiceAgentApp.xcodeproj">
             </BuildableReference>
          </TestableReference>

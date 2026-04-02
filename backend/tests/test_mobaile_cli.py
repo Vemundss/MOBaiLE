@@ -4,9 +4,85 @@ import os
 from pathlib import Path
 import platform
 import subprocess
+import textwrap
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def run_git(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+def create_update_checkout(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
+    home = tmp_path / "home"
+    home.mkdir()
+    shared_env = {
+        **os.environ,
+        "HOME": str(home),
+    }
+
+    remote = tmp_path / "remote.git"
+    run_git(["init", "--bare", "--initial-branch=main", str(remote)], cwd=tmp_path, env=shared_env)
+
+    author = tmp_path / "author"
+    run_git(["clone", str(remote), str(author)], cwd=tmp_path, env=shared_env)
+    run_git(["config", "user.name", "MOBaiLE Tests"], cwd=author, env=shared_env)
+    run_git(["config", "user.email", "tests@example.com"], cwd=author, env=shared_env)
+
+    (author / "scripts").mkdir(parents=True)
+    (author / "backend").mkdir(parents=True)
+    (author / ".gitignore").write_text("backend/.env\n", encoding="utf-8")
+    (author / "README.md").write_text("# temp\n", encoding="utf-8")
+    (author / "scripts" / "install.sh").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+            REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+            printf "%s\n" "$@" > "${REPO_ROOT}/update_args.txt"
+            """
+        ),
+        encoding="utf-8",
+    )
+    (author / "scripts" / "install_backend.sh").write_text("#!/usr/bin/env bash\nset -euo pipefail\n", encoding="utf-8")
+    (author / "scripts" / "pairing_qr.sh").write_text("#!/usr/bin/env bash\nset -euo pipefail\n", encoding="utf-8")
+    for path in [
+        author / "scripts" / "install.sh",
+        author / "scripts" / "install_backend.sh",
+        author / "scripts" / "pairing_qr.sh",
+    ]:
+        path.chmod(0o755)
+
+    run_git(["add", "."], cwd=author, env=shared_env)
+    run_git(["commit", "-m", "Initial"], cwd=author, env=shared_env)
+    run_git(["push", "-u", "origin", "main"], cwd=author, env=shared_env)
+
+    repo = tmp_path / "repo"
+    run_git(["clone", str(remote), str(repo)], cwd=tmp_path, env=shared_env)
+    run_git(["config", "user.name", "MOBaiLE Tests"], cwd=repo, env=shared_env)
+    run_git(["config", "user.email", "tests@example.com"], cwd=repo, env=shared_env)
+
+    (repo / "backend").mkdir(exist_ok=True)
+    (repo / "backend" / ".env").write_text(
+        "VOICE_AGENT_SECURITY_MODE=full-access\nVOICE_AGENT_PHONE_ACCESS_MODE=tailscale\n",
+        encoding="utf-8",
+    )
+
+    (author / "README.md").write_text("# updated\n", encoding="utf-8")
+    run_git(["add", "README.md"], cwd=author, env=shared_env)
+    run_git(["commit", "-m", "Update"], cwd=author, env=shared_env)
+    run_git(["push"], cwd=author, env=shared_env)
+
+    return repo, author, shared_env
 
 
 def test_mobaile_status_reports_running_summary(tmp_path: Path):
@@ -256,3 +332,79 @@ printf "stub-qr" > "${{out_path}}"
     assert "Pairing QR:" in result.stdout
     assert (backend_dir / "pairing-qr.png").read_text(encoding="utf-8") == "stub-qr"
     assert args_log.read_text(encoding="utf-8").strip() == "--quiet --no-preview"
+
+
+def test_mobaile_update_check_reports_available_update(tmp_path: Path):
+    repo, author, shared_env = create_update_checkout(tmp_path)
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "update", "--check"],
+        env={
+            **shared_env,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ALLOW_ANY_UPDATE_REMOTE": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Current branch: main" in result.stdout
+    assert "Update available." in result.stdout
+    assert run_git(["rev-parse", "--short", "HEAD"], cwd=author, env=shared_env).stdout.strip() in result.stdout
+
+
+def test_mobaile_update_pulls_and_reapplies_setup(tmp_path: Path):
+    repo, author, shared_env = create_update_checkout(tmp_path)
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "update"],
+        env={
+            **shared_env,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ALLOW_ANY_UPDATE_REMOTE": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Updated MOBaiLE to" in result.stdout
+    assert run_git(["rev-parse", "HEAD"], cwd=repo, env=shared_env).stdout.strip() == run_git(
+        ["rev-parse", "HEAD"], cwd=author, env=shared_env
+    ).stdout.strip()
+
+    install_args = (repo / "update_args.txt").read_text(encoding="utf-8").splitlines()
+    assert install_args == [
+        "--checkout",
+        str(repo),
+        "--non-interactive",
+        "--mode",
+        "full-access",
+        "--phone-access",
+        "tailscale",
+        "--background-service",
+        "no",
+    ]
+
+
+def test_mobaile_update_refuses_dirty_checkout(tmp_path: Path):
+    repo, _author, shared_env = create_update_checkout(tmp_path)
+    (repo / "local-notes.txt").write_text("dirty\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "update"],
+        env={
+            **shared_env,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ALLOW_ANY_UPDATE_REMOTE": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "requires a clean checkout" in result.stderr

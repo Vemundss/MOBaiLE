@@ -70,9 +70,9 @@ struct ContentView: View {
                         Button {
                             showThreads = true
                         } label: {
-                            Image(systemName: "text.bubble")
+                            ThreadToolbarButtonLabel(threadCount: vm.sortedThreads.count)
                         }
-                        .accessibilityLabel("Threads")
+                        .accessibilityLabel("Threads, \(threadCountLabel), current \(activeNavigationTitle)")
 
                         Menu {
                             Button {
@@ -137,9 +137,13 @@ struct ContentView: View {
                         showThreads = false
                     }
                 )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showLogs) {
                 LogsView(events: vm.events)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showWorkspaceBrowser, onDismiss: {
                 newDirectoryName = ""
@@ -225,12 +229,18 @@ struct ContentView: View {
                     }
                 )
             }
-            .confirmationDialog("Add attachment", isPresented: $showAttachmentOptions, titleVisibility: .visible) {
+            .confirmationDialog("Add context", isPresented: $showAttachmentOptions, titleVisibility: .visible) {
                 Button("Photo Library") {
                     showPhotoPicker = true
                 }
                 Button("Files") {
                     showFileImporter = true
+                }
+                if vm.hasConfiguredConnection && !vm.isLoading && vm.hasDraftContent {
+                    Button("Voice Note") {
+                        composerFocused = false
+                        handleRecordingButtonTap()
+                    }
                 }
                 Button("Paste from Clipboard") {
                     Task {
@@ -699,7 +709,7 @@ struct ContentView: View {
                         if isCheckingSettingsConnection {
                             ProgressView()
                         } else {
-                            Text("Check")
+                            Text("Test")
                         }
                     }
                     .buttonStyle(.bordered)
@@ -712,6 +722,19 @@ struct ContentView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if vm.hasConfiguredConnection {
+                ViewThatFits(in: .vertical) {
+                    HStack(spacing: 8) {
+                        RuntimeContextChip(icon: "server.rack", label: "Server", value: connectionHostLabel)
+                        RuntimeContextChip(icon: "iphone", label: "Session", value: vm.sessionID)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        RuntimeContextChip(icon: "server.rack", label: "Server", value: connectionHostLabel)
+                        RuntimeContextChip(icon: "iphone", label: "Session", value: vm.sessionID)
+                    }
+                }
+            }
 
             if showsSettingsRuntimeDetails {
                 ViewThatFits(in: .vertical) {
@@ -746,13 +769,7 @@ struct ContentView: View {
     }
 
     private var showsSettingsRuntimeDetails: Bool {
-        guard vm.hasConfiguredConnection else { return false }
-        switch settingsConnectionState {
-        case .idle:
-            return false
-        case .checking, .success, .failure:
-            return true
-        }
+        vm.hasConfiguredConnection
     }
 
     private var isCheckingSettingsConnection: Bool {
@@ -765,7 +782,7 @@ struct ContentView: View {
     private var settingsConnectionTitle: String {
         switch settingsConnectionState {
         case .idle:
-            return vm.hasConfiguredConnection ? "Verify connection" : "Waiting for pairing"
+            return vm.hasConfiguredConnection ? "Current backend" : "Waiting for pairing"
         case .checking:
             return "Checking connection"
         case .success:
@@ -779,7 +796,7 @@ struct ContentView: View {
         switch settingsConnectionState {
         case .idle:
             return vm.hasConfiguredConnection
-                ? "Check after editing either field."
+                ? "MOBaiLE stores these values on the phone. Test the connection after editing them."
                 : "Use the installer and QR pairing for the fastest setup, or expand the manual fallback section if you already have connection details."
         case .checking:
             return "Checking the current backend session."
@@ -1029,13 +1046,13 @@ struct ContentView: View {
                 showAttachmentOptions = true
             } label: {
                 ComposerTrayButtonLabel(
-                    systemImage: vm.draftAttachments.isEmpty ? "paperclip" : "paperclip.circle.fill",
+                    systemImage: "plus",
                     tint: vm.draftAttachments.isEmpty ? Color.secondary : Color.accentColor,
                     fill: vm.draftAttachments.isEmpty ? .clear : Color.accentColor.opacity(0.16)
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Add attachment")
+            .accessibilityLabel("Add context")
             .disabled(!vm.hasConfiguredConnection || vm.isLoading)
             .opacity((!vm.hasConfiguredConnection || vm.isLoading) ? 0.45 : 1)
 
@@ -1054,23 +1071,6 @@ struct ContentView: View {
             .accessibilityLabel(vm.isVoiceModeActiveForCurrentThread ? "End voice mode" : "Start voice mode")
             .disabled(!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode)
             .opacity((!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode) ? 0.45 : 1)
-
-            if vm.hasDraftContent && !vm.canCancelActiveOperation {
-                Button {
-                    composerFocused = false
-                    handleRecordingButtonTap()
-                } label: {
-                    ComposerTrayButtonLabel(
-                        systemImage: "mic.fill",
-                        tint: .blue,
-                        fill: Color.blue.opacity(0.12)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add a voice note")
-                .disabled(vm.isLoading || !vm.hasConfiguredConnection)
-                .opacity((vm.isLoading || !vm.hasConfiguredConnection) ? 0.45 : 1)
-            }
         }
         .padding(4)
         .background(Color(.secondarySystemBackground))
@@ -1404,6 +1404,26 @@ struct ContentView: View {
         return trimmed.isEmpty ? "MOBaiLE" : trimmed
     }
 
+    private var activeThread: ChatThread? {
+        guard let activeThreadID = vm.activeThreadID else { return nil }
+        return vm.threads.first(where: { $0.id == activeThreadID })
+    }
+
+    private var activeThreadPresentationStatus: ChatThreadPresentationStatus {
+        activeThread?.presentationStatus ?? .ready
+    }
+
+    private var threadCountLabel: String {
+        let count = vm.sortedThreads.count
+        return "\(count) thread\(count == 1 ? "" : "s")"
+    }
+
+    private var connectionHostLabel: String {
+        let trimmed = vm.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let host = URL(string: trimmed)?.host, !host.isEmpty else { return trimmed }
+        return host
+    }
+
     private var emptyStateRuntimeContext: EmptyStateRuntimeContext? {
         guard vm.hasConfiguredConnection else { return nil }
         let workspace = compactPathLabel(runtimeDirectoryLabel)
@@ -1585,33 +1605,116 @@ struct ContentView: View {
     }
 
     private var compactRuntimeInfoBar: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                if shouldShowRuntimeStatusBadge {
-                    RuntimeStatusBadge(
-                        text: runtimeStatusText,
-                        systemImage: runtimeStatusIcon,
-                        tint: runtimeStatusTint
-                    )
+        VStack(alignment: .leading, spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    runtimeThreadButton
+
+                    Spacer(minLength: 0)
+
+                    if shouldShowRuntimeStatusBadge {
+                        RuntimeStatusBadge(
+                            text: runtimeStatusText,
+                            systemImage: runtimeStatusIcon,
+                            tint: runtimeStatusTint
+                        )
+                    }
                 }
 
-                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 8) {
+                    runtimeThreadButton
 
-                runtimeWorkspaceButton
+                    if shouldShowRuntimeStatusBadge {
+                        RuntimeStatusBadge(
+                            text: runtimeStatusText,
+                            systemImage: runtimeStatusIcon,
+                            tint: runtimeStatusTint
+                        )
+                    }
+                }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                if shouldShowRuntimeStatusBadge {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    runtimeWorkspaceButton
                     RuntimeStatusBadge(
-                        text: runtimeStatusText,
-                        systemImage: runtimeStatusIcon,
-                        tint: runtimeStatusTint
+                        text: runtimeExecutorLabel,
+                        systemImage: "bolt.horizontal.circle.fill",
+                        tint: .secondary
                     )
+                    if vm.isVoiceModeActiveForCurrentThread {
+                        RuntimeStatusBadge(
+                            text: vm.voiceModeStatusText,
+                            systemImage: "waveform.circle.fill",
+                            tint: .blue
+                        )
+                    }
                 }
 
-                runtimeWorkspaceButton
+                VStack(alignment: .leading, spacing: 8) {
+                    runtimeWorkspaceButton
+                    HStack(spacing: 8) {
+                        RuntimeStatusBadge(
+                            text: runtimeExecutorLabel,
+                            systemImage: "bolt.horizontal.circle.fill",
+                            tint: .secondary
+                        )
+                        if vm.isVoiceModeActiveForCurrentThread {
+                            RuntimeStatusBadge(
+                                text: vm.voiceModeStatusText,
+                                systemImage: "waveform.circle.fill",
+                                tint: .blue
+                            )
+                        }
+                    }
+                }
             }
         }
+    }
+
+    private var runtimeThreadButton: some View {
+        Button {
+            showThreads = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "text.bubble.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(activeNavigationTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(threadCountLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if activeThreadPresentationStatus == .needsInput {
+                    Text(activeThreadPresentationStatus.label)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Switch threads")
     }
 
     private var runtimeWorkspaceButton: some View {
@@ -2243,6 +2346,27 @@ private struct ComposerTrayButtonLabel: View {
                 Circle()
                     .fill(fill)
             )
+    }
+}
+
+private struct ThreadToolbarButtonLabel: View {
+    let threadCount: Int
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Image(systemName: "text.bubble")
+
+            if threadCount > 1 {
+                Text(threadCount > 9 ? "9+" : "\(threadCount)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.accentColor)
+                    .clipShape(Capsule())
+                    .offset(x: 8, y: -6)
+            }
+        }
     }
 }
 

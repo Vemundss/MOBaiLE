@@ -31,7 +31,7 @@ This path:
 If you are already inside this repo and want to run the installer there:
 
 ```bash
-bash ./scripts/install.sh
+bash ./scripts/install.sh --checkout "$PWD"
 ```
 
 ### Step 2. Pair the iPhone
@@ -48,6 +48,12 @@ mobaile status
 ```
 
 If your shell does not find it yet, run `~/.local/bin/mobaile status`.
+
+When you want the latest MOBaiLE updates later, run:
+
+```bash
+mobaile update
+```
 
 ### Step 4. Reach for fallback or advanced setup only when you need it
 
