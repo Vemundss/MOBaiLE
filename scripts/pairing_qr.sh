@@ -9,6 +9,7 @@ FORMAT="url"
 QR_SCALE="12"
 QUIET="false"
 SHOW_PREVIEW="true"
+PAIR_CODE_TTL_MIN="${VOICE_AGENT_PAIR_CODE_TTL_MIN:-30}"
 
 ensure_uv_available() {
   if command -v uv >/dev/null 2>&1; then
@@ -72,25 +73,54 @@ if [[ ! -f "${PAIRING_FILE}" ]]; then
   exit 1
 fi
 
-PAYLOAD_JSON="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
+PAIRING_REFRESHED="$(PAIRING_PATH="${PAIRING_FILE}" PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - <<'PY'
 import json
 import os
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 p = Path(os.environ["PAIRING_PATH"])
 data = json.loads(p.read_text(encoding="utf-8"))
+pair_code = str(data.get("pair_code", "")).strip()
 expires_at = str(data.get("pair_code_expires_at", "")).strip()
+needs_refresh = not pair_code
+
 if expires_at:
     try:
         parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
     except ValueError:
         parsed = None
+        needs_refresh = True
     if parsed is not None and parsed <= datetime.now(timezone.utc):
-        raise SystemExit(
-            f"pair_code in pairing.json expired at {expires_at}; "
-            "run scripts/rotate_api_token.sh or scripts/install_backend.sh again"
-        )
+        needs_refresh = True
+else:
+    needs_refresh = True
+
+if needs_refresh:
+    ttl = int(os.environ.get("PAIR_TTL_MIN", "30"))
+    data["pair_code"] = secrets.token_urlsafe(10)
+    data["pair_code_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(minutes=ttl)
+    ).isoformat().replace("+00:00", "Z")
+    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print("true")
+else:
+    print("false")
+PY
+)"
+
+if [[ "${PAIRING_REFRESHED}" == "true" ]] && [[ "${QUIET}" != "true" ]]; then
+  echo "Refreshed pairing code in: ${PAIRING_FILE}"
+fi
+
+PAYLOAD_JSON="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+p = Path(os.environ["PAIRING_PATH"])
+data = json.loads(p.read_text(encoding="utf-8"))
 print(
     json.dumps(
         {

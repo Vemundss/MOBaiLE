@@ -334,6 +334,86 @@ printf "stub-qr" > "${{out_path}}"
     assert args_log.read_text(encoding="utf-8").strip() == "--quiet --no-preview"
 
 
+def test_mobaile_pair_refreshes_expired_pair_code(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    scripts_dir = repo / "scripts"
+    fake_bin = tmp_path / "bin"
+    backend_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    fake_bin.mkdir(parents=True)
+
+    (backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://127.0.0.1:8000","server_urls":["http://127.0.0.1:8000"],"session_id":"iphone-app","pair_code":"expired-1234","pair_code_expires_at":"2000-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    (scripts_dir / "pairing_qr.sh").write_text(
+        (PROJECT_ROOT / "scripts" / "pairing_qr.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (scripts_dir / "pairing_qr.sh").chmod(0o755)
+
+    (fake_bin / "uv").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import subprocess
+            import sys
+
+            args = sys.argv[1:]
+            if args[:2] == ["run", "python"]:
+                raise SystemExit(subprocess.call([sys.executable] + args[2:]))
+            raise SystemExit(f"unsupported uv invocation: {args}")
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "uv").chmod(0o755)
+    (fake_bin / "qrencode").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            out_path=""
+            while [[ $# -gt 0 ]]; do
+              case "$1" in
+                -o)
+                  out_path="$2"
+                  shift 2
+                  ;;
+                *)
+                  shift
+                  ;;
+              esac
+            done
+
+            printf "stub-qr" > "${out_path}"
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "qrencode").chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "pair"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_SKIP_OPEN": "1",
+            "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Phone pairing: Ready" in result.stdout
+    updated = (backend_dir / "pairing.json").read_text(encoding="utf-8")
+    assert '"pair_code": "expired-1234"' not in updated
+
+
 def test_mobaile_update_check_reports_available_update(tmp_path: Path):
     repo, author, shared_env = create_update_checkout(tmp_path)
 
