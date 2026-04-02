@@ -110,6 +110,7 @@ def test_mobaile_status_reports_running_summary(tmp_path: Path):
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_TEST_SERVICE_STATE": "running",
             "MOBAILE_SKIP_OPEN": "1",
         },
@@ -150,6 +151,7 @@ def test_mobaile_labels_public_url_in_status_and_config(tmp_path: Path):
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_TEST_SERVICE_STATE": "running",
             "MOBAILE_SKIP_OPEN": "1",
         },
@@ -162,6 +164,7 @@ def test_mobaile_labels_public_url_in_status_and_config(tmp_path: Path):
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_SKIP_OPEN": "1",
         },
         capture_output=True,
@@ -189,6 +192,7 @@ def test_mobaile_pair_prints_qr_path_when_open_is_skipped(tmp_path: Path):
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_SKIP_OPEN": "1",
             "MOBAILE_TEST_PAIRING_QR": str(backend_dir / "pairing-qr.png"),
         },
@@ -215,6 +219,7 @@ def test_mobaile_status_does_not_report_ready_for_expired_pairing(tmp_path: Path
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_TEST_SERVICE_STATE": "running",
             "MOBAILE_SKIP_OPEN": "1",
         },
@@ -268,6 +273,7 @@ EOF
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_SKIP_OPEN": "1",
         },
         capture_output=True,
@@ -321,6 +327,7 @@ printf "stub-qr" > "${{out_path}}"
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_SKIP_OPEN": "1",
         },
         capture_output=True,
@@ -400,6 +407,7 @@ def test_mobaile_pair_refreshes_expired_pair_code(tmp_path: Path):
         env={
             **os.environ,
             "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_SKIP_OPEN": "1",
             "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
         },
@@ -412,6 +420,51 @@ def test_mobaile_pair_refreshes_expired_pair_code(tmp_path: Path):
     assert "Phone pairing: Ready" in result.stdout
     updated = (backend_dir / "pairing.json").read_text(encoding="utf-8")
     assert '"pair_code": "expired-1234"' not in updated
+
+
+def test_mobaile_pair_prefers_runtime_backend_when_service_is_installed(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    runtime_backend_dir = tmp_path / "home-runtime"
+    home = tmp_path / "home"
+    backend_dir.mkdir(parents=True)
+    runtime_backend_dir.mkdir(parents=True)
+
+    (backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://repo.example:8000","session_id":"iphone-app","pair_code":"repo-code","pair_code_expires_at":"2999-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    (runtime_backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://runtime.example:8000","session_id":"iphone-app","pair_code":"runtime-code","pair_code_expires_at":"2999-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+
+    if platform.system() == "Darwin":
+        marker = home / "Library" / "LaunchAgents" / "com.mobile.voiceagent.backend.plist"
+    else:
+        marker = home / ".config" / "systemd" / "user" / "mobaile-backend.service"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+
+    qr_path = runtime_backend_dir / "pairing-qr.png"
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "pair"],
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_SKIP_OPEN": "1",
+            "MOBAILE_TEST_RUNTIME_BACKEND_DIR": str(runtime_backend_dir),
+            "MOBAILE_TEST_PAIRING_QR": str(qr_path),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert f"Pairing QR: {qr_path}" in result.stdout
+    assert "URL: http://runtime.example:8000" in result.stdout
 
 
 def test_mobaile_update_check_reports_available_update(tmp_path: Path):

@@ -154,6 +154,37 @@ service_install_preference() {
   esac
 }
 
+runtime_backend_dir() {
+  if [[ -n "${MOBAILE_TEST_RUNTIME_BACKEND_DIR:-}" ]]; then
+    printf "%s\n" "${MOBAILE_TEST_RUNTIME_BACKEND_DIR}"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin) printf "%s\n" "${HOME}/Library/Application Support/MOBaiLE/backend-runtime" ;;
+    Linux) printf "%s\n" "${HOME}/.local/share/MOBaiLE/backend-runtime" ;;
+    *) printf "\n" ;;
+  esac
+}
+
+active_backend_dir() {
+  local repo_root="$1"
+  local runtime_dir
+
+  if [[ -n "${MOBAILE_TEST_ACTIVE_BACKEND_DIR:-}" ]]; then
+    printf "%s\n" "${MOBAILE_TEST_ACTIVE_BACKEND_DIR}"
+    return
+  fi
+
+  runtime_dir="$(runtime_backend_dir)"
+  if [[ -n "${runtime_dir}" ]] && [[ -d "${runtime_dir}" ]] && [[ "$(service_install_preference)" == "yes" ]]; then
+    printf "%s\n" "${runtime_dir}"
+    return
+  fi
+
+  printf "%s\n" "${repo_root}/backend"
+}
+
 git_checkout_or_fail() {
   local repo_root="$1"
   if ! command -v git >/dev/null 2>&1; then
@@ -342,10 +373,14 @@ open_file_if_possible() {
 
 status_command() {
   local repo_root="$1"
-  local backend_dir="${repo_root}/backend"
-  local env_file="${backend_dir}/.env"
-  local pairing_file="${backend_dir}/pairing.json"
+  local backend_dir
+  local env_file
+  local pairing_file
   local security_mode phone_access_mode public_server_url server_url
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
 
   security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
   phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
@@ -371,10 +406,12 @@ EOF
 
 pair_command() {
   local repo_root="$1"
-  local backend_dir="${repo_root}/backend"
-  local pairing_file="${backend_dir}/pairing.json"
+  local backend_dir
+  local pairing_file
   local qr_path
 
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  pairing_file="${backend_dir}/pairing.json"
   qr_path="$(pairing_qr_path "${backend_dir}")"
 
   if [[ -n "${MOBAILE_TEST_PAIRING_QR:-}" ]]; then
@@ -392,6 +429,10 @@ pair_command() {
       exit 1
     fi
 
+    MOBAILE_BACKEND_DIR="${backend_dir}" \
+    MOBAILE_PAIRING_FILE="${pairing_file}" \
+    MOBAILE_PAIRING_QR_OUT="${qr_path}" \
+    MOBAILE_QR_PYTHON_ENV_DIR="${backend_dir}" \
     bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}" --quiet --no-preview
   fi
 
@@ -424,11 +465,15 @@ delegate_service_command() {
 
 config_command() {
   local repo_root="$1"
-  local backend_dir="${repo_root}/backend"
-  local env_file="${backend_dir}/.env"
-  local pairing_file="${backend_dir}/pairing.json"
+  local checkout_backend_dir="${repo_root}/backend"
+  local backend_dir
+  local env_file
+  local pairing_file
   local qr_path service_script security_mode phone_access_mode public_server_url api_token server_url
 
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
   qr_path="$(pairing_qr_path "${backend_dir}")"
   service_script="$(service_script_path "${repo_root}")"
   security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
@@ -441,7 +486,8 @@ config_command() {
 MOBaiLE configuration
 
 Repo root: ${repo_root}
-Backend dir: ${backend_dir}
+Checkout backend dir: ${checkout_backend_dir}
+Active backend dir: ${backend_dir}
 Env file: ${env_file} $( [[ -f "${env_file}" ]] && printf "(present)" || printf "(missing)" )
 Pairing file: ${pairing_file} $( [[ -f "${pairing_file}" ]] && printf "(present)" || printf "(missing)" )
 Pairing QR image: ${qr_path} $( [[ -f "${qr_path}" ]] && printf "(present)" || printf "(missing)" )

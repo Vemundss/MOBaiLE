@@ -218,6 +218,28 @@ service_script_path() {
   esac
 }
 
+runtime_backend_dir() {
+  case "$(uname -s)" in
+    Darwin) printf "%s\n" "${HOME}/Library/Application Support/MOBaiLE/backend-runtime" ;;
+    Linux) printf "%s\n" "${HOME}/.local/share/MOBaiLE/backend-runtime" ;;
+    *) printf "%s\n" "${CHECKOUT}/backend" ;;
+  esac
+}
+
+effective_qr_backend_dir() {
+  if [[ "${BACKGROUND_SERVICE}" == "yes" ]]; then
+    printf "%s\n" "$(runtime_backend_dir)"
+    return
+  fi
+  printf "%s\n" "${CHECKOUT}/backend"
+}
+
+effective_qr_path() {
+  local backend_dir
+  backend_dir="$(effective_qr_backend_dir)"
+  printf "%s\n" "${backend_dir}/pairing-qr.png"
+}
+
 build_reexec_args() {
   local args=(
     --checkout "${CHECKOUT_DEFAULT}"
@@ -448,7 +470,9 @@ run_wizard() {
 
 print_product_summary() {
   local heading="$1"
-  local qr_path="${CHECKOUT}/backend/pairing-qr.png"
+  local qr_path
+
+  qr_path="$(effective_qr_path)"
 
   echo
   echo "${heading}"
@@ -506,7 +530,9 @@ print_dry_run_summary() {
 }
 
 open_qr_if_possible() {
-  local qr_path="${CHECKOUT}/backend/pairing-qr.png"
+  local qr_path
+
+  qr_path="$(effective_qr_path)"
 
   if [[ "${MOBAILE_SKIP_OPEN:-0}" == "1" ]]; then
     return
@@ -571,7 +597,11 @@ run_install() {
   fi
 
   step "Preparing pairing QR"
-  bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
+  if [[ "${BACKGROUND_SERVICE}" == "yes" ]] && [[ -n "${service_script}" ]]; then
+    MOBAILE_SKIP_OPEN=1 bash "${CHECKOUT}/scripts/mobaile" pair >/dev/null
+  else
+    bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
+  fi
   open_qr_if_possible
   print_product_summary "Done."
 }

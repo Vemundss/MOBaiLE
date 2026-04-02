@@ -3,8 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PAIRING_FILE="${REPO_ROOT}/backend/pairing.json"
-OUT_FILE="${REPO_ROOT}/backend/pairing-qr.png"
+BACKEND_DIR="${MOBAILE_BACKEND_DIR:-${REPO_ROOT}/backend}"
+PAIRING_FILE="${MOBAILE_PAIRING_FILE:-${BACKEND_DIR}/pairing.json}"
+OUT_FILE="${MOBAILE_PAIRING_QR_OUT:-${BACKEND_DIR}/pairing-qr.png}"
+PYTHON_ENV_DIR="${MOBAILE_QR_PYTHON_ENV_DIR:-${BACKEND_DIR}}"
 FORMAT="url"
 QR_SCALE="12"
 QUIET="false"
@@ -190,7 +192,7 @@ fi
 
 if ensure_uv_available; then
   (
-    cd "${REPO_ROOT}/backend"
+    cd "${PYTHON_ENV_DIR}"
     uv run python - "${OUT_FILE}" "${PAYLOAD}" "${QR_SCALE}" <<'PY'
 import sys
 from pathlib import Path

@@ -52,6 +52,57 @@ ensure_uv_available() {
   exit 1
 }
 
+merge_runtime_pairing_state() {
+  local source_pairing="${BACKEND_DIR}/pairing.json"
+  local runtime_pairing="${RUNTIME_DIR}/pairing.json"
+
+  if [[ ! -f "${source_pairing}" ]]; then
+    return
+  fi
+
+  python3 - "${source_pairing}" "${runtime_pairing}" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+source_path = Path(sys.argv[1])
+runtime_path = Path(sys.argv[2])
+
+
+def load(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+source_payload = load(source_path)
+runtime_payload = load(runtime_path)
+if not source_payload and not runtime_payload:
+    raise SystemExit(0)
+
+merged = dict(runtime_payload)
+for key in ("session_id", "pair_code", "pair_code_expires_at", "server_url", "server_urls"):
+    if key in source_payload:
+        merged[key] = source_payload[key]
+
+if "paired_clients" in runtime_payload:
+    merged["paired_clients"] = runtime_payload["paired_clients"]
+elif "paired_clients" in source_payload:
+    merged["paired_clients"] = source_payload["paired_clients"]
+
+runtime_path.parent.mkdir(parents=True, exist_ok=True)
+runtime_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+PY
+
+  rm -f "${RUNTIME_DIR}/pairing-qr.png"
+}
+
 sync_runtime() {
   ensure_uv_available
   mkdir -p "${RUNTIME_DIR}"
@@ -62,6 +113,8 @@ sync_runtime() {
       --exclude "sandbox" \
       --exclude "data" \
       --exclude "logs" \
+      --exclude "pairing.json" \
+      --exclude "pairing-qr.png" \
       "${BACKEND_DIR}/" "${RUNTIME_DIR}/"
   else
     echo "rsync not found; using cp fallback" >&2
@@ -71,6 +124,8 @@ sync_runtime() {
   if [[ -f "${BACKEND_DIR}/.env" ]]; then
     cp "${BACKEND_DIR}/.env" "${RUNTIME_DIR}/.env"
   fi
+
+  merge_runtime_pairing_state
 
   local sync_output=""
   if sync_output="$(

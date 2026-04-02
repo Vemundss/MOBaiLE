@@ -652,6 +652,8 @@ def test_slash_command_catalog_includes_model_and_effort_for_codex(monkeypatch, 
     payload = catalog.json()
     ids = [item["id"] for item in payload]
     assert ids == ["cwd", "executor", "model", "effort"]
+    assert payload[2]["title"] == "Model Override"
+    assert payload[3]["argument_options"] == ["backend-default", "minimal", "low", "medium", "high", "xhigh"]
 
     model_response = client.post(
         "/v1/sessions/sess-context/slash-commands/model",
@@ -668,6 +670,99 @@ def test_slash_command_catalog_includes_model_and_effort_for_codex(monkeypatch, 
     )
     assert effort_response.status_code == 200
     assert effort_response.json()["session_context"]["codex_reasoning_effort"] == "high"
+
+
+def test_slash_commands_follow_runtime_setting_registry(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CODEX_BINARY": str(fake_codex),
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+    module = importlib.import_module("app.main")
+    schemas = importlib.import_module("app.models.schemas")
+
+    def fake_runtime_executor_descriptors():
+        return [
+            schemas.RuntimeExecutorDescriptor(
+                id="local",
+                title="Local fallback",
+                kind="internal",
+                available=True,
+                default=False,
+                internal_only=True,
+            ),
+            schemas.RuntimeExecutorDescriptor(
+                id="codex",
+                title="Codex",
+                kind="agent",
+                available=True,
+                default=True,
+                settings=[
+                    schemas.RuntimeSettingDescriptor(
+                        id="model",
+                        title="Model",
+                        kind="enum",
+                        allow_custom=True,
+                        value="gpt-5.4",
+                        options=["gpt-5.4", "gpt-5.4-mini"],
+                    ),
+                    schemas.RuntimeSettingDescriptor(
+                        id="reasoning_effort",
+                        title="Reasoning Effort",
+                        kind="enum",
+                        allow_custom=False,
+                        value="medium",
+                        options=["low", "medium", "high"],
+                    ),
+                    schemas.RuntimeSettingDescriptor(
+                        id="verbosity",
+                        title="Verbosity",
+                        kind="enum",
+                        allow_custom=False,
+                        value="concise",
+                        options=["concise", "detailed"],
+                    ),
+                ],
+            ),
+        ]
+
+    monkeypatch.setattr(
+        module.RuntimeEnvironment,
+        "runtime_executor_descriptors",
+        lambda self: fake_runtime_executor_descriptors(),
+    )
+
+    catalog = client.get(
+        "/v1/slash-commands",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert catalog.status_code == 200
+    payload = catalog.json()
+    assert [item["id"] for item in payload] == ["cwd", "executor", "model", "effort", "verbosity"]
+    assert payload[-1]["usage"] == "/verbosity [backend-default|concise|detailed]"
+
+    response = client.post(
+        "/v1/sessions/sess-context/slash-commands/verbosity",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"arguments": "detailed"},
+    )
+    assert response.status_code == 200
+    runtime_settings = {
+        (item["executor"], item["id"]): item["value"] for item in response.json()["session_context"]["runtime_settings"]
+    }
+    assert runtime_settings[("codex", "verbosity")] == "detailed"
 
 
 def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):

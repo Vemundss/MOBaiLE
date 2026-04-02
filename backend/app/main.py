@@ -689,6 +689,158 @@ def _runtime_setting_descriptor_map() -> dict[tuple[str, str], RuntimeSettingDes
     return descriptors
 
 
+def _runtime_executor_titles() -> dict[str, str]:
+    return {executor.id: executor.title for executor in ENV.runtime_executor_descriptors()}
+
+
+def _available_runtime_setting_entries() -> list[tuple[str, list[tuple[str, RuntimeSettingDescriptor]]]]:
+    entries: dict[str, list[tuple[str, RuntimeSettingDescriptor]]] = {}
+    order: list[str] = []
+    for executor in ENV.runtime_executor_descriptors():
+        if executor.internal_only or not executor.available:
+            continue
+        for setting in executor.settings or []:
+            setting_id = _normalized_runtime_setting_id(setting.id)
+            if setting_id is None:
+                continue
+            if setting_id not in entries:
+                entries[setting_id] = []
+                order.append(setting_id)
+            entries[setting_id].append((executor.id, setting))
+    return [(setting_id, entries[setting_id]) for setting_id in order]
+
+
+def _runtime_setting_supported_executors(setting_id: str) -> list[str]:
+    normalized_setting_id = _normalized_runtime_setting_id(setting_id)
+    if normalized_setting_id is None:
+        return []
+    for candidate_setting_id, descriptors in _available_runtime_setting_entries():
+        if candidate_setting_id == normalized_setting_id:
+            return [executor for executor, _ in descriptors]
+    return []
+
+
+def _runtime_setting_slash_command_id(setting_id: str) -> str:
+    normalized_setting_id = _normalized_runtime_setting_id(setting_id) or setting_id
+    if normalized_setting_id == "reasoning_effort":
+        return "effort"
+    command_id = normalized_setting_id.replace("_", "-")
+    if command_id in {"cwd", "executor"}:
+        return f"runtime-{command_id}"
+    return command_id
+
+
+def _slash_command_runtime_setting_id(command_id: str) -> str | None:
+    normalized_command = _normalized_optional_text(command_id)
+    if normalized_command is None:
+        return None
+    lowered_command = normalized_command.lower()
+    for setting_id, _ in _available_runtime_setting_entries():
+        if _runtime_setting_slash_command_id(setting_id) == lowered_command:
+            return setting_id
+    return None
+
+
+def _runtime_setting_option_list(descriptors: list[tuple[str, RuntimeSettingDescriptor]]) -> list[str]:
+    options: list[str] = []
+    seen: set[str] = set()
+    for _, descriptor in descriptors:
+        for option in descriptor.options:
+            lowered = option.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            options.append(option)
+    return options
+
+
+def _runtime_setting_allows_custom(descriptors: list[tuple[str, RuntimeSettingDescriptor]]) -> bool:
+    return any(descriptor.allow_custom for _, descriptor in descriptors)
+
+
+def _human_join(values: list[str]) -> str:
+    cleaned = [value for value in values if value]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} or {cleaned[1]}"
+    return f"{', '.join(cleaned[:-1])}, or {cleaned[-1]}"
+
+
+def _runtime_setting_usage(command_id: str, options: list[str], *, allow_custom: bool, placeholder: str) -> str:
+    if allow_custom:
+        return f"/{command_id} [backend-default|{placeholder}]"
+    usage_options = ["backend-default", *options] if options else ["backend-default"]
+    return f"/{command_id} [{'|'.join(usage_options)}]"
+
+
+def _runtime_setting_command_metadata(
+    setting_id: str,
+    descriptors: list[tuple[str, RuntimeSettingDescriptor]],
+) -> tuple[str, str, list[str], str, str]:
+    normalized_setting_id = _normalized_runtime_setting_id(setting_id) or setting_id
+    if normalized_setting_id == "model":
+        return (
+            "Model Override",
+            "Show or override the active agent model for this session.",
+            ["runtime-model"],
+            "sparkles",
+            "model-id",
+        )
+    if normalized_setting_id == "reasoning_effort":
+        return (
+            "Reasoning Effort",
+            "Show or override the active executor reasoning effort for this session.",
+            ["thinking", "reasoning", "reasoning-effort"],
+            "brain.head.profile",
+            "effort",
+        )
+
+    primary_descriptor = descriptors[0][1]
+    title = primary_descriptor.title.strip() or normalized_setting_id.replace("_", " ").title()
+    description = f"Show or override the active {title.lower()} for this session."
+    return (title, description, [], "slider.horizontal.3", normalized_setting_id.replace("_", "-"))
+
+
+def _runtime_setting_title_text(setting_id: str, descriptor: RuntimeSettingDescriptor | None = None) -> str:
+    if descriptor is not None and descriptor.title.strip():
+        return descriptor.title.strip().lower()
+    normalized_setting_id = _normalized_runtime_setting_id(setting_id) or setting_id
+    for candidate_setting_id, descriptors in _available_runtime_setting_entries():
+        if candidate_setting_id == normalized_setting_id and descriptors:
+            candidate_title = descriptors[0][1].title.strip()
+            if candidate_title:
+                return candidate_title.lower()
+            break
+    return normalized_setting_id.replace("_", " ")
+
+
+def _runtime_setting_slash_commands() -> list[SlashCommandDescriptor]:
+    commands: list[SlashCommandDescriptor] = []
+    for setting_id, descriptors in _available_runtime_setting_entries():
+        command_id = _runtime_setting_slash_command_id(setting_id)
+        title, description, aliases, symbol, placeholder = _runtime_setting_command_metadata(setting_id, descriptors)
+        options = _runtime_setting_option_list(descriptors)
+        allow_custom = _runtime_setting_allows_custom(descriptors)
+        commands.append(
+            SlashCommandDescriptor(
+                id=command_id,
+                title=title,
+                description=description,
+                usage=_runtime_setting_usage(command_id, options, allow_custom=allow_custom, placeholder=placeholder),
+                group="Runtime",
+                aliases=aliases,
+                symbol=symbol,
+                argument_kind="text" if allow_custom or not options else "enum",
+                argument_options=[] if allow_custom else ["backend-default", *options],
+                argument_placeholder=placeholder,
+            )
+        )
+    return commands
+
+
 def _canonical_runtime_setting_option(value: str, options: list[str]) -> str | None:
     normalized = value.strip()
     if not normalized:
@@ -800,6 +952,17 @@ def _serialized_runtime_settings(values: dict[tuple[str, str], str]) -> str | No
         for executor, setting_id in sorted(values)
     ]
     return json.dumps(payload, separators=(",", ":"))
+
+
+def _session_context_runtime_settings_map(context: SessionContextResponse) -> dict[tuple[str, str], str]:
+    values: dict[tuple[str, str], str] = {}
+    for item in context.runtime_settings:
+        setting_id = _normalized_runtime_setting_id(item.id)
+        setting_value = _normalized_optional_text(item.value)
+        if setting_id is None or setting_value is None:
+            continue
+        values[(item.executor, setting_id)] = setting_value
+    return values
 
 
 def _session_context_response(session_id: str) -> SessionContextResponse:
@@ -941,24 +1104,11 @@ def _validated_optional_codex_reasoning_effort(value: str | None) -> str | None:
     return normalized
 
 
-def _effective_codex_model(context: SessionContextResponse) -> str | None:
-    return _normalized_optional_text(context.codex_model) or ENV.codex_model_override or None
-
-
-def _effective_codex_reasoning_effort(context: SessionContextResponse) -> str | None:
-    return _validated_optional_codex_reasoning_effort(context.codex_reasoning_effort) or ENV.codex_reasoning_effort_override or None
-
-
-def _effective_claude_model(context: SessionContextResponse) -> str | None:
-    return _normalized_optional_text(context.claude_model) or ENV.claude_model_override or None
-
-
 def _slash_command_catalog() -> list[SlashCommandDescriptor]:
     executor_options = _slash_command_executor_options()
     executor_usage = "/executor"
     if executor_options:
         executor_usage = f"/executor [{'|'.join(executor_options)}]"
-    codex_effort_options = ["backend-default", *CODEX_REASONING_EFFORT_OPTIONS]
 
     commands = [
         SlashCommandDescriptor(
@@ -985,39 +1135,7 @@ def _slash_command_catalog() -> list[SlashCommandDescriptor]:
             argument_placeholder="executor",
         ),
     ]
-
-    if any(option in {"codex", "claude"} for option in executor_options):
-        commands.append(
-            SlashCommandDescriptor(
-                id="model",
-                title="Model Override",
-                description="Show or override the active agent model for this session.",
-                usage="/model [backend-default|model-id]",
-                group="Runtime",
-                aliases=["runtime-model"],
-                symbol="sparkles",
-                argument_kind="text",
-                argument_placeholder="model-id",
-            )
-        )
-
-    if "codex" in executor_options:
-        commands.append(
-            SlashCommandDescriptor(
-                id="effort",
-                title="Codex Effort",
-                description="Show or override the Codex reasoning effort for this session.",
-                usage="/effort [backend-default|minimal|low|medium|high|xhigh]",
-                group="Runtime",
-                aliases=["thinking", "reasoning"],
-                symbol="brain.head.profile",
-                argument_kind="enum",
-                argument_options=codex_effort_options,
-                argument_placeholder="effort",
-            )
-        )
-
-    return commands
+    return [*commands, *_runtime_setting_slash_commands()]
 
 
 def _slash_command_executor_options() -> list[str]:
@@ -1082,62 +1200,54 @@ def _execute_slash_command(
             session_context=context,
         )
 
-    if normalized_command == "model":
+    runtime_setting_id = _slash_command_runtime_setting_id(normalized_command)
+    if runtime_setting_id is not None:
         context = _session_context_response(session_id)
         if not normalized_arguments:
             return SlashCommandExecutionResponse(
-                command_id="model",
-                message=_model_status_message(context),
+                command_id=normalized_command,
+                message=_runtime_setting_status_message(context, runtime_setting_id),
                 session_context=context,
             )
 
-        normalized_model = normalized_arguments
-        if normalized_model.lower() in {"backend-default", "default", "auto"}:
-            normalized_model = ""
-
-        if context.executor == "local":
-            raise HTTPException(status_code=400, detail="model overrides apply only to codex or claude executors")
-
-        if context.executor == "codex":
-            context = _update_session_context(
-                session_id,
-                codex_model=_normalized_optional_text(normalized_model),
-            )
-        else:
-            context = _update_session_context(
-                session_id,
-                claude_model=_normalized_optional_text(normalized_model),
+        if (context.executor, runtime_setting_id) not in _runtime_setting_descriptor_map():
+            supported_titles = [
+                _runtime_executor_titles().get(executor, executor)
+                for executor in _runtime_setting_supported_executors(runtime_setting_id)
+            ]
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{_runtime_setting_title_text(runtime_setting_id)} overrides apply only when "
+                    f"the session executor is {_human_join(supported_titles)}"
+                ),
             )
 
-        return SlashCommandExecutionResponse(
-            command_id="model",
-            message=_model_status_message(context),
-            session_context=context,
+        requested_value = normalized_arguments
+        if requested_value.lower() in {"backend-default", "default", "auto"}:
+            requested_value = ""
+
+        next_runtime_settings = _session_context_runtime_settings_map(context)
+        validated_value = _validated_runtime_setting_value(
+            context.executor,
+            runtime_setting_id,
+            requested_value,
         )
-
-    if normalized_command == "effort":
-        context = _session_context_response(session_id)
-        if not normalized_arguments:
-            return SlashCommandExecutionResponse(
-                command_id="effort",
-                message=_codex_effort_status_message(context),
-                session_context=context,
-            )
-
-        if context.executor != "codex":
-            raise HTTPException(status_code=400, detail="codex effort overrides require the codex executor")
-
-        requested_effort = normalized_arguments.lower()
-        if requested_effort in {"backend-default", "default", "auto"}:
-            requested_effort = ""
-
+        key = (context.executor, runtime_setting_id)
+        if validated_value is None:
+            next_runtime_settings.pop(key, None)
+        else:
+            next_runtime_settings[key] = validated_value
         context = _update_session_context(
             session_id,
-            codex_reasoning_effort=_validated_optional_codex_reasoning_effort(requested_effort),
+            runtime_settings=[
+                SessionRuntimeSettingValue(executor=executor, id=setting_id, value=value)
+                for (executor, setting_id), value in sorted(next_runtime_settings.items())
+            ],
         )
         return SlashCommandExecutionResponse(
-            command_id="effort",
-            message=_codex_effort_status_message(context),
+            command_id=normalized_command,
+            message=_runtime_setting_status_message(context, runtime_setting_id),
             session_context=context,
         )
 
@@ -1156,21 +1266,32 @@ def _executor_status_message(context: SessionContextResponse) -> str:
     return f"Executor: {context.executor}. Available: {options}."
 
 
-def _model_status_message(context: SessionContextResponse) -> str:
-    if context.executor == "codex":
-        model = _effective_codex_model(context) or "backend default"
-        return f"Codex model: {model}."
-    if context.executor == "claude":
-        model = _effective_claude_model(context) or "backend default"
-        return f"Claude model: {model}."
-    return "Model overrides apply when the session executor is codex or claude."
+def _runtime_setting_status_message(context: SessionContextResponse, setting_id: str) -> str:
+    normalized_setting_id = _normalized_runtime_setting_id(setting_id)
+    if normalized_setting_id is None:
+        return "Runtime setting is not available."
 
+    executor_titles = _runtime_executor_titles()
+    descriptor = _runtime_setting_descriptor_map().get((context.executor, normalized_setting_id))
+    if descriptor is None:
+        supported_titles = [
+            executor_titles.get(executor, executor) for executor in _runtime_setting_supported_executors(normalized_setting_id)
+        ]
+        if not supported_titles:
+            return "Runtime setting is not available."
+        return (
+            f"{_runtime_setting_title_text(normalized_setting_id)} overrides apply when "
+            f"the session executor is {_human_join(supported_titles)}."
+        )
 
-def _codex_effort_status_message(context: SessionContextResponse) -> str:
-    if context.executor != "codex":
-        return "Codex effort overrides apply when the session executor is codex."
-    effort = _effective_codex_reasoning_effort(context) or "backend default"
-    return f"Codex reasoning effort: {effort}."
+    value = _session_context_runtime_settings_map(context).get((context.executor, normalized_setting_id))
+    if value is None:
+        if context.executor == "codex" and normalized_setting_id == "reasoning_effort":
+            value = _validated_optional_codex_reasoning_effort(descriptor.value)
+        else:
+            value = _normalized_optional_text(descriptor.value)
+    executor_title = executor_titles.get(context.executor, context.executor.title())
+    return f"{executor_title} {_runtime_setting_title_text(normalized_setting_id, descriptor)}: {value or 'backend default'}."
 
 
 def _fetch_today_calendar_events() -> list[AgendaItem]:
