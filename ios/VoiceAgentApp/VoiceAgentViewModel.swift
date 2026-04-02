@@ -199,6 +199,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private let threadStore = ChatThreadStore()
     private let defaults = UserDefaults.standard
     private let draftAttachmentDirectory: URL
+    private var pairedRefreshToken: String = ""
     private var lastSubmittedUserMessage: ConversationMessage?
     private var hasSeenMicrophonePrimer = false
     private var didBootstrapSession = false
@@ -215,6 +216,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var lastHydratedSessionContextServerURL: String?
     private var voiceModeThreadID: UUID?
     private var shouldResumeVoiceModeAfterSpeech = false
+    private var credentialRefreshTask: Task<String?, Error>?
 
     private static let defaultCodexReasoningEffortOptions = ["minimal", "low", "medium", "high", "xhigh"]
     private static let defaultCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
@@ -285,6 +287,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             Task { @MainActor in
                 self?.promoteResolvedServerURL(resolvedURL)
             }
+        }
+        client.onUnauthorizedRecovery = { [weak self] resolvedURL in
+            guard let self else { return nil }
+            return try await self.silentlyRefreshPairingCredentials(preferredServerURL: resolvedURL)
         }
         loadSettings()
         loadThreads()
@@ -2459,8 +2465,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             KeychainStore.save(value: apiToken, service: "MOBaiLE", account: "api_token")
             defaults.removeObject(forKey: DefaultsKey.apiToken)
+            if !pairedRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.save(value: pairedRefreshToken, service: "MOBaiLE", account: "refresh_token")
+            } else {
+                KeychainStore.delete(service: "MOBaiLE", account: "refresh_token")
+            }
         } else {
             KeychainStore.delete(service: "MOBaiLE", account: "api_token")
+            KeychainStore.delete(service: "MOBaiLE", account: "refresh_token")
             defaults.removeObject(forKey: DefaultsKey.apiToken)
         }
         defaults.set(sessionID, forKey: DefaultsKey.sessionID)
@@ -2493,6 +2505,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         guard !normalizedServerURL.isEmpty, !apiToken.isEmpty, !sessionID.isEmpty else { return }
         didBootstrapSession = true
         do {
+            await ensureRefreshCredentialIfPossible()
+            if needsConnectionRepair {
+                return
+            }
             _ = try? await refreshRuntimeConfiguration()
             let context = try await refreshSessionContextFromBackend()
             let restoredFromContext = (try? await restoreLatestRunFromSessionContext(context)) ?? false
@@ -2543,6 +2559,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     func refreshSessionPresenceFromBackendIfPossible() async {
         guard hasConfiguredConnection else { return }
         do {
+            await ensureRefreshCredentialIfPossible()
+            if needsConnectionRepair {
+                return
+            }
             let context = try await refreshSessionContextFromBackend()
             _ = try? await restoreLatestRunFromSessionContext(context)
         } catch {
@@ -3019,8 +3039,20 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         serverURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
+    private var normalizedRefreshToken: String {
+        pairedRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var hasConfiguredConnection: Bool {
         !normalizedServerURL.isEmpty && !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasPairedRefreshCredential: Bool {
+        !normalizedRefreshToken.isEmpty
+    }
+
+    var connectionCandidateServerURLsForTesting: [String] {
+        connectionCandidateServerURLs
     }
 
     var needsConnectionRepair: Bool {
@@ -3035,9 +3067,97 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         connectionRepairState?.message ?? "Open the latest pairing QR on your computer and scan it again here."
     }
 
+    func applyPairedClientCredentials(
+        _ response: PairExchangeResponse,
+        fallbackPrimaryServerURL: String,
+        additionalServerURLs: [String] = [],
+        statusText statusOverride: String? = nil
+    ) {
+        apiToken = response.apiToken
+        if let refreshToken = response.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !refreshToken.isEmpty {
+            pairedRefreshToken = refreshToken
+        }
+        sessionID = response.sessionId
+        applyAdvertisedServerURLs(
+            primaryServerURL: response.serverURL ?? fallbackPrimaryServerURL,
+            advertisedServerURLs: (response.serverURLs ?? []) + additionalServerURLs,
+            persist: false
+        )
+        backendSecurityMode = response.securityMode
+        clearConnectionRepairState()
+        persistSettings()
+        errorText = ""
+        if let statusOverride, !statusOverride.isEmpty {
+            statusText = statusOverride
+        }
+    }
+
+    func ensureRefreshCredentialIfPossible() async {
+        guard hasConfiguredConnection, normalizedRefreshToken.isEmpty else { return }
+        do {
+            _ = try await silentlyRefreshPairingCredentials(preferredServerURL: normalizedServerURL)
+        } catch let apiError as APIError where apiError.statusCode == 403 {
+            return
+        } catch {
+            if registerConnectionRepairIfNeeded(from: error) != nil {
+                statusText = "Connection needs repair"
+            }
+        }
+    }
+
+    func silentlyRefreshPairingCredentials(preferredServerURL: String? = nil) async throws -> String? {
+        if let credentialRefreshTask {
+            return try await credentialRefreshTask.value
+        }
+
+        let task = Task<String?, Error> { @MainActor in
+            let targetServerURL = preferredServerURL?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                ?? self.normalizedServerURL
+            let currentToken = self.apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let refreshToken = self.normalizedRefreshToken
+            guard !targetServerURL.isEmpty, !currentToken.isEmpty || !refreshToken.isEmpty else {
+                return nil
+            }
+
+            let response = try await self.client.refreshPairingCredentials(
+                serverURL: targetServerURL,
+                refreshToken: refreshToken.isEmpty ? nil : refreshToken,
+                currentToken: currentToken.isEmpty ? nil : currentToken,
+                sessionID: self.sessionID
+            )
+            self.applyPairedClientCredentials(
+                response,
+                fallbackPrimaryServerURL: targetServerURL,
+                additionalServerURLs: self.connectionCandidateServerURLs,
+                statusText: refreshToken.isEmpty ? nil : "Reconnected automatically"
+            )
+            return response.apiToken
+        }
+        credentialRefreshTask = task
+
+        do {
+            let refreshedToken = try await task.value
+            credentialRefreshTask = nil
+            return refreshedToken
+        } catch {
+            credentialRefreshTask = nil
+            if let apiError = error as? APIError, apiError.statusCode == 404 {
+                return nil
+            }
+            if let apiError = error as? APIError, apiError.isMissingOrInvalidRefreshToken {
+                _ = registerConnectionRepairIfNeeded(
+                    from: APIError.httpError(401, #"{"detail":"missing or invalid bearer token"}"#)
+                )
+            }
+            throw error
+        }
+    }
+
     @discardableResult
     func registerConnectionRepairIfNeeded(from error: Error) -> String? {
-        guard let apiError = error as? APIError, apiError.isMissingOrInvalidBearerToken else {
+        guard let apiError = error as? APIError,
+              apiError.isMissingOrInvalidBearerToken || apiError.isMissingOrInvalidRefreshToken else {
             return nil
         }
 
@@ -3875,6 +3995,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             KeychainStore.save(value: value, service: "MOBaiLE", account: "api_token")
             defaults.removeObject(forKey: DefaultsKey.apiToken)
         }
+        if let keychainRefreshToken = KeychainStore.load(service: "MOBaiLE", account: "refresh_token"),
+           !keychainRefreshToken.isEmpty {
+            pairedRefreshToken = keychainRefreshToken
+        }
         if let value = defaults.string(forKey: DefaultsKey.sessionID), !value.isEmpty {
             sessionID = value
         }
@@ -3979,19 +4103,13 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 pairCode: pairCode,
                 sessionID: sessionID ?? self.sessionID
             )
-            self.apiToken = response.apiToken
-            self.sessionID = response.sessionId
-            self.applyAdvertisedServerURLs(
-                primaryServerURL: response.serverURL ?? primaryServerURL,
-                advertisedServerURLs: (response.serverURLs ?? []) + resolvedServerURLs,
-                persist: false
+            self.applyPairedClientCredentials(
+                response,
+                fallbackPrimaryServerURL: primaryServerURL,
+                additionalServerURLs: resolvedServerURLs
             )
-            self.backendSecurityMode = response.securityMode
             _ = try? await self.refreshRuntimeConfiguration()
             _ = try? await self.refreshSessionContextFromBackend()
-            self.clearConnectionRepairState()
-            self.persistSettings()
-            self.errorText = ""
             self.statusText = "Paired successfully (\(response.securityMode))"
             self.pendingPairing = nil
             self.persistActiveThreadSnapshot()

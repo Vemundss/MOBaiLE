@@ -37,6 +37,7 @@ from app.models.schemas import (
     HumanUnblockRequest,
     PairExchangeRequest,
     PairExchangeResponse,
+    PairRefreshRequest,
     RunDiagnostics,
     RunExecutorName,
     RunRecord,
@@ -110,7 +111,7 @@ def health() -> dict[str, str]:
 async def require_api_token(request: Request, call_next):
     if not request.url.path.startswith("/v1/"):
         return await call_next(request)
-    if request.url.path == "/v1/pair/exchange":
+    if request.url.path in {"/v1/pair/exchange", "/v1/pair/refresh"}:
         return await call_next(request)
 
     pairing = _read_pairing_file()
@@ -149,14 +150,31 @@ def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchang
 
         _rotate_pair_code(pairing)
         session_id = payload.session_id or str(pairing.get("session_id", "iphone-app")).strip() or "iphone-app"
-        api_token = _issue_paired_client_token(pairing, session_id=session_id)
-        server_urls = _pairing_server_urls(pairing)
-        return PairExchangeResponse(
+        api_token, refresh_token = _issue_paired_client_credentials(pairing, session_id=session_id)
+        return _pair_credentials_response(
+            pairing,
             api_token=api_token,
+            refresh_token=refresh_token,
             session_id=session_id,
-            security_mode=ENV.security_mode,  # type: ignore[arg-type]
-            server_url=server_urls[0] if server_urls else str(pairing.get("server_url", "")).strip() or None,
-            server_urls=server_urls,
+        )
+
+
+@app.post("/v1/pair/refresh", response_model=PairExchangeResponse)
+def pair_refresh(payload: PairRefreshRequest, request: Request) -> PairExchangeResponse:
+    _enforce_pair_rate_limit(request.client.host if request.client else "unknown")
+    with PAIR_EXCHANGE_LOCK:
+        pairing = _read_pairing_file()
+        api_token, refresh_token, session_id = _refresh_paired_client_credentials(
+            pairing,
+            auth_header=request.headers.get("Authorization", ""),
+            refresh_token=payload.refresh_token,
+            session_id=payload.session_id,
+        )
+        return _pair_credentials_response(
+            pairing,
+            api_token=api_token,
+            refresh_token=refresh_token,
+            session_id=session_id,
         )
 
 
@@ -1386,6 +1404,24 @@ def _rotate_pair_code(payload: dict[str, object]) -> None:
     _write_pairing_file(payload)
 
 
+def _pair_credentials_response(
+    pairing: dict[str, object],
+    *,
+    api_token: str,
+    refresh_token: str,
+    session_id: str,
+) -> PairExchangeResponse:
+    server_urls = _pairing_server_urls(pairing)
+    return PairExchangeResponse(
+        api_token=api_token,
+        refresh_token=refresh_token,
+        session_id=session_id,
+        security_mode=ENV.security_mode,  # type: ignore[arg-type]
+        server_url=server_urls[0] if server_urls else str(pairing.get("server_url", "")).strip() or None,
+        server_urls=server_urls,
+    )
+
+
 def _extract_bearer_token(auth_header: str) -> str:
     prefix = "Bearer "
     if not auth_header.startswith(prefix):
@@ -1412,19 +1448,35 @@ def _paired_client_records(payload: dict[str, object]) -> list[dict[str, str]]:
         records.append(
             {
                 "token_sha256": token_hash,
+                "refresh_token_sha256": str(item.get("refresh_token_sha256", "")).strip(),
                 "session_id": str(item.get("session_id", "")).strip(),
                 "issued_at": str(item.get("issued_at", "")).strip(),
+                "refreshed_at": str(item.get("refreshed_at", "")).strip(),
             }
         )
     return records
 
 
-def _pairing_token_matches(payload: dict[str, object], token: str) -> bool:
+def _paired_client_record_index_for_hashed_token(
+    records: list[dict[str, str]],
+    *,
+    field: str,
+    token: str,
+) -> int | None:
     token_hash = _hash_api_token(token)
-    return any(
-        secrets.compare_digest(record["token_sha256"], token_hash)
-        for record in _paired_client_records(payload)
-    )
+    for index, record in enumerate(records):
+        candidate = record.get(field, "")
+        if candidate and secrets.compare_digest(candidate, token_hash):
+            return index
+    return None
+
+
+def _pairing_token_matches(payload: dict[str, object], token: str) -> bool:
+    return _paired_client_record_index_for_hashed_token(
+        _paired_client_records(payload),
+        field="token_sha256",
+        token=token,
+    ) is not None
 
 
 def _is_authorized_api_token(auth_header: str, pairing: dict[str, object]) -> bool:
@@ -1436,19 +1488,78 @@ def _is_authorized_api_token(auth_header: str, pairing: dict[str, object]) -> bo
     return _pairing_token_matches(pairing, token)
 
 
-def _issue_paired_client_token(payload: dict[str, object], *, session_id: str) -> str:
+def _issue_paired_client_credentials(payload: dict[str, object], *, session_id: str) -> tuple[str, str]:
     token = secrets.token_urlsafe(32)
+    refresh_token = secrets.token_urlsafe(32)
     records = _paired_client_records(payload)
     records.append(
         {
             "token_sha256": _hash_api_token(token),
+            "refresh_token_sha256": _hash_api_token(refresh_token),
             "session_id": session_id,
             "issued_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "refreshed_at": "",
         }
     )
     payload["paired_clients"] = records[-MAX_PAIRED_CLIENT_TOKENS:]
     _write_pairing_file(payload)
-    return token
+    return token, refresh_token
+
+
+def _refresh_paired_client_credentials(
+    payload: dict[str, object],
+    *,
+    auth_header: str,
+    refresh_token: str | None,
+    session_id: str | None,
+) -> tuple[str, str, str]:
+    records = _paired_client_records(payload)
+    normalized_refresh_token = (refresh_token or "").strip()
+    normalized_auth_token = _extract_bearer_token(auth_header)
+
+    if normalized_refresh_token:
+        record_index = _paired_client_record_index_for_hashed_token(
+            records,
+            field="refresh_token_sha256",
+            token=normalized_refresh_token,
+        )
+        if record_index is None:
+            raise HTTPException(status_code=401, detail="missing or invalid refresh token")
+
+        record = records[record_index]
+        next_api_token = secrets.token_urlsafe(32)
+        record["token_sha256"] = _hash_api_token(next_api_token)
+        record["refreshed_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        effective_session_id = record.get("session_id", "").strip() or session_id or "iphone-app"
+        records[record_index] = record
+        payload["paired_clients"] = records[-MAX_PAIRED_CLIENT_TOKENS:]
+        _write_pairing_file(payload)
+        return next_api_token, normalized_refresh_token, effective_session_id
+
+    if not normalized_auth_token:
+        raise HTTPException(status_code=401, detail="missing refresh token")
+    if ENV.api_token and secrets.compare_digest(normalized_auth_token, ENV.api_token):
+        raise HTTPException(status_code=403, detail="refresh bootstrap is only available for paired phones")
+
+    record_index = _paired_client_record_index_for_hashed_token(
+        records,
+        field="token_sha256",
+        token=normalized_auth_token,
+    )
+    if record_index is None:
+        raise HTTPException(status_code=401, detail="missing or invalid bearer token")
+
+    record = records[record_index]
+    next_refresh_token = secrets.token_urlsafe(32)
+    record["refresh_token_sha256"] = _hash_api_token(next_refresh_token)
+    record["refreshed_at"] = record.get("refreshed_at", "").strip()
+    if session_id and not record.get("session_id", "").strip():
+        record["session_id"] = session_id
+    effective_session_id = record.get("session_id", "").strip() or session_id or "iphone-app"
+    records[record_index] = record
+    payload["paired_clients"] = records[-MAX_PAIRED_CLIENT_TOKENS:]
+    _write_pairing_file(payload)
+    return normalized_auth_token, next_refresh_token, effective_session_id
 
 
 def _enforce_pair_rate_limit(client_id: str) -> None:

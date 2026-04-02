@@ -27,6 +27,11 @@ enum APIError: Error, LocalizedError {
             (backendDetail?.lowercased().contains("missing or invalid bearer token") ?? false)
     }
 
+    var isMissingOrInvalidRefreshToken: Bool {
+        statusCode == 401 &&
+            (backendDetail?.lowercased().contains("missing or invalid refresh token") ?? false)
+    }
+
     var errorDescription: String? {
         switch self {
         case .missingCredentials:
@@ -71,13 +76,14 @@ final class APIClient {
     private let jsonEncoder = JSONEncoder()
     var fallbackServerURLs: [String] = []
     var onResolvedServerURL: ((String) -> Void)?
+    var onUnauthorizedRecovery: ((String) async throws -> String?)?
 
     func createUtterance(
         serverURL: String,
         token: String,
         requestBody: UtteranceRequest
     ) async throws -> UtteranceResponse {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/utterances") else {
                 throw APIError.invalidURL
             }
@@ -86,7 +92,7 @@ final class APIClient {
             request.httpMethod = "POST"
             request.timeoutInterval = 15
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.httpBody = try jsonEncoder.encode(requestBody)
 
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -117,12 +123,42 @@ final class APIClient {
         }
     }
 
+    func refreshPairingCredentials(
+        serverURL: String,
+        refreshToken: String?,
+        currentToken: String?,
+        sessionID: String?
+    ) async throws -> PairExchangeResponse {
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = URL(string: baseURL + "/v1/pair/refresh") else {
+                throw APIError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            let trimmedCurrentToken = (currentToken ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedCurrentToken.isEmpty {
+                request.addValue("Bearer \(trimmedCurrentToken)", forHTTPHeaderField: "Authorization")
+            }
+            request.httpBody = try jsonEncoder.encode(
+                PairRefreshRequest(
+                    refreshToken: refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    sessionId: sessionID
+                )
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(PairExchangeResponse.self, from: data)
+        }
+    }
+
     func fetchRun(
         serverURL: String,
         token: String,
         runID: String
     ) async throws -> RunRecord {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/runs/\(runID)") else {
                 throw APIError.invalidURL
             }
@@ -130,7 +166,7 @@ final class APIClient {
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 10
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
 
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
@@ -144,7 +180,7 @@ final class APIClient {
         sessionID: String,
         limit: Int = 20
     ) async throws -> [RunSummary] {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
                   let url = URL(string: baseURL + "/v1/sessions/\(encoded)/runs?limit=\(limit)") else {
                 throw APIError.invalidURL
@@ -153,7 +189,7 @@ final class APIClient {
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 10
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
 
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
@@ -166,14 +202,14 @@ final class APIClient {
         token: String,
         runID: String
     ) async throws -> RunDiagnostics {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/runs/\(runID)/diagnostics") else {
                 throw APIError.invalidURL
             }
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 10
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
             return try jsonDecoder.decode(RunDiagnostics.self, from: data)
@@ -184,14 +220,14 @@ final class APIClient {
         serverURL: String,
         token: String
     ) async throws -> RuntimeConfig {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/config") else {
                 throw APIError.invalidURL
             }
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 10
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
             return try jsonDecoder.decode(RuntimeConfig.self, from: data)
@@ -203,14 +239,14 @@ final class APIClient {
         token: String
     ) async throws -> [SlashCommandDescriptor] {
         do {
-            return try await withCandidateServerURL(serverURL) { baseURL in
+            return try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
                 guard let url = URL(string: baseURL + "/v1/slash-commands") else {
                     throw APIError.invalidURL
                 }
                 var request = URLRequest(url: url)
                 request.httpMethod = "GET"
                 request.timeoutInterval = 10
-                request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
                 let (data, response) = try await URLSession.shared.data(for: request)
                 try validate(response: response, data: data)
                 return try jsonDecoder.decode([SlashCommandDescriptor].self, from: data)
@@ -225,7 +261,7 @@ final class APIClient {
         token: String,
         sessionID: String
     ) async throws -> SessionContext {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
                   let url = URL(string: baseURL + "/v1/sessions/\(encoded)/context") else {
                 throw APIError.invalidURL
@@ -233,7 +269,7 @@ final class APIClient {
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 10
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
             return try jsonDecoder.decode(SessionContext.self, from: data)
@@ -246,7 +282,7 @@ final class APIClient {
         sessionID: String,
         requestBody: SessionContextUpdateRequest
     ) async throws -> SessionContext {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let encoded = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
                   let url = URL(string: baseURL + "/v1/sessions/\(encoded)/context") else {
                 throw APIError.invalidURL
@@ -255,7 +291,7 @@ final class APIClient {
             request.httpMethod = "PATCH"
             request.timeoutInterval = 15
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.httpBody = try jsonEncoder.encode(requestBody)
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
@@ -270,7 +306,7 @@ final class APIClient {
         commandID: String,
         arguments: String?
     ) async throws -> SlashCommandExecutionResponse {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let encodedSession = sessionID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
                   let encodedCommand = commandID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
                   let url = URL(string: baseURL + "/v1/sessions/\(encodedSession)/slash-commands/\(encodedCommand)") else {
@@ -280,7 +316,7 @@ final class APIClient {
             request.httpMethod = "POST"
             request.timeoutInterval = 15
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.httpBody = try jsonEncoder.encode(
                 SlashCommandExecutionRequest(arguments: arguments)
             )
@@ -295,7 +331,7 @@ final class APIClient {
         token: String,
         path: String?
     ) async throws -> DirectoryListingResponse {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard var components = URLComponents(string: baseURL + "/v1/directories") else {
                 throw APIError.invalidURL
             }
@@ -310,7 +346,7 @@ final class APIClient {
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 10
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
 
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
@@ -323,7 +359,7 @@ final class APIClient {
         token: String,
         path: String
     ) async throws -> DirectoryCreateResponse {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/directories") else {
                 throw APIError.invalidURL
             }
@@ -331,7 +367,7 @@ final class APIClient {
             request.httpMethod = "POST"
             request.timeoutInterval = 15
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.httpBody = try jsonEncoder.encode(DirectoryCreateRequest(path: path))
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
@@ -352,7 +388,7 @@ final class APIClient {
         attachments: [ChatArtifact],
         audioFileURL: URL
     ) async throws -> AudioRunResponse {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/audio") else {
                 throw APIError.invalidURL
             }
@@ -361,7 +397,7 @@ final class APIClient {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.timeoutInterval = 30
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
             let audioData = try Data(contentsOf: audioFileURL)
@@ -415,7 +451,7 @@ final class APIClient {
         onProgress: ((Double) -> Void)? = nil,
         registerCancellation: ((@escaping () -> Void) -> Void)? = nil
     ) async throws -> UploadResponse {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/uploads") else {
                 throw APIError.invalidURL
             }
@@ -424,7 +460,7 @@ final class APIClient {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.timeoutInterval = 60
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
             let fileData = try Data(contentsOf: fileURL)
@@ -460,7 +496,7 @@ final class APIClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let (bytes, response) = try await withCandidateServerURL(serverURL) { baseURL in
+                    let (bytes, response) = try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
                         guard var components = URLComponents(string: baseURL + "/v1/runs/\(runID)/events") else {
                             throw APIError.invalidURL
                         }
@@ -476,7 +512,7 @@ final class APIClient {
                         var request = URLRequest(url: url)
                         request.httpMethod = "GET"
                         request.timeoutInterval = 60
-                        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                        request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
                         return try await URLSession.shared.bytes(for: request)
                     }
                     guard let http = response as? HTTPURLResponse else {
@@ -536,7 +572,7 @@ final class APIClient {
         token: String,
         runID: String
     ) async throws -> CancelRunResponse {
-        try await withCandidateServerURL(serverURL) { baseURL in
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/runs/\(runID)/cancel") else {
                 throw APIError.invalidURL
             }
@@ -544,7 +580,7 @@ final class APIClient {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.timeoutInterval = 10
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
 
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
@@ -583,12 +619,21 @@ final class APIClient {
         url: URL,
         timeout: TimeInterval = 20
     ) async throws -> Data {
+        if shouldAttachAuth(to: url, serverURL: serverURL), !token.isEmpty {
+            return try await withAuthorizedCandidateServerURL(serverURL, token: token) { _, activeToken in
+                var request = URLRequest(url: url)
+                request.httpMethod = "GET"
+                request.timeoutInterval = timeout
+                request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                try validate(response: response, data: data)
+                return data
+            }
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = timeout
-        if shouldAttachAuth(to: url, serverURL: serverURL), !token.isEmpty {
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return data
@@ -609,6 +654,57 @@ final class APIClient {
                 }
                 return value
             } catch {
+                lastError = error
+                if index == candidates.count - 1 || !shouldRetryAcrossCandidates(error) {
+                    throw error
+                }
+            }
+        }
+
+        throw lastError ?? APIError.invalidResponse
+    }
+
+    private func withAuthorizedCandidateServerURL<T>(
+        _ serverURL: String,
+        token: String,
+        operation: (String, String) async throws -> T
+    ) async throws -> T {
+        let candidates = candidateServerURLs(for: serverURL)
+        var lastError: Error?
+        var currentToken = token
+        var attemptedRecovery = false
+
+        for (index, candidate) in candidates.enumerated() {
+            do {
+                let value = try await operation(candidate, currentToken)
+                if normalizedBaseURL(candidate) != normalizedBaseURL(serverURL) {
+                    onResolvedServerURL?(candidate)
+                }
+                return value
+            } catch {
+                if !attemptedRecovery,
+                   shouldAttemptUnauthorizedRecovery(error),
+                   let onUnauthorizedRecovery,
+                   let recoveredToken = try await onUnauthorizedRecovery(candidate)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                   !recoveredToken.isEmpty {
+                    attemptedRecovery = true
+                    currentToken = recoveredToken
+                    do {
+                        let value = try await operation(candidate, currentToken)
+                        if normalizedBaseURL(candidate) != normalizedBaseURL(serverURL) {
+                            onResolvedServerURL?(candidate)
+                        }
+                        return value
+                    } catch {
+                        lastError = error
+                        if index == candidates.count - 1 || !shouldRetryAcrossCandidates(error) {
+                            throw error
+                        }
+                        continue
+                    }
+                }
+
                 lastError = error
                 if index == candidates.count - 1 || !shouldRetryAcrossCandidates(error) {
                     throw error
@@ -653,6 +749,11 @@ final class APIClient {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw APIError.httpError(http.statusCode, body)
         }
+    }
+
+    private func shouldAttemptUnauthorizedRecovery(_ error: Error) -> Bool {
+        guard let apiError = error as? APIError else { return false }
+        return apiError.isMissingOrInvalidBearerToken
     }
 
     private func resolveArtifactURL(serverURL: String, artifact: ChatArtifact) -> URL? {

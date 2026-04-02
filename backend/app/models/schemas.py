@@ -200,8 +200,14 @@ class PairExchangeRequest(BaseModel):
     session_id: str | None = None
 
 
+class PairRefreshRequest(BaseModel):
+    refresh_token: str | None = None
+    session_id: str | None = None
+
+
 class PairExchangeResponse(BaseModel):
     api_token: str
+    refresh_token: str
     session_id: str
     security_mode: Literal["safe", "full-access"]
     server_url: str | None = None

@@ -107,6 +107,38 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertFalse(vm.needsConnectionRepair)
     }
 
+    @MainActor
+    func testApplyPairedClientCredentialsStoresRefreshTokenAndClearsRepairState() {
+        let vm = VoiceAgentViewModel()
+        vm.serverURL = "http://127.0.0.1:8000"
+        vm.apiToken = "stale-token"
+        _ = vm.registerConnectionRepairIfNeeded(
+            from: APIError.httpError(401, #"{"detail":"missing or invalid bearer token"}"#)
+        )
+
+        vm.applyPairedClientCredentials(
+            PairExchangeResponse(
+                apiToken: "fresh-token",
+                refreshToken: "refresh-token",
+                sessionId: "iphone-app",
+                securityMode: "safe",
+                serverURL: "https://relay.example.com",
+                serverURLs: ["https://relay.example.com", "http://100.111.99.51:8000"]
+            ),
+            fallbackPrimaryServerURL: "http://127.0.0.1:8000"
+        )
+
+        XCTAssertEqual(vm.apiToken, "fresh-token")
+        XCTAssertEqual(vm.sessionID, "iphone-app")
+        XCTAssertEqual(vm.serverURL, "https://relay.example.com")
+        XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "https://relay.example.com",
+            "http://100.111.99.51:8000",
+        ])
+        XCTAssertTrue(vm.hasPairedRefreshCredential)
+        XCTAssertFalse(vm.needsConnectionRepair)
+    }
+
     func testPairingQRCodeImageDecoderDecodesGeneratedQRCode() throws {
         let payload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123"
         let filter = CIFilter.qrCodeGenerator()
@@ -650,6 +682,7 @@ final class VoiceAgentModelTests: XCTestCase {
         let json = """
         {
           "api_token":"paired-token",
+          "refresh_token":"refresh-token",
           "session_id":"iphone-app",
           "security_mode":"safe",
           "server_url":"https://relay.example.com",
@@ -660,6 +693,7 @@ final class VoiceAgentModelTests: XCTestCase {
         let data = Data(json.utf8)
         let decoded = try JSONDecoder().decode(PairExchangeResponse.self, from: data)
         XCTAssertEqual(decoded.apiToken, "paired-token")
+        XCTAssertEqual(decoded.refreshToken, "refresh-token")
         XCTAssertEqual(decoded.serverURL, "https://relay.example.com")
         XCTAssertEqual(decoded.serverURLs ?? [], ["https://relay.example.com", "http://100.111.99.51:8000"])
     }

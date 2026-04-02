@@ -294,8 +294,19 @@ struct PairExchangeRequest: Encodable {
     }
 }
 
+struct PairRefreshRequest: Encodable {
+    let refreshToken: String?
+    let sessionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case refreshToken = "refresh_token"
+        case sessionId = "session_id"
+    }
+}
+
 struct PairExchangeResponse: Decodable {
     let apiToken: String
+    let refreshToken: String?
     let sessionId: String
     let securityMode: String
     let serverURL: String?
@@ -303,6 +314,7 @@ struct PairExchangeResponse: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case apiToken = "api_token"
+        case refreshToken = "refresh_token"
         case sessionId = "session_id"
         case securityMode = "security_mode"
         case serverURL = "server_url"

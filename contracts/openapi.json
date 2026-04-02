@@ -621,6 +621,10 @@
             "title": "Api Token",
             "type": "string"
           },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
           "security_mode": {
             "enum": [
               "safe",
@@ -654,10 +658,39 @@
         },
         "required": [
           "api_token",
+          "refresh_token",
           "session_id",
           "security_mode"
         ],
         "title": "PairExchangeResponse",
+        "type": "object"
+      },
+      "PairRefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "title": "PairRefreshRequest",
         "type": "object"
       },
       "RunDiagnostics": {
@@ -2069,6 +2102,44 @@
           }
         },
         "summary": "Pair Exchange"
+      }
+    },
+    "/v1/pair/refresh": {
+      "post": {
+        "operationId": "pair_refresh_v1_pair_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairExchangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pair Refresh"
       }
     },
     "/v1/runs/{run_id}": {
