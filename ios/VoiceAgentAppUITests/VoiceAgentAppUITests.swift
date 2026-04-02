@@ -17,6 +17,21 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Ready"].waitForExistence(timeout: 5))
     }
 
+    func testConfiguredEmptyPreviewKeepsComposerActiveWhileTyping() {
+        let app = launchApp(previewScenario: "configured-empty")
+        let composer = app.textViews["composer.textEditor"]
+
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+
+        composer.tap()
+        composer.typeText("a")
+        composer.typeText("b")
+
+        let value = String(describing: composer.value)
+        XCTAssertTrue(value.contains("ab"))
+        XCTAssertTrue(app.buttons["Send prompt"].exists)
+    }
+
     func testConversationPreviewShowsThreadSwitcherMetadata() {
         let app = launchApp(previewScenario: "conversation")
 
@@ -37,6 +52,8 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["demo.mobaile.app"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["app-preview"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Test"].exists)
+        XCTAssertTrue(element(in: app, identifier: "settings.runtime.codexModel").exists)
+        XCTAssertTrue(element(in: app, identifier: "settings.runtime.codexEffort").exists)
     }
 
     func testRecordingPreviewShowsVoiceContextAndRecordingActions() {
@@ -60,5 +77,9 @@ final class VoiceAgentAppUITests: XCTestCase {
 
     private func threadToolbarButton(in app: XCUIApplication) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Threads,")).firstMatch
+    }
+
+    private func element(in app: XCUIApplication, identifier: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 }

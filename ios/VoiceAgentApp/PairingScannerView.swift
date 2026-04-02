@@ -81,6 +81,7 @@ private enum PairingScannerCameraState: Equatable {
 }
 
 struct PairingScannerSheet: View {
+    let isRepairMode: Bool
     let onSubmitPayload: (String) -> String?
     let onOpenManualSetup: () -> Void
 
@@ -107,7 +108,7 @@ struct PairingScannerSheet: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Scan Pairing QR")
+            .navigationTitle(isRepairMode ? "Reconnect Phone" : "Scan Pairing QR")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -128,14 +129,22 @@ struct PairingScannerSheet: View {
 
     private var scannerHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Pair from your computer", systemImage: "qrcode.viewfinder")
+            Label(isRepairMode ? "Reconnect from your computer" : "Pair from your computer", systemImage: "qrcode.viewfinder")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
 
-            Text("Open the pairing QR on your computer, then scan it right here.")
+            Text(
+                isRepairMode
+                    ? "Open the latest pairing QR on your computer, then scan it here to replace the saved connection."
+                    : "Open the pairing QR on your computer, then scan it right here."
+            )
                 .font(.title3.weight(.semibold))
 
-            Text("MOBaiLE fills the connection for you and asks for confirmation before it pairs.")
+            Text(
+                isRepairMode
+                    ? "MOBaiLE keeps your server details and swaps in a fresh token after you confirm the new QR."
+                    : "MOBaiLE fills the connection for you and asks for confirmation before it pairs."
+            )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -242,7 +251,7 @@ struct PairingScannerSheet: View {
 
     private var quickActionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Other ways to pair")
+            Text(isRepairMode ? "Other ways to reconnect" : "Other ways to pair")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -258,7 +267,7 @@ struct PairingScannerSheet: View {
                 }
             }
 
-            Text("Need the QR again? Run `mobaile pair` on your computer.")
+            Text(isRepairMode ? "Need a fresh QR? Run `mobaile pair` on your computer." : "Need the QR again? Run `mobaile pair` on your computer.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -294,10 +303,14 @@ struct PairingScannerSheet: View {
 
     private var manualFallbackSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Manual fallback", systemImage: "slider.horizontal.3")
+            Label(isRepairMode ? "Manual reconnect" : "Manual fallback", systemImage: "slider.horizontal.3")
                 .font(.subheadline.weight(.semibold))
 
-            Text("If scanning is not possible, you can still enter the server URL and token yourself in Settings.")
+            Text(
+                isRepairMode
+                    ? "If scanning is not possible, you can still replace the saved server URL and token yourself in Settings."
+                    : "If scanning is not possible, you can still enter the server URL and token yourself in Settings."
+            )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

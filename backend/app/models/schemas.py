@@ -216,6 +216,22 @@ class RuntimeExecutorDescriptor(BaseModel):
     default: bool = False
     internal_only: bool = False
     model: str | None = None
+    settings: list["RuntimeSettingDescriptor"] = Field(default_factory=list)
+
+
+class RuntimeSettingDescriptor(BaseModel):
+    id: str
+    title: str
+    kind: Literal["enum"]
+    allow_custom: bool = False
+    value: str | None = None
+    options: list[str] = Field(default_factory=list)
+
+
+class SessionRuntimeSettingValue(BaseModel):
+    executor: RunExecutorName
+    id: str = Field(min_length=1)
+    value: str | None = None
 
 
 class RuntimeConfigResponse(BaseModel):
@@ -226,9 +242,11 @@ class RuntimeConfigResponse(BaseModel):
     transcribe_provider: str
     transcribe_ready: bool
     codex_model: str | None = None
+    codex_model_options: list[str] = Field(default_factory=list)
     codex_reasoning_effort: CodexReasoningEffort | None = None
     codex_reasoning_effort_options: list[CodexReasoningEffort] = Field(default_factory=list)
     claude_model: str | None = None
+    claude_model_options: list[str] = Field(default_factory=list)
     workdir_root: str | None = None
     allow_absolute_file_reads: bool
     file_roots: list[str] = Field(default_factory=list)
@@ -240,6 +258,7 @@ class SessionContextResponse(BaseModel):
     session_id: str
     executor: RunExecutorName
     working_directory: str | None = None
+    runtime_settings: list[SessionRuntimeSettingValue] = Field(default_factory=list)
     codex_model: str | None = None
     codex_reasoning_effort: CodexReasoningEffort | None = None
     claude_model: str | None = None
@@ -255,6 +274,7 @@ class SessionContextResponse(BaseModel):
 class SessionContextUpdateRequest(BaseModel):
     executor: RunExecutorName | None = None
     working_directory: str | None = None
+    runtime_settings: list[SessionRuntimeSettingValue] | None = None
     codex_model: str | None = None
     codex_reasoning_effort: CodexReasoningEffort | None = None
     claude_model: str | None = None

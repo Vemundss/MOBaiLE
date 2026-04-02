@@ -425,6 +425,61 @@ struct RunDiagnostics: Decodable {
     }
 }
 
+struct RuntimeSettingDescriptor: Decodable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    let kind: String
+    let allowCustom: Bool
+    let value: String?
+    let options: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case kind
+        case allowCustom = "allow_custom"
+        case value
+        case options
+    }
+
+    init(
+        id: String,
+        title: String,
+        kind: String,
+        allowCustom: Bool,
+        value: String? = nil,
+        options: [String] = []
+    ) {
+        self.id = normalizedRuntimeSettingIdentifier(id) ?? id
+        self.title = normalizedRuntimeSettingText(title) ?? self.id
+        self.kind = normalizedRuntimeSettingKind(kind)
+        self.allowCustom = allowCustom
+        self.value = normalizedRuntimeSettingText(value)
+        self.options = RuntimeSettingDescriptor.normalizedOptions(options)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = normalizedRuntimeSettingIdentifier(try container.decode(String.self, forKey: .id)) ?? "setting"
+        title = normalizedRuntimeSettingText(try container.decode(String.self, forKey: .title)) ?? id
+        kind = normalizedRuntimeSettingKind(try container.decode(String.self, forKey: .kind))
+        allowCustom = try container.decodeIfPresent(Bool.self, forKey: .allowCustom) ?? false
+        value = normalizedRuntimeSettingText(try container.decodeIfPresent(String.self, forKey: .value))
+        options = RuntimeSettingDescriptor.normalizedOptions(
+            try container.decodeIfPresent([String].self, forKey: .options) ?? []
+        )
+    }
+
+    private static func normalizedOptions(_ options: [String]) -> [String] {
+        var values: [String] = []
+        for option in options {
+            guard let normalized = normalizedRuntimeSettingText(option), !values.contains(normalized) else { continue }
+            values.append(normalized)
+        }
+        return values
+    }
+}
+
 struct RuntimeExecutorDescriptor: Decodable, Identifiable {
     let id: String
     let title: String
@@ -433,6 +488,27 @@ struct RuntimeExecutorDescriptor: Decodable, Identifiable {
     let isDefault: Bool
     let internalOnly: Bool
     let model: String?
+    let settings: [RuntimeSettingDescriptor]?
+
+    init(
+        id: String,
+        title: String,
+        kind: String,
+        available: Bool,
+        isDefault: Bool,
+        internalOnly: Bool,
+        model: String?,
+        settings: [RuntimeSettingDescriptor]? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.available = available
+        self.isDefault = isDefault
+        self.internalOnly = internalOnly
+        self.model = model
+        self.settings = settings
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -442,6 +518,7 @@ struct RuntimeExecutorDescriptor: Decodable, Identifiable {
         case isDefault = "default"
         case internalOnly = "internal_only"
         case model
+        case settings
     }
 }
 
@@ -453,9 +530,11 @@ struct RuntimeConfig: Decodable {
     let transcribeProvider: String?
     let transcribeReady: Bool?
     let codexModel: String?
+    let codexModelOptions: [String]?
     let codexReasoningEffort: String?
     let codexReasoningEffortOptions: [String]?
     let claudeModel: String?
+    let claudeModelOptions: [String]?
     let workdirRoot: String?
     let allowAbsoluteFileReads: Bool?
     let fileRoots: [String]?
@@ -470,9 +549,11 @@ struct RuntimeConfig: Decodable {
         case transcribeProvider = "transcribe_provider"
         case transcribeReady = "transcribe_ready"
         case codexModel = "codex_model"
+        case codexModelOptions = "codex_model_options"
         case codexReasoningEffort = "codex_reasoning_effort"
         case codexReasoningEffortOptions = "codex_reasoning_effort_options"
         case claudeModel = "claude_model"
+        case claudeModelOptions = "claude_model_options"
         case workdirRoot = "workdir_root"
         case allowAbsoluteFileReads = "allow_absolute_file_reads"
         case fileRoots = "file_roots"
@@ -481,9 +562,46 @@ struct RuntimeConfig: Decodable {
     }
 }
 
+private extension KeyedDecodingContainer {
+    func firstString(forKeys keys: [Key]) -> String? {
+        for key in keys {
+            if let value = try? decodeIfPresent(String.self, forKey: key) {
+                let normalized = normalizedRuntimeSettingText(value)
+                if normalized != nil {
+                    return normalized
+                }
+            }
+        }
+        return nil
+    }
+
+    func firstBool(forKeys keys: [Key]) -> Bool? {
+        for key in keys {
+            if let value = try? decodeIfPresent(Bool.self, forKey: key) {
+                return value
+            }
+        }
+        return nil
+    }
+}
+
+private func normalizedRuntimeSettingText(_ value: String?) -> String? {
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return trimmed.isEmpty ? nil : trimmed
+}
+
+private func normalizedRuntimeSettingIdentifier(_ value: String?) -> String? {
+    normalizedRuntimeSettingText(value)?.lowercased().replacingOccurrences(of: " ", with: "_")
+}
+
+private func normalizedRuntimeSettingKind(_ value: String?) -> String {
+    normalizedRuntimeSettingText(value)?.lowercased() ?? "enum"
+}
+
 struct SessionContextUpdateRequest: Encodable {
     let executor: String?
     let workingDirectory: String?
+    let runtimeSettings: [SessionRuntimeSetting]?
     let codexModel: String?
     let codexReasoningEffort: String?
     let claudeModel: String?
@@ -491,9 +609,84 @@ struct SessionContextUpdateRequest: Encodable {
     enum CodingKeys: String, CodingKey {
         case executor
         case workingDirectory = "working_directory"
+        case runtimeSettings = "runtime_settings"
         case codexModel = "codex_model"
         case codexReasoningEffort = "codex_reasoning_effort"
         case claudeModel = "claude_model"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let executor {
+            try container.encode(executor, forKey: .executor)
+        } else {
+            try container.encodeNil(forKey: .executor)
+        }
+        if let workingDirectory {
+            try container.encode(workingDirectory, forKey: .workingDirectory)
+        } else {
+            try container.encodeNil(forKey: .workingDirectory)
+        }
+        if let runtimeSettings {
+            try container.encode(runtimeSettings, forKey: .runtimeSettings)
+        } else {
+            try container.encodeNil(forKey: .runtimeSettings)
+        }
+        if let codexModel {
+            try container.encode(codexModel, forKey: .codexModel)
+        } else {
+            try container.encodeNil(forKey: .codexModel)
+        }
+        if let codexReasoningEffort {
+            try container.encode(codexReasoningEffort, forKey: .codexReasoningEffort)
+        } else {
+            try container.encodeNil(forKey: .codexReasoningEffort)
+        }
+        if let claudeModel {
+            try container.encode(claudeModel, forKey: .claudeModel)
+        } else {
+            try container.encodeNil(forKey: .claudeModel)
+        }
+    }
+}
+
+struct SessionRuntimeSetting: Codable, Equatable, Identifiable {
+    let executor: String
+    let settingID: String
+    let value: String?
+
+    var id: String { "\(executor).\(settingID)" }
+
+    enum CodingKeys: String, CodingKey {
+        case executor
+        case settingID = "id"
+        case value
+    }
+
+    init(executor: String, settingID: String, value: String?) {
+        self.executor = executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.settingID = normalizedRuntimeSettingIdentifier(settingID) ?? settingID
+        self.value = normalizedRuntimeSettingText(value)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        executor = try container.decode(String.self, forKey: .executor)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        settingID = normalizedRuntimeSettingIdentifier(try container.decode(String.self, forKey: .settingID)) ?? "setting"
+        value = normalizedRuntimeSettingText(try container.decodeIfPresent(String.self, forKey: .value))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(executor, forKey: .executor)
+        try container.encode(settingID, forKey: .settingID)
+        if let value {
+            try container.encode(value, forKey: .value)
+        } else {
+            try container.encodeNil(forKey: .value)
+        }
     }
 }
 
@@ -501,6 +694,7 @@ struct SessionContext: Decodable {
     let sessionId: String
     let executor: String
     let workingDirectory: String?
+    let runtimeSettings: [SessionRuntimeSetting]?
     let codexModel: String?
     let codexReasoningEffort: String?
     let claudeModel: String?
@@ -516,6 +710,7 @@ struct SessionContext: Decodable {
         case sessionId = "session_id"
         case executor
         case workingDirectory = "working_directory"
+        case runtimeSettings = "runtime_settings"
         case codexModel = "codex_model"
         case codexReasoningEffort = "codex_reasoning_effort"
         case claudeModel = "claude_model"

@@ -63,6 +63,7 @@ def test_run_store_persists_session_context(tmp_path) -> None:
         "session-1",
         executor="local",
         working_directory=str(tmp_path / "workspace"),
+        runtime_settings_json=None,
         codex_model=None,
         codex_reasoning_effort=None,
         claude_model=None,

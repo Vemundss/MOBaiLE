@@ -427,17 +427,25 @@ def test_session_context_persists_runtime_overrides(monkeypatch, tmp_path: Path)
         headers={"Authorization": f"Bearer {token}"},
         json={
             "executor": "codex",
-            "codex_model": "gpt-5.4-mini",
-            "codex_reasoning_effort": "xhigh",
+            "runtime_settings": [
+                {"executor": "codex", "id": "model", "value": "gpt-5.4-mini"},
+                {"executor": "codex", "id": "reasoning_effort", "value": "xhigh"},
+            ],
         },
     )
 
     assert response.status_code == 200
     payload = response.json()
+    runtime_settings = {
+        (item["executor"], item["id"]): item["value"] for item in payload["runtime_settings"]
+    }
     assert payload["executor"] == "codex"
     assert payload["codex_model"] == "gpt-5.4-mini"
     assert payload["codex_reasoning_effort"] == "xhigh"
     assert payload["claude_model"] is None
+    assert runtime_settings[("codex", "model")] == "gpt-5.4-mini"
+    assert runtime_settings[("codex", "reasoning_effort")] == "xhigh"
+    assert runtime_settings[("claude", "model")] is None
 
 
 def test_session_context_rejects_invalid_codex_effort(monkeypatch, tmp_path: Path):
@@ -461,10 +469,111 @@ def test_session_context_rejects_invalid_codex_effort(monkeypatch, tmp_path: Pat
     response = client.patch(
         "/v1/sessions/sess-context/context",
         headers={"Authorization": f"Bearer {token}"},
-        json={"codex_reasoning_effort": "turbo"},
+        json={"runtime_settings": [{"executor": "codex", "id": "reasoning_effort", "value": "turbo"}]},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert "must be one of" in response.json()["detail"]
+
+
+def test_session_context_runtime_settings_can_clear_overrides(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CODEX_MODEL": "gpt-5.4",
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    initial = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "runtime_settings": [
+                {"executor": "codex", "id": "model", "value": "gpt-5.4-mini"},
+                {"executor": "codex", "id": "reasoning_effort", "value": "high"},
+            ],
+        },
+    )
+    assert initial.status_code == 200
+
+    cleared = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "runtime_settings": [
+                {"executor": "codex", "id": "model", "value": None},
+                {"executor": "codex", "id": "reasoning_effort", "value": None},
+            ],
+        },
+    )
+
+    assert cleared.status_code == 200
+    payload = cleared.json()
+    runtime_settings = {
+        (item["executor"], item["id"]): item["value"] for item in payload["runtime_settings"]
+    }
+    assert payload["codex_model"] is None
+    assert payload["codex_reasoning_effort"] is None
+    assert runtime_settings[("codex", "model")] is None
+    assert runtime_settings[("codex", "reasoning_effort")] is None
+
+
+def test_session_context_runtime_settings_payload_replaces_existing_state(monkeypatch, tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        monkeypatch,
+        tmp_path,
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_DEFAULT_EXECUTOR": "codex",
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workspace),
+            "VOICE_AGENT_CLAUDE_BINARY": "missing-claude",
+        },
+    )
+
+    seeded = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "runtime_settings": [
+                {"executor": "codex", "id": "model", "value": "gpt-5.4-mini"},
+                {"executor": "codex", "id": "reasoning_effort", "value": "high"},
+            ],
+        },
+    )
+    assert seeded.status_code == 200
+
+    replaced = client.patch(
+        "/v1/sessions/sess-context/context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"runtime_settings": []},
+    )
+
+    assert replaced.status_code == 200
+    payload = replaced.json()
+    runtime_settings = {
+        (item["executor"], item["id"]): item["value"] for item in payload["runtime_settings"]
+    }
+    assert payload["codex_model"] is None
+    assert payload["codex_reasoning_effort"] is None
+    assert runtime_settings[("codex", "model")] is None
+    assert runtime_settings[("codex", "reasoning_effort")] is None
 
 
 def test_slash_command_catalog_and_execution(monkeypatch, tmp_path: Path):
@@ -1131,6 +1240,9 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
             "VOICE_AGENT_CODEX_MODEL": "gpt-5.1",
             "VOICE_AGENT_CODEX_REASONING_EFFORT": "high",
             "VOICE_AGENT_CLAUDE_MODEL": "claude-sonnet-4-5",
+            "VOICE_AGENT_CODEX_MODEL_OPTIONS": "gpt-5.4-mini,custom-codex,gpt-5.4-mini",
+            "VOICE_AGENT_CLAUDE_MODEL_OPTIONS": "claude-opus-4,claude-sonnet-4-5",
+            "VOICE_AGENT_CODEX_REASONING_EFFORT_OPTIONS": "high,medium,turbo,high",
             "VOICE_AGENT_DEFAULT_EXECUTOR": "claude",
             "VOICE_AGENT_PAIRING_FILE": str(pairing_file),
         },
@@ -1142,9 +1254,11 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["codex_model"] == "gpt-5.1"
+    assert payload["codex_model_options"] == ["gpt-5.4-mini", "custom-codex", "gpt-5.4", "gpt-5.1"]
     assert payload["codex_reasoning_effort"] == "high"
-    assert payload["codex_reasoning_effort_options"] == ["minimal", "low", "medium", "high", "xhigh"]
+    assert payload["codex_reasoning_effort_options"] == ["high", "medium", "minimal", "low", "xhigh"]
     assert payload["claude_model"] == "claude-sonnet-4-5"
+    assert payload["claude_model_options"] == ["claude-opus-4", "claude-sonnet-4-5"]
     assert payload["default_executor"] == "claude"
     assert "codex" in payload["available_executors"]
     assert "claude" in payload["available_executors"]
@@ -1152,6 +1266,19 @@ def test_runtime_config_includes_codex_model(monkeypatch, tmp_path: Path):
     executors = {item["id"]: item for item in payload["executors"]}
     assert executors["codex"]["kind"] == "agent"
     assert executors["codex"]["model"] == "gpt-5.1"
+    assert [setting["id"] for setting in executors["codex"]["settings"]] == ["model", "reasoning_effort"]
+    assert executors["codex"]["settings"][0]["kind"] == "enum"
+    assert executors["codex"]["settings"][0]["allow_custom"] is True
+    assert executors["codex"]["settings"][0]["value"] == "gpt-5.1"
+    assert executors["codex"]["settings"][0]["options"] == ["gpt-5.4-mini", "custom-codex", "gpt-5.4", "gpt-5.1"]
+    assert executors["codex"]["settings"][1]["allow_custom"] is False
+    assert executors["codex"]["settings"][1]["value"] == "high"
+    assert executors["codex"]["settings"][1]["options"] == ["high", "medium", "minimal", "low", "xhigh"]
+    assert [setting["id"] for setting in executors["claude"]["settings"]] == ["model"]
+    assert executors["claude"]["settings"][0]["allow_custom"] is True
+    assert executors["claude"]["settings"][0]["value"] == "claude-sonnet-4-5"
+    assert executors["claude"]["settings"][0]["options"] == ["claude-opus-4", "claude-sonnet-4-5"]
+    assert executors["local"]["settings"] == []
     assert executors["claude"]["default"] is True
     assert executors["local"]["internal_only"] is True
     assert payload["transcribe_provider"] == "mock"

@@ -42,6 +42,8 @@ from app.models.schemas import (
     RunRecord,
     RunSummary,
     RuntimeConfigResponse,
+    RuntimeSettingDescriptor,
+    SessionRuntimeSettingValue,
     SessionContextResponse,
     SessionContextUpdateRequest,
     SlashCommandDescriptor,
@@ -468,6 +470,7 @@ def get_session_context(session_id: str) -> SessionContextResponse:
 def update_session_context(session_id: str, payload: SessionContextUpdateRequest) -> SessionContextResponse:
     executor = _UNSET
     working_directory = _UNSET
+    runtime_settings = _UNSET
     codex_model = _UNSET
     codex_reasoning_effort = _UNSET
     claude_model = _UNSET
@@ -485,6 +488,18 @@ def update_session_context(session_id: str, payload: SessionContextUpdateRequest
         else:
             working_directory = None
 
+    if "runtime_settings" in payload.model_fields_set:
+        entries: list[SessionRuntimeSettingValue] = []
+        for item in payload.runtime_settings or []:
+            entries.append(
+                SessionRuntimeSettingValue(
+                    executor=item.executor,
+                    id=_normalized_runtime_setting_id(item.id) or item.id,
+                    value=_validated_runtime_setting_value(item.executor, item.id, item.value),
+                )
+            )
+        runtime_settings = entries
+
     if "codex_model" in payload.model_fields_set:
         codex_model = _normalized_optional_text(payload.codex_model)
 
@@ -498,6 +513,7 @@ def update_session_context(session_id: str, payload: SessionContextUpdateRequest
         session_id,
         executor=executor,
         working_directory=working_directory,
+        runtime_settings=runtime_settings,
         codex_model=codex_model,
         codex_reasoning_effort=codex_reasoning_effort,
         claude_model=claude_model,
@@ -637,17 +653,145 @@ def stream_run_events(run_id: str, after_seq: int = Query(-1, ge=-1)) -> Streami
     )
 
 
+def _normalized_runtime_setting_id(value: str | None) -> str | None:
+    normalized = _normalized_optional_text(value)
+    if normalized is None:
+        return None
+    return normalized.lower().replace(" ", "_")
+
+
+def _runtime_setting_descriptor_map() -> dict[tuple[str, str], RuntimeSettingDescriptor]:
+    descriptors: dict[tuple[str, str], RuntimeSettingDescriptor] = {}
+    for executor in ENV.runtime_executor_descriptors():
+        for setting in executor.settings or []:
+            setting_id = _normalized_runtime_setting_id(setting.id)
+            if setting_id is None:
+                continue
+            descriptors[(executor.id, setting_id)] = setting
+    return descriptors
+
+
+def _canonical_runtime_setting_option(value: str, options: list[str]) -> str | None:
+    normalized = value.strip()
+    if not normalized:
+        return None
+    lowered = normalized.lower()
+    for option in options:
+        if option.lower() == lowered:
+            return option
+    return None
+
+
+def _validated_runtime_setting_value(executor: str, setting_id: str, value: str | None) -> str | None:
+    normalized_setting_id = _normalized_runtime_setting_id(setting_id)
+    if normalized_setting_id is None:
+        raise HTTPException(status_code=400, detail="runtime setting id is required")
+
+    descriptor = _runtime_setting_descriptor_map().get((executor, normalized_setting_id))
+    if descriptor is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"runtime setting {executor}.{normalized_setting_id} is not supported by this backend",
+        )
+
+    normalized_value = _normalized_optional_text(value)
+    if normalized_value is None:
+        return None
+
+    if executor == "codex" and normalized_setting_id == "reasoning_effort":
+        return _validated_optional_codex_reasoning_effort(normalized_value)
+
+    canonical_option = _canonical_runtime_setting_option(normalized_value, descriptor.options)
+    if canonical_option is not None:
+        return canonical_option
+    if descriptor.allow_custom:
+        return normalized_value
+
+    allowed = ", ".join(descriptor.options)
+    raise HTTPException(
+        status_code=400,
+        detail=f"runtime setting {executor}.{normalized_setting_id} must be one of: {allowed}",
+    )
+
+
+def _session_runtime_settings_map(row) -> dict[tuple[str, str], str]:
+    values: dict[tuple[str, str], str] = {}
+    raw_runtime_settings = str(row["runtime_settings_json"]).strip() if row is not None and row["runtime_settings_json"] else ""
+    if raw_runtime_settings:
+        try:
+            payload = json.loads(raw_runtime_settings)
+        except Exception:
+            payload = []
+        if isinstance(payload, list):
+            for item in payload:
+                try:
+                    decoded = SessionRuntimeSettingValue.model_validate(item)
+                except Exception:
+                    continue
+                normalized_setting_id = _normalized_runtime_setting_id(decoded.id)
+                normalized_value = _normalized_optional_text(decoded.value)
+                if normalized_setting_id is None or normalized_value is None:
+                    continue
+                values[(decoded.executor, normalized_setting_id)] = normalized_value
+
+    legacy_values = {
+        ("codex", "model"): _normalized_optional_text(
+            str(row["codex_model"]).strip() if row is not None and row["codex_model"] else None
+        ),
+        ("codex", "reasoning_effort"): _validated_optional_codex_reasoning_effort(
+            str(row["codex_reasoning_effort"]).strip().lower()
+            if row is not None and row["codex_reasoning_effort"]
+            else None
+        ),
+        ("claude", "model"): _normalized_optional_text(
+            str(row["claude_model"]).strip() if row is not None and row["claude_model"] else None
+        ),
+    }
+    for key, normalized_value in legacy_values.items():
+        if normalized_value is None:
+            values.pop(key, None)
+        else:
+            values[key] = normalized_value
+    return values
+
+
+def _session_runtime_settings_response(values: dict[tuple[str, str], str]) -> list[SessionRuntimeSettingValue]:
+    items: list[SessionRuntimeSettingValue] = []
+    seen: set[tuple[str, str]] = set()
+    for executor in ENV.runtime_executor_descriptors():
+        for setting in executor.settings or []:
+            setting_id = _normalized_runtime_setting_id(setting.id)
+            if setting_id is None:
+                continue
+            key = (executor.id, setting_id)
+            seen.add(key)
+            items.append(SessionRuntimeSettingValue(executor=executor.id, id=setting_id, value=values.get(key)))
+    for executor, setting_id in sorted(values):
+        key = (executor, setting_id)
+        if key in seen:
+            continue
+        items.append(SessionRuntimeSettingValue(executor=executor, id=setting_id, value=values[key]))
+    return items
+
+
+def _serialized_runtime_settings(values: dict[tuple[str, str], str]) -> str | None:
+    if not values:
+        return None
+    payload = [
+        {"executor": executor, "id": setting_id, "value": values[(executor, setting_id)]}
+        for executor, setting_id in sorted(values)
+    ]
+    return json.dumps(payload, separators=(",", ":"))
+
+
 def _session_context_response(session_id: str) -> SessionContextResponse:
     row = RUN_STORE.get_session_context(session_id)
     raw_executor = str(row["executor"]).strip() if row is not None and row["executor"] else ""
     raw_working_directory = str(row["working_directory"]).strip() if row is not None and row["working_directory"] else ""
-    codex_model = str(row["codex_model"]).strip() if row is not None and row["codex_model"] else ""
-    codex_reasoning_effort = (
-        str(row["codex_reasoning_effort"]).strip().lower()
-        if row is not None and row["codex_reasoning_effort"]
-        else ""
-    )
-    claude_model = str(row["claude_model"]).strip() if row is not None and row["claude_model"] else ""
+    runtime_settings = _session_runtime_settings_map(row)
+    codex_model = runtime_settings.get(("codex", "model"), "")
+    codex_reasoning_effort = runtime_settings.get(("codex", "reasoning_effort"), "")
+    claude_model = runtime_settings.get(("claude", "model"), "")
     latest_run_pending_human_unblock: HumanUnblockRequest | None = None
     if row is not None and row["latest_run_pending_human_unblock_json"]:
         try:
@@ -669,6 +813,7 @@ def _session_context_response(session_id: str) -> SessionContextResponse:
         session_id=session_id,
         executor=effective_executor,  # type: ignore[arg-type]
         working_directory=effective_working_directory,
+        runtime_settings=_session_runtime_settings_response(runtime_settings),
         codex_model=codex_model or None,
         codex_reasoning_effort=codex_reasoning_effort or None,  # type: ignore[arg-type]
         claude_model=claude_model or None,
@@ -687,6 +832,7 @@ def _update_session_context(
     *,
     executor=_UNSET,
     working_directory=_UNSET,
+    runtime_settings=_UNSET,
     codex_model=_UNSET,
     codex_reasoning_effort=_UNSET,
     claude_model=_UNSET,
@@ -705,6 +851,7 @@ def _update_session_context(
         else None
     )
     next_claude_model = str(current["claude_model"]).strip() if current is not None and current["claude_model"] else None
+    next_runtime_settings = _session_runtime_settings_map(current)
 
     if executor is not _UNSET:
         next_executor = executor
@@ -712,15 +859,40 @@ def _update_session_context(
         next_working_directory = working_directory
     if codex_model is not _UNSET:
         next_codex_model = codex_model
+        if next_codex_model is None:
+            next_runtime_settings.pop(("codex", "model"), None)
+        else:
+            next_runtime_settings[("codex", "model")] = next_codex_model
     if codex_reasoning_effort is not _UNSET:
         next_codex_reasoning_effort = codex_reasoning_effort
+        if next_codex_reasoning_effort is None:
+            next_runtime_settings.pop(("codex", "reasoning_effort"), None)
+        else:
+            next_runtime_settings[("codex", "reasoning_effort")] = next_codex_reasoning_effort
     if claude_model is not _UNSET:
         next_claude_model = claude_model
+        if next_claude_model is None:
+            next_runtime_settings.pop(("claude", "model"), None)
+        else:
+            next_runtime_settings[("claude", "model")] = next_claude_model
+    if runtime_settings is not _UNSET:
+        next_runtime_settings = {}
+        for item in runtime_settings:
+            key = (item.executor, _normalized_runtime_setting_id(item.id) or item.id)
+            if item.value is None:
+                next_runtime_settings.pop(key, None)
+            else:
+                next_runtime_settings[key] = item.value
+
+    next_codex_model = next_runtime_settings.get(("codex", "model"))
+    next_codex_reasoning_effort = next_runtime_settings.get(("codex", "reasoning_effort"))
+    next_claude_model = next_runtime_settings.get(("claude", "model"))
 
     RUN_STORE.upsert_session_context(
         session_id,
         executor=next_executor,
         working_directory=next_working_directory,
+        runtime_settings_json=_serialized_runtime_settings(next_runtime_settings),
         codex_model=next_codex_model,
         codex_reasoning_effort=next_codex_reasoning_effort,
         claude_model=next_claude_model,

@@ -61,9 +61,9 @@ struct ContentView: View {
                         Button {
                             showConnectionSettings = true
                         } label: {
-                            Image(systemName: vm.hasConfiguredConnection ? "slider.horizontal.3" : "gearshape.fill")
+                            Image(systemName: settingsToolbarSymbol)
                         }
-                        .foregroundStyle(vm.hasConfiguredConnection ? Color.primary : Color.orange)
+                        .foregroundStyle(settingsToolbarTint)
                         .accessibilityLabel("Settings")
                     }
                     ToolbarItemGroup(placement: .topBarTrailing) {
@@ -236,7 +236,7 @@ struct ContentView: View {
                 Button("Files") {
                     showFileImporter = true
                 }
-                if vm.hasConfiguredConnection && !vm.isLoading && vm.hasDraftContent {
+                if canUseConnectedFeatures && !vm.isLoading && vm.hasDraftContent {
                     Button("Voice Note") {
                         composerFocused = false
                         handleRecordingButtonTap()
@@ -338,6 +338,7 @@ struct ContentView: View {
                     if vm.conversation.isEmpty {
                         ConversationEmptyStateView(
                             isConfigured: vm.hasConfiguredConnection,
+                            needsConnectionRepair: vm.needsConnectionRepair,
                             statusText: headerStatusText,
                             canRetryLastPrompt: vm.canRetryLastPrompt,
                             runtimeContext: emptyStateRuntimeContext,
@@ -377,7 +378,18 @@ struct ContentView: View {
                         .id(message.id)
                     }
 
-                    if !vm.errorText.isEmpty && !shouldShowRecordingNotice {
+                    if vm.needsConnectionRepair && !shouldShowRecordingNotice {
+                        InlineNoticeCard(
+                            title: vm.connectionRepairTitle,
+                            message: vm.connectionRepairMessage,
+                            tint: .orange,
+                            systemImage: "qrcode.viewfinder",
+                            actionTitle: "Scan Pairing QR",
+                            action: {
+                                showPairingScanner = true
+                            }
+                        )
+                    } else if !vm.errorText.isEmpty && !shouldShowRecordingNotice {
                         InlineNoticeCard(
                             title: "Something went wrong",
                             message: vm.errorText,
@@ -397,6 +409,7 @@ struct ContentView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 8)
+            .scrollDismissesKeyboard(.never)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if shouldShowRuntimeInfoBar {
                     runtimeInfoBar
@@ -411,11 +424,6 @@ struct ContentView: View {
                     }
                 }
             }
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    composerFocused = false
-                }
-            )
             .safeAreaInset(edge: .bottom) {
                 composerBar
             }
@@ -425,22 +433,27 @@ struct ContentView: View {
     private var settingsSheet: some View {
         NavigationStack {
             Form {
-                if !vm.hasConfiguredConnection {
+                if !vm.hasConfiguredConnection || vm.needsConnectionRepair {
                     Section {
                         VStack(alignment: .leading, spacing: 14) {
-                            Label("You only need to do this once", systemImage: "list.number")
+                            Label(
+                                vm.needsConnectionRepair ? "This usually takes a few seconds" : "You only need to do this once",
+                                systemImage: "list.number"
+                            )
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.primary)
 
                             VStack(alignment: .leading, spacing: 10) {
                                 SetupGuideStepSummaryRow(
                                     stepNumber: 1,
-                                    title: "Install MOBaiLE on your computer",
-                                    detail: "Run one install command on your Mac or Linux machine. The installer asks three quick questions. Keep the default answers for the normal setup."
+                                    title: vm.needsConnectionRepair ? "Open a fresh pairing QR on your computer" : "Install MOBaiLE on your computer",
+                                    detail: vm.needsConnectionRepair
+                                        ? "Run `mobaile pair` on the computer if you need a new QR, then keep it visible on screen."
+                                        : "Run one install command on your Mac or Linux machine. The installer asks three quick questions. Keep the default answers for the normal setup."
                                 )
                                 SetupGuideStepSummaryRow(
                                     stepNumber: 2,
-                                    title: "Scan the pairing QR in MOBaiLE",
+                                    title: vm.needsConnectionRepair ? "Scan the QR again in MOBaiLE" : "Scan the pairing QR in MOBaiLE",
                                     detail: "Open `backend/pairing-qr.png` on the computer, then tap Scan Pairing QR here. MOBaiLE reads it directly and fills the connection for you."
                                 )
                             }
@@ -450,7 +463,7 @@ struct ContentView: View {
                                     Button {
                                         showPairingScanner = true
                                     } label: {
-                                        Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
+                                        Label(vm.needsConnectionRepair ? "Scan Pairing QR Again" : "Scan Pairing QR", systemImage: "qrcode.viewfinder")
                                             .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.borderedProminent)
@@ -458,7 +471,7 @@ struct ContentView: View {
                                     Button {
                                         showSetupGuide = true
                                     } label: {
-                                        Label("Show Setup Guide", systemImage: "arrow.right.circle.fill")
+                                        Label(vm.needsConnectionRepair ? "Show Repair Guide" : "Show Setup Guide", systemImage: "arrow.right.circle.fill")
                                             .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.bordered)
@@ -468,7 +481,7 @@ struct ContentView: View {
                                     Button {
                                         showPairingScanner = true
                                     } label: {
-                                        Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
+                                        Label(vm.needsConnectionRepair ? "Scan Pairing QR Again" : "Scan Pairing QR", systemImage: "qrcode.viewfinder")
                                             .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.borderedProminent)
@@ -476,7 +489,7 @@ struct ContentView: View {
                                     Button {
                                         showSetupGuide = true
                                     } label: {
-                                        Label("Show Setup Guide", systemImage: "arrow.right.circle.fill")
+                                        Label(vm.needsConnectionRepair ? "Show Repair Guide" : "Show Setup Guide", systemImage: "arrow.right.circle.fill")
                                             .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.bordered)
@@ -485,9 +498,13 @@ struct ContentView: View {
                         }
                         .padding(.vertical, 4)
                     } header: {
-                        Text("Getting Started")
+                        Text(vm.needsConnectionRepair ? "Reconnect" : "Getting Started")
                     } footer: {
-                        Text("Fastest path: run the installer, keep the defaults, then use QR pairing. Manual fields below are only the fallback.")
+                        Text(
+                            vm.needsConnectionRepair
+                                ? "Fastest fix: run `mobaile pair` on the computer if needed, then scan the QR again here."
+                                : "Fastest path: run the installer, keep the defaults, then use QR pairing. Manual fields below are only the fallback."
+                        )
                     }
                 }
 
@@ -506,8 +523,10 @@ struct ContentView: View {
                     Text(vm.hasConfiguredConnection ? "Connection" : "Manual Connection")
                 } footer: {
                     Text(
-                        vm.hasConfiguredConnection
-                            ? "Server URL and token are the only required setup."
+                        vm.needsConnectionRepair
+                            ? "The saved server URL is still here. Scanning a fresh QR replaces the broken token without retyping everything."
+                            : vm.hasConfiguredConnection
+                                ? "Server URL and token are the only required setup."
                             : "Most people should pair by QR instead of typing these fallback fields."
                     )
                 }
@@ -516,7 +535,7 @@ struct ContentView: View {
                     settingsConnectionCard
                 }
 
-                if vm.hasConfiguredConnection {
+                if canUseConnectedFeatures {
                     Section {
                         Picker("Executor", selection: $vm.executor) {
                             ForEach(vm.selectableExecutors, id: \.self) { option in
@@ -525,23 +544,8 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
 
-                        if vm.effectiveExecutor == "codex" {
-                            TextField("Codex model", text: $vm.codexModelOverride)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.footnote.monospaced())
-
-                            Picker("Codex effort", selection: $vm.codexReasoningEffort) {
-                                Text("Backend default").tag("")
-                                ForEach(vm.backendCodexReasoningEffortOptions, id: \.self) { option in
-                                    Text(option.uppercased()).tag(option)
-                                }
-                            }
-                        } else if vm.effectiveExecutor == "claude" {
-                            TextField("Claude model", text: $vm.claudeModelOverride)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.footnote.monospaced())
+                        ForEach(vm.selectedRuntimeSettings) { setting in
+                            runtimeSettingControl(setting)
                         }
                     } header: {
                         Text("Agent Runtime")
@@ -591,6 +595,14 @@ struct ContentView: View {
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .font(.footnote.monospaced())
+
+                            ForEach(vm.selectedRuntimeSettings.filter { vm.runtimeSettingAllowsCustom($0.id) }) { setting in
+                                TextField("Custom \(setting.title)", text: runtimeSettingBinding(for: setting.id))
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .font(.footnote.monospaced())
+                                    .accessibilityIdentifier("settings.runtime.custom.\(setting.id)")
+                            }
                             if !vm.backendWorkdirRoot.isEmpty {
                                 Button {
                                     vm.workingDirectory = vm.backendWorkdirRoot
@@ -673,6 +685,7 @@ struct ContentView: View {
 
     private var pairingScannerSheet: some View {
         PairingScannerSheet(
+            isRepairMode: vm.needsConnectionRepair,
             onSubmitPayload: handlePairingScannerPayload,
             onOpenManualSetup: {
                 expandManualConnectionOnNextSettingsOpen = true
@@ -702,7 +715,7 @@ struct ContentView: View {
 
                 Spacer(minLength: 0)
 
-                if vm.hasConfiguredConnection {
+                if vm.hasConfiguredConnection && !vm.needsConnectionRepair {
                     Button {
                         Task { await checkSettingsConnection() }
                     } label: {
@@ -723,53 +736,154 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if vm.hasConfiguredConnection {
-                ViewThatFits(in: .vertical) {
-                    HStack(spacing: 8) {
-                        RuntimeContextChip(icon: "server.rack", label: "Server", value: connectionHostLabel)
-                        RuntimeContextChip(icon: "iphone", label: "Session", value: vm.sessionID)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    settingsPairingScannerButton()
+
+                    if vm.needsConnectionRepair {
+                        Button("Show Repair Steps") {
+                            showSetupGuide = true
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        RuntimeContextChip(icon: "server.rack", label: "Server", value: connectionHostLabel)
-                        RuntimeContextChip(icon: "iphone", label: "Session", value: vm.sessionID)
+                }
+
+                VStack(spacing: 10) {
+                    settingsPairingScannerButton(frameLabelToFillWidth: true)
+
+                    if vm.needsConnectionRepair {
+                        Button("Show Repair Steps") {
+                            showSetupGuide = true
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
             }
 
-            if showsSettingsRuntimeDetails {
-                ViewThatFits(in: .vertical) {
-                    HStack(spacing: 8) {
-                        RuntimeContextChip(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased())
-                        RuntimeContextChip(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel)
-                        RuntimeContextChip(icon: "sparkles", label: "Model", value: vm.currentBackendModelLabel)
-                        if let runtimeEffortLabel {
-                            RuntimeContextChip(icon: "brain.head.profile", label: "Effort", value: runtimeEffortLabel)
-                        }
-                        if !vm.backendWorkdirRoot.isEmpty {
-                            RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
-                        }
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            RuntimeContextChip(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased())
-                            RuntimeContextChip(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel)
-                            RuntimeContextChip(icon: "sparkles", label: "Model", value: vm.currentBackendModelLabel)
-                            if let runtimeEffortLabel {
-                                RuntimeContextChip(icon: "brain.head.profile", label: "Effort", value: runtimeEffortLabel)
-                            }
-                        }
-                        if !vm.backendWorkdirRoot.isEmpty {
-                            RuntimeContextChip(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot))
-                        }
-                    }
-                }
+            if vm.hasConfiguredConnection && !settingsConnectionDetails.isEmpty {
+                settingsDetailsGrid(items: settingsConnectionDetails)
+            }
+
+            if showsSettingsRuntimeDetails && !settingsRuntimeDetails.isEmpty {
+                settingsDetailsGrid(items: settingsRuntimeDetails)
             }
         }
         .padding(.vertical, 4)
     }
 
+    private var settingsConnectionDetails: [SettingsRuntimeDetailItem] {
+        guard vm.hasConfiguredConnection else { return [] }
+        return [
+            SettingsRuntimeDetailItem(icon: "server.rack", label: "Server", value: connectionHostLabel),
+            SettingsRuntimeDetailItem(icon: "iphone", label: "Session", value: vm.sessionID),
+        ]
+    }
+
+    @ViewBuilder
+    private func settingsPairingScannerButton(frameLabelToFillWidth: Bool = false) -> some View {
+        let label = Label(
+            vm.needsConnectionRepair ? "Scan Pairing QR Again" : "Scan New Pairing QR",
+            systemImage: "qrcode.viewfinder"
+        )
+
+        if vm.needsConnectionRepair {
+            Button {
+                showPairingScanner = true
+            } label: {
+                if frameLabelToFillWidth {
+                    label.frame(maxWidth: .infinity)
+                } else {
+                    label
+                }
+            }
+            .buttonStyle(.borderedProminent)
+        } else {
+            Button {
+                showPairingScanner = true
+            } label: {
+                if frameLabelToFillWidth {
+                    label.frame(maxWidth: .infinity)
+                } else {
+                    label
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var settingsRuntimeDetails: [SettingsRuntimeDetailItem] {
+        guard showsSettingsRuntimeDetails else { return [] }
+        var items = [
+            SettingsRuntimeDetailItem(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased()),
+            SettingsRuntimeDetailItem(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel),
+        ]
+        for setting in vm.selectedRuntimeSettings {
+            let value = vm.runtimeSettingDisplayValue(for: setting.id)
+            guard value != "Backend default" else { continue }
+            items.append(
+                SettingsRuntimeDetailItem(
+                    icon: vm.runtimeSettingIconName(for: setting.id),
+                    label: setting.title,
+                    value: value
+                )
+            )
+        }
+        if !vm.backendWorkdirRoot.isEmpty {
+            items.append(SettingsRuntimeDetailItem(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot)))
+        }
+        return items
+    }
+
+    private func settingsDetailsGrid(items: [SettingsRuntimeDetailItem]) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .top)],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            ForEach(items) { item in
+                RuntimeContextChip(icon: item.icon, label: item.label, value: item.value)
+            }
+        }
+    }
+
+    private func runtimeSettingAccessibilityIdentifier(for settingID: String) -> String {
+        switch (vm.effectiveExecutor, settingID) {
+        case ("codex", "model"):
+            return "settings.runtime.codexModel"
+        case ("codex", "reasoning_effort"):
+            return "settings.runtime.codexEffort"
+        case ("claude", "model"):
+            return "settings.runtime.claudeModel"
+        default:
+            return "settings.runtime.\(vm.effectiveExecutor).\(settingID)"
+        }
+    }
+
+    private func runtimeSettingBinding(for settingID: String) -> Binding<String> {
+        Binding(
+            get: { vm.runtimeSettingStoredValue(for: settingID) },
+            set: { vm.setRuntimeSettingValue($0, for: settingID) }
+        )
+    }
+
+    @ViewBuilder
+    private func runtimeSettingControl(_ setting: RuntimeSettingDescriptor) -> some View {
+        let options = vm.runtimeSettingPickerOptions(for: setting.id)
+        if setting.kind == "enum", !options.isEmpty {
+            Picker(setting.title, selection: runtimeSettingBinding(for: setting.id)) {
+                ForEach(options, id: \.self) { option in
+                    Text(vm.runtimeSettingPickerTitle(for: option, settingID: setting.id)).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier(runtimeSettingAccessibilityIdentifier(for: setting.id))
+        } else {
+            LabeledContent(setting.title, value: vm.runtimeSettingDisplayValue(for: setting.id))
+        }
+    }
+
     private var showsSettingsRuntimeDetails: Bool {
-        vm.hasConfiguredConnection
+        vm.hasConfiguredConnection && !vm.needsConnectionRepair
     }
 
     private var isCheckingSettingsConnection: Bool {
@@ -782,19 +896,25 @@ struct ContentView: View {
     private var settingsConnectionTitle: String {
         switch settingsConnectionState {
         case .idle:
+            if vm.needsConnectionRepair {
+                return "Reconnect this phone"
+            }
             return vm.hasConfiguredConnection ? "Current backend" : "Waiting for pairing"
         case .checking:
             return "Checking connection"
         case .success:
             return "Connection verified"
         case .failure:
-            return "Connection failed"
+            return vm.needsConnectionRepair ? "Reconnect this phone" : "Connection failed"
         }
     }
 
     private var settingsConnectionMessage: String {
         switch settingsConnectionState {
         case .idle:
+            if vm.needsConnectionRepair {
+                return vm.connectionRepairMessage
+            }
             return vm.hasConfiguredConnection
                 ? "MOBaiLE stores these values on the phone. Test the connection after editing them."
                 : "Use the installer and QR pairing for the fastest setup, or expand the manual fallback section if you already have connection details."
@@ -808,26 +928,32 @@ struct ContentView: View {
     private var settingsConnectionTint: Color {
         switch settingsConnectionState {
         case .idle:
+            if vm.needsConnectionRepair {
+                return .orange
+            }
             return vm.hasConfiguredConnection ? .primary : .orange
         case .checking:
             return .blue
         case .success:
             return .green
         case .failure:
-            return .red
+            return vm.needsConnectionRepair ? .orange : .red
         }
     }
 
     private var settingsConnectionSymbol: String {
         switch settingsConnectionState {
         case .idle:
+            if vm.needsConnectionRepair {
+                return "qrcode.viewfinder"
+            }
             return vm.hasConfiguredConnection ? "server.rack" : "exclamationmark.triangle.fill"
         case .checking:
             return "arrow.triangle.2.circlepath"
         case .success:
             return "checkmark.circle.fill"
         case .failure:
-            return "xmark.octagon.fill"
+            return vm.needsConnectionRepair ? "qrcode.viewfinder" : "xmark.octagon.fill"
         }
     }
 
@@ -846,7 +972,7 @@ struct ContentView: View {
                 "Connected to \(host)."
             )
         } catch {
-            settingsConnectionState = .failure(error.localizedDescription)
+            settingsConnectionState = .failure(vm.needsConnectionRepair ? vm.connectionRepairMessage : error.localizedDescription)
         }
     }
 
@@ -987,23 +1113,12 @@ struct ContentView: View {
     }
 
     private var standardComposerRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .bottom, spacing: 10) {
-                composerUtilityActionTray
-                composerTextEditorSurface
-                    .frame(minWidth: 140)
-                composerPrimaryActionButton
-            }
-
-            VStack(spacing: 8) {
-                composerTextEditorSurface
-
-                HStack(spacing: 10) {
-                    composerUtilityActionTray
-                    Spacer(minLength: 0)
-                    composerPrimaryActionButton
-                }
-            }
+        HStack(alignment: .bottom, spacing: 10) {
+            composerUtilityActionTray
+            composerTextEditorSurface
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
+            composerPrimaryActionButton
         }
     }
 
@@ -1011,6 +1126,7 @@ struct ContentView: View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $vm.promptText)
                 .focused($composerFocused)
+                .accessibilityIdentifier("composer.textEditor")
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 9)
@@ -1026,6 +1142,9 @@ struct ContentView: View {
                             lineWidth: 1
                         )
                 )
+                .onTapGesture {
+                    composerFocused = true
+                }
 
             if vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(composerPlaceholder)
@@ -1053,10 +1172,10 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Add context")
-            .disabled(!vm.hasConfiguredConnection || vm.isLoading)
-            .opacity((!vm.hasConfiguredConnection || vm.isLoading) ? 0.45 : 1)
+            .disabled(!canUseConnectedFeatures || vm.isLoading)
+            .opacity((!canUseConnectedFeatures || vm.isLoading) ? 0.45 : 1)
 
-            let canStartVoiceMode = !vm.isLoading && vm.hasConfiguredConnection
+            let canStartVoiceMode = !vm.isLoading && canUseConnectedFeatures
             Button {
                 composerFocused = false
                 handleVoiceModeButtonTap()
@@ -1077,63 +1196,72 @@ struct ContentView: View {
         .clipShape(Capsule())
     }
 
-    @ViewBuilder
-    private var composerPrimaryActionButton: some View {
+    private var composerPrimaryActionButtonConfiguration: ComposerPrimaryActionConfiguration {
         if vm.canCancelActiveOperation {
-            Button {
+            return ComposerPrimaryActionConfiguration(
+                systemImage: "stop.fill",
+                tint: .white,
+                fill: .red,
+                size: 46,
+                iconSize: 13,
+                weight: .semibold,
+                accessibilityLabel: vm.isUploadingAttachments ? "Cancel upload" : "Cancel run",
+                isDisabled: false,
+                opacity: 1
+            ) {
                 composerFocused = false
                 vm.cancelActiveOperation()
-            } label: {
-                ComposerActionButtonLabel(
-                    systemImage: "stop.fill",
-                    tint: .white,
-                    fill: .red,
-                    size: 46,
-                    iconSize: 13,
-                    weight: .semibold
-                )
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(vm.isUploadingAttachments ? "Cancel upload" : "Cancel run")
-        } else if vm.hasDraftContent {
-            Button {
-                handleComposerSend()
-            } label: {
-                ComposerActionButtonLabel(
-                    systemImage: "arrow.up",
-                    tint: .white,
-                    fill: .accentColor,
-                    size: 46,
-                    iconSize: 14,
-                    weight: .bold
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Send prompt")
-            .disabled(
-                !vm.hasConfiguredConnection ||
-                !vm.hasDraftContent
-            )
-            .opacity((!vm.hasConfiguredConnection || !vm.hasDraftContent) ? 0.45 : 1)
-        } else {
-            Button {
-                composerFocused = false
-                handleRecordingButtonTap()
-            } label: {
-                ComposerActionButtonLabel(
-                    systemImage: "mic.fill",
-                    tint: .white,
-                    fill: .blue,
-                    size: 46,
-                    iconSize: 14,
-                    weight: .bold
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Start recording")
-            .disabled(vm.isLoading || !vm.hasConfiguredConnection)
-            .opacity((vm.isLoading || !vm.hasConfiguredConnection) ? 0.45 : 1)
         }
+
+        if vm.hasDraftContent {
+            return ComposerPrimaryActionConfiguration(
+                systemImage: "arrow.up",
+                tint: .white,
+                fill: .accentColor,
+                size: 46,
+                iconSize: 14,
+                weight: .bold,
+                accessibilityLabel: "Send prompt",
+                isDisabled: !canUseConnectedFeatures || !vm.hasDraftContent,
+                opacity: (!canUseConnectedFeatures || !vm.hasDraftContent) ? 0.45 : 1
+            ) {
+                handleComposerSend()
+            }
+        }
+
+        return ComposerPrimaryActionConfiguration(
+            systemImage: "mic.fill",
+            tint: .white,
+            fill: .blue,
+            size: 46,
+            iconSize: 14,
+            weight: .bold,
+            accessibilityLabel: "Start recording",
+            isDisabled: vm.isLoading || !canUseConnectedFeatures,
+            opacity: (vm.isLoading || !canUseConnectedFeatures) ? 0.45 : 1
+        ) {
+            composerFocused = false
+            handleRecordingButtonTap()
+        }
+    }
+
+    private var composerPrimaryActionButton: some View {
+        let configuration = composerPrimaryActionButtonConfiguration
+        return Button(action: configuration.action) {
+            ComposerActionButtonLabel(
+                systemImage: configuration.systemImage,
+                tint: configuration.tint,
+                fill: configuration.fill,
+                size: configuration.size,
+                iconSize: configuration.iconSize,
+                weight: configuration.weight
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(configuration.accessibilityLabel)
+        .disabled(configuration.isDisabled)
+        .opacity(configuration.opacity)
     }
 
     private var recordingComposerRow: some View {
@@ -1374,6 +1502,9 @@ struct ContentView: View {
     }
 
     private var composerPlaceholder: String {
+        if vm.needsConnectionRepair {
+            return "Scan pairing QR again to reconnect"
+        }
         if !vm.hasConfiguredConnection {
             return "Connect backend"
         }
@@ -1392,6 +1523,9 @@ struct ContentView: View {
         }
         if vm.isLoading {
             return bottomRunStatusText
+        }
+        if vm.needsConnectionRepair {
+            return "Scan pairing QR again to reconnect"
         }
         if vm.hasConfiguredConnection {
             return "Ready for prompts"
@@ -1424,8 +1558,26 @@ struct ContentView: View {
         return host
     }
 
+    private var settingsToolbarSymbol: String {
+        if vm.needsConnectionRepair {
+            return "exclamationmark.triangle.fill"
+        }
+        return vm.hasConfiguredConnection ? "slider.horizontal.3" : "gearshape.fill"
+    }
+
+    private var settingsToolbarTint: Color {
+        if vm.needsConnectionRepair {
+            return .orange
+        }
+        return vm.hasConfiguredConnection ? Color.primary : Color.orange
+    }
+
+    private var canUseConnectedFeatures: Bool {
+        vm.hasConfiguredConnection && !vm.needsConnectionRepair
+    }
+
     private var emptyStateRuntimeContext: EmptyStateRuntimeContext? {
-        guard vm.hasConfiguredConnection else { return nil }
+        guard canUseConnectedFeatures else { return nil }
         let workspace = compactPathLabel(runtimeDirectoryLabel)
         return EmptyStateRuntimeContext(
             executor: runtimeExecutorLabel,
@@ -1441,23 +1593,18 @@ struct ContentView: View {
     }
 
     private var runtimeEffortLabel: String? {
-        guard vm.effectiveExecutor == "codex" else { return nil }
-        let label = vm.currentCodexReasoningEffortLabel
-        return label == "DEFAULT" ? nil : label
+        let label = vm.runtimeSettingDisplayValue(for: "reasoning_effort", executor: vm.effectiveExecutor)
+        return label == "Backend default" ? nil : label
     }
 
     private var agentRuntimeFooterText: String {
-        if vm.effectiveExecutor == "codex" {
-            return vm.hasCodexRuntimeOverrides
-                ? "These Codex values override the backend default for this session only."
-                : "Leave model blank and effort on Backend default to follow the backend defaults."
+        guard !vm.selectedRuntimeSettings.isEmpty else {
+            return "Choose an executor to show its backend-advertised runtime settings."
         }
-        if vm.effectiveExecutor == "claude" {
-            return vm.hasClaudeRuntimeOverrides
-                ? "This Claude model override applies only to the current session."
-                : "Leave the Claude model blank to follow the backend default."
+        if vm.selectedRuntimeSettings.contains(where: { vm.runtimeSettingAllowsCustom($0.id) }) {
+            return "Menu pickers follow the backend-advertised enum values. Custom text fields stay in Advanced Runtime and only appear for backend-marked settings."
         }
-        return "Choose an agent executor to expose per-session model controls."
+        return "Menu pickers follow the backend-advertised runtime values for this session."
     }
 
     private var runtimeDirectoryLabel: String {
@@ -1491,6 +1638,9 @@ struct ContentView: View {
         if vm.isLoading || lower.contains("think") || lower.contains("plan") || lower.contains("execut") || lower.contains("summar") {
             return "Thinking"
         }
+        if vm.needsConnectionRepair {
+            return "Reconnect"
+        }
         if vm.hasConfiguredConnection {
             return "Ready"
         }
@@ -1505,6 +1655,9 @@ struct ContentView: View {
         }
         if lower.contains("upload") || lower.contains("thinking") {
             return "bolt.horizontal.circle.fill"
+        }
+        if lower.contains("reconnect") {
+            return "qrcode.viewfinder"
         }
         if lower.contains("input") {
             return "hand.raised.fill"
@@ -1527,7 +1680,7 @@ struct ContentView: View {
         if lower.contains("upload") || lower.contains("thinking") {
             return .blue
         }
-        if lower.contains("input") || lower.contains("setup") {
+        if lower.contains("input") || lower.contains("setup") || lower.contains("reconnect") {
             return .orange
         }
         if lower.contains("cancel") || lower.contains("attention") {
@@ -1561,7 +1714,7 @@ struct ContentView: View {
 
     private var runtimeInfoBar: some View {
         Group {
-            if !vm.hasConfiguredConnection {
+            if !vm.hasConfiguredConnection || vm.needsConnectionRepair {
                 setupRuntimeInfoBar
                     .transition(.move(edge: .top).combined(with: .opacity))
             } else {
@@ -1582,7 +1735,7 @@ struct ContentView: View {
 
     private var setupRuntimeInfoBar: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "slider.horizontal.3")
+            Image(systemName: vm.needsConnectionRepair ? "qrcode.viewfinder" : "slider.horizontal.3")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.orange)
                 .frame(width: 34, height: 34)
@@ -1590,9 +1743,13 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Finish setup to start a run")
+                Text(vm.needsConnectionRepair ? "Repair the connection to keep chatting" : "Finish setup to start a run")
                     .font(.subheadline.weight(.semibold))
-                Text("Run one install command on your computer, keep the default answers, then scan the pairing QR. Manual connection fields are only the fallback.")
+                Text(
+                    vm.needsConnectionRepair
+                        ? "Open the latest pairing QR on your computer, then scan it again here. If you need a fresh QR first, run `mobaile pair` on the computer."
+                        : "Run one install command on your computer, keep the default answers, then scan the pairing QR. Manual connection fields are only the fallback."
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1719,7 +1876,14 @@ struct ContentView: View {
 
     private var runtimeWorkspaceButton: some View {
         Group {
-            if vm.hasConfiguredConnection {
+            if vm.needsConnectionRepair {
+                Button {
+                    showPairingScanner = true
+                } label: {
+                    Label("Scan QR Again", systemImage: "qrcode.viewfinder")
+                }
+                .buttonStyle(.borderedProminent)
+            } else if vm.hasConfiguredConnection {
                 Button {
                     showWorkspaceBrowser = true
                     Task { await vm.refreshDirectoryBrowser() }
@@ -2117,6 +2281,10 @@ struct ContentView: View {
             Task { await vm.stopRecordingAndSend() }
             return
         }
+        if vm.needsConnectionRepair {
+            showPairingScanner = true
+            return
+        }
         guard vm.hasConfiguredConnection, !vm.isLoading else { return }
         if vm.shouldPresentMicrophonePrimer {
             vm.markMicrophonePrimerSeen()
@@ -2129,6 +2297,10 @@ struct ContentView: View {
     }
 
     private func handleVoiceModeButtonTap() {
+        if vm.needsConnectionRepair && !vm.isVoiceModeActiveForCurrentThread {
+            showPairingScanner = true
+            return
+        }
         if !vm.isVoiceModeActiveForCurrentThread && vm.shouldPresentMicrophonePrimer {
             vm.markMicrophonePrimerSeen()
         }
@@ -2136,6 +2308,10 @@ struct ContentView: View {
     }
 
     private func handleVoiceModeStartTap() {
+        if vm.needsConnectionRepair {
+            showPairingScanner = true
+            return
+        }
         guard !vm.isVoiceModeActiveForCurrentThread else { return }
         if vm.shouldPresentMicrophonePrimer {
             vm.markMicrophonePrimerSeen()
@@ -2145,6 +2321,10 @@ struct ContentView: View {
 
     private func handleComposerSend() {
         composerFocused = false
+        if vm.needsConnectionRepair {
+            showPairingScanner = true
+            return
+        }
         guard let slashState = composerSlashCommandState else {
             Task { await vm.sendPrompt() }
             return
@@ -2332,6 +2512,19 @@ private struct ComposerActionButtonLabel: View {
     }
 }
 
+private struct ComposerPrimaryActionConfiguration {
+    let systemImage: String
+    let tint: Color
+    let fill: Color
+    let size: CGFloat
+    let iconSize: CGFloat
+    let weight: Font.Weight
+    let accessibilityLabel: String
+    let isDisabled: Bool
+    let opacity: Double
+    let action: () -> Void
+}
+
 private struct ComposerTrayButtonLabel: View {
     let systemImage: String
     let tint: Color
@@ -2390,26 +2583,39 @@ private struct RuntimeStatusBadge: View {
     }
 }
 
+private struct SettingsRuntimeDetailItem: Identifiable {
+    let icon: String
+    let label: String
+    let value: String
+
+    var id: String { label }
+}
+
 private struct RuntimeContextChip: View {
     let icon: String
     let label: String
     let value: String
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(value)
                     .font(.caption.monospaced())
-                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(Color(.secondarySystemBackground))

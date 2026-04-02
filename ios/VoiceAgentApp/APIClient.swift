@@ -1,10 +1,31 @@
 import Foundation
 
+private struct APIErrorPayload: Decodable {
+    let detail: String?
+}
+
 enum APIError: Error, LocalizedError {
     case missingCredentials
     case invalidURL
     case invalidResponse
     case httpError(Int, String)
+
+    var statusCode: Int? {
+        if case let .httpError(code, _) = self {
+            return code
+        }
+        return nil
+    }
+
+    var backendDetail: String? {
+        guard case let .httpError(_, body) = self else { return nil }
+        return Self.parseBackendDetail(from: body)
+    }
+
+    var isMissingOrInvalidBearerToken: Bool {
+        statusCode == 401 &&
+            (backendDetail?.lowercased().contains("missing or invalid bearer token") ?? false)
+    }
 
     var errorDescription: String? {
         switch self {
@@ -15,11 +36,33 @@ enum APIError: Error, LocalizedError {
         case .invalidResponse:
             return "Invalid server response."
         case let .httpError(code, body):
+            if let detail = backendDetail {
+                return detail
+            }
             if body.isEmpty {
                 return "Server returned HTTP \(code)."
             }
             return "Server returned HTTP \(code): \(body)"
         }
+    }
+
+    private static func parseBackendDetail(from body: String) -> String? {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let data = trimmed.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(APIErrorPayload.self, from: data),
+           let detail = payload.detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !detail.isEmpty {
+            return humanized(detail)
+        }
+
+        return humanized(trimmed)
+    }
+
+    private static func humanized(_ detail: String) -> String {
+        guard let first = detail.first else { return detail }
+        return String(first).uppercased() + detail.dropFirst()
     }
 }
 

@@ -50,16 +50,17 @@ private struct MobaileLogoMark: View {
 
 private struct ConnectionBadge: View {
     let isConnected: Bool
+    let requiresRepair: Bool
     let statusText: String
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: isConnected ? "checkmark.circle.fill" : "gearshape.fill")
+            Image(systemName: requiresRepair ? "qrcode.viewfinder" : (isConnected ? "checkmark.circle.fill" : "gearshape.fill"))
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isConnected ? Color.green : Color.orange)
+                .foregroundStyle(requiresRepair ? Color.orange : (isConnected ? Color.green : Color.orange))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(isConnected ? "Connected" : "Setup needed")
+                Text(requiresRepair ? "Reconnect needed" : (isConnected ? "Connected" : "Setup needed"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
 
@@ -97,6 +98,7 @@ struct EmptyStateRuntimeContext {
 
 struct ConversationEmptyStateView: View {
     let isConfigured: Bool
+    let needsConnectionRepair: Bool
     let statusText: String
     let canRetryLastPrompt: Bool
     let runtimeContext: EmptyStateRuntimeContext?
@@ -130,7 +132,7 @@ struct ConversationEmptyStateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if isConfigured {
+            if isConfigured && !needsConnectionRepair {
                 VStack(alignment: .leading, spacing: 16) {
                     Label(statusText, systemImage: "checkmark.circle.fill")
                         .font(.caption.weight(.semibold))
@@ -214,9 +216,13 @@ struct ConversationEmptyStateView: View {
                             .frame(width: 44, height: 44)
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Set up your computer first")
+                            Text(needsConnectionRepair ? "Reconnect this phone" : "Set up your computer first")
                                 .font(.title3.weight(.semibold))
-                            Text("MOBaiLE is the remote control. Start the backend on your Mac or Linux machine, then scan one pairing QR in the app.")
+                            Text(
+                                needsConnectionRepair
+                                    ? "The saved connection on this phone is no longer valid. Open the latest pairing QR on your computer, then scan it again here."
+                                    : "MOBaiLE is the remote control. Start the backend on your Mac or Linux machine, then scan one pairing QR in the app."
+                            )
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -225,7 +231,11 @@ struct ConversationEmptyStateView: View {
                         Spacer(minLength: 0)
                     }
 
-                    ConnectionBadge(isConnected: isConfigured, statusText: statusText)
+                    ConnectionBadge(
+                        isConnected: isConfigured,
+                        requiresRepair: needsConnectionRepair,
+                        statusText: statusText
+                    )
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("The fastest path")
@@ -235,19 +245,21 @@ struct ConversationEmptyStateView: View {
                         SetupStepRow(
                             stepNumber: 1,
                             systemImage: "laptopcomputer",
-                            title: "Run one install command on your computer",
-                            detail: "Use the guided bootstrap flow to install the backend, start it, and prepare pairing."
+                            title: needsConnectionRepair ? "Open a fresh pairing QR on your computer" : "Run one install command on your computer",
+                            detail: needsConnectionRepair
+                                ? "Run `mobaile pair` on the computer if you need a new QR, then keep it visible on screen."
+                                : "Use the guided bootstrap flow to install the backend, start it, and prepare pairing."
                         )
                         SetupStepRow(
                             stepNumber: 2,
                             systemImage: "qrcode.viewfinder",
-                            title: "Scan the pairing QR in MOBaiLE",
+                            title: needsConnectionRepair ? "Scan the QR again in MOBaiLE" : "Scan the pairing QR in MOBaiLE",
                             detail: "Open `backend/pairing-qr.png` on your computer, then tap Scan Pairing QR here and point the phone at the screen."
                         )
                         SetupStepRow(
                             stepNumber: 3,
                             systemImage: "slider.horizontal.3",
-                            title: "Use manual fields only as a fallback",
+                            title: needsConnectionRepair ? "Use manual fields only if the QR is not practical" : "Use manual fields only as a fallback",
                             detail: "If you already have a server URL and token, you can enter them yourself in Settings."
                         )
                     }
@@ -257,7 +269,7 @@ struct ConversationEmptyStateView: View {
                             Button {
                                 onOpenSetupGuide()
                             } label: {
-                                Label("Show Setup Steps", systemImage: "list.number")
+                                Label(needsConnectionRepair ? "Show Repair Steps" : "Show Setup Steps", systemImage: "list.number")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
@@ -265,7 +277,7 @@ struct ConversationEmptyStateView: View {
                             Button {
                                 onOpenPairingScanner()
                             } label: {
-                                Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
+                                Label(needsConnectionRepair ? "Scan Pairing QR Again" : "Scan Pairing QR", systemImage: "qrcode.viewfinder")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
@@ -275,7 +287,7 @@ struct ConversationEmptyStateView: View {
                             Button {
                                 onOpenSetupGuide()
                             } label: {
-                                Label("Show Setup Steps", systemImage: "list.number")
+                                Label(needsConnectionRepair ? "Show Repair Steps" : "Show Setup Steps", systemImage: "list.number")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
@@ -283,7 +295,7 @@ struct ConversationEmptyStateView: View {
                             Button {
                                 onOpenPairingScanner()
                             } label: {
-                                Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
+                                Label(needsConnectionRepair ? "Scan Pairing QR Again" : "Scan Pairing QR", systemImage: "qrcode.viewfinder")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)

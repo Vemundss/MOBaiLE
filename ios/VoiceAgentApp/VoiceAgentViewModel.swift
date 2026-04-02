@@ -8,6 +8,7 @@ private enum PreviewScenario: String {
     case configuredEmpty = "configured-empty"
     case conversation = "conversation"
     case recording = "recording"
+    case repair = "repair"
 
     static var current: PreviewScenario? {
         let processInfo = ProcessInfo.processInfo
@@ -104,6 +105,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
+    struct ConnectionRepairState: Equatable {
+        let title: String
+        let message: String
+    }
+
     struct DirectoryBreadcrumb: Identifiable, Equatable {
         let id: String
         let title: String
@@ -125,9 +131,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var workingDirectory: String = "~"
     @Published var runTimeoutSeconds: String = "0"
     @Published var executor: String = "codex"
-    @Published var codexModelOverride: String = ""
-    @Published var codexReasoningEffort: String = ""
-    @Published var claudeModelOverride: String = ""
+    @Published private var runtimeSettingOverrides: [String: [String: String]] = [:]
     @Published var responseMode: String = "concise"
     @Published var agentGuidanceMode: String = "guided"
     @Published var developerMode: Bool = false
@@ -165,8 +169,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var backendAvailableExecutors: [String] = ["codex"]
     @Published var backendSlashCommands: [ComposerSlashCommand] = []
     @Published var backendWorkdirRoot: String = ""
+    @Published var backendCodexModelOptions: [String] = []
     @Published var backendCodexReasoningEffort: String = ""
     @Published var backendCodexReasoningEffortOptions: [String] = ["minimal", "low", "medium", "high", "xhigh"]
+    @Published var backendClaudeModelOptions: [String] = []
     @Published var showDirectoryBrowser: Bool = false
     @Published var isLoadingDirectoryBrowser: Bool = false
     @Published var directoryBrowserEntries: [DirectoryEntry] = []
@@ -174,6 +180,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var directoryBrowserError: String = ""
     @Published var directoryBrowserMissingPath: String = ""
     @Published var pendingPairing: PendingPairing?
+    @Published private(set) var connectionRepairState: ConnectionRepairState?
     @Published var runPhaseText: String = "Idle"
     @Published var runStartedAt: Date?
     @Published var runEndedAt: Date?
@@ -200,6 +207,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var didConfigureRemoteCommands = false
     private var isRestoringThreadState = false
     private var activeAttachmentUploadCancellation: (() -> Void)?
+    private var pendingDraftPersistenceTask: Task<Void, Never>?
     private var backendTranscribeProvider: String = "unknown"
     private var backendTranscribeReady = false
     private var observedRunContexts: [String: ObservedRunContext] = [:]
@@ -209,6 +217,27 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var shouldResumeVoiceModeAfterSpeech = false
 
     private static let defaultCodexReasoningEffortOptions = ["minimal", "low", "medium", "high", "xhigh"]
+    private static let defaultCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
+    private static let defaultClaudeModelOptions = ["claude-sonnet-4-5"]
+
+    var codexModelOverride: String {
+        get { runtimeSettingOverrideValue(for: "model", executor: "codex") }
+        set { updateRuntimeSettingOverride(newValue, for: "model", executor: "codex") }
+    }
+
+    var codexReasoningEffort: String {
+        get { runtimeSettingOverrideValue(for: "reasoning_effort", executor: "codex") }
+        set { updateRuntimeSettingOverride(newValue, for: "reasoning_effort", executor: "codex") }
+    }
+
+    var claudeModelOverride: String {
+        get { runtimeSettingOverrideValue(for: "model", executor: "claude") }
+        set { updateRuntimeSettingOverride(newValue, for: "model", executor: "claude") }
+    }
+
+    deinit {
+        pendingDraftPersistenceTask?.cancel()
+    }
 
     private enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
@@ -219,6 +248,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         static let runTimeoutSeconds = "mobaile.run_timeout_seconds"
         static let runTimeoutMigratedToZeroDefault = "mobaile.run_timeout_migrated_to_zero_default"
         static let executor = "mobaile.executor"
+        static let runtimeSettingOverrides = "mobaile.runtime_setting_overrides"
         static let codexModelOverride = "mobaile.codex_model_override"
         static let codexReasoningEffort = "mobaile.codex_reasoning_effort"
         static let claudeModelOverride = "mobaile.claude_model_override"
@@ -351,16 +381,44 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 available: true,
                 isDefault: true,
                 internalOnly: false,
-                model: "gpt-5.4"
+                model: "gpt-5.4",
+                settings: [
+                    RuntimeSettingDescriptor(
+                        id: "model",
+                        title: "Model",
+                        kind: "enum",
+                        allowCustom: true,
+                        value: "gpt-5.4",
+                        options: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
+                    ),
+                    RuntimeSettingDescriptor(
+                        id: "reasoning_effort",
+                        title: "Reasoning Effort",
+                        kind: "enum",
+                        allowCustom: false,
+                        value: "high",
+                        options: Self.defaultCodexReasoningEffortOptions
+                    ),
+                ]
             ),
             RuntimeExecutorDescriptor(
                 id: "claude",
-                title: "Claude",
+                title: "Claude Code",
                 kind: "agent",
                 available: true,
                 isDefault: false,
                 internalOnly: false,
-                model: "claude-sonnet-4.5"
+                model: "claude-sonnet-4-5",
+                settings: [
+                    RuntimeSettingDescriptor(
+                        id: "model",
+                        title: "Model",
+                        kind: "enum",
+                        allowCustom: true,
+                        value: "claude-sonnet-4-5",
+                        options: ["claude-sonnet-4-5"]
+                    )
+                ]
             ),
         ]
 
@@ -377,8 +435,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         backendDefaultExecutor = "codex"
         backendAvailableExecutors = previewExecutors.map(\.id)
         backendExecutorDescriptors = previewExecutors
+        backendCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
         backendCodexReasoningEffort = "high"
         backendCodexReasoningEffortOptions = Self.defaultCodexReasoningEffortOptions
+        backendClaudeModelOptions = ["claude-sonnet-4-5"]
         backendSlashCommands = previewSlashCommands()
         directoryBrowserPath = workspace
         directoryBrowserEntries = []
@@ -462,6 +522,28 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 didCompleteRun = false
                 voiceModeEnabled = true
                 voiceModeThreadID = primaryThreadID
+
+            case .repair:
+                conversation = previewConversation()
+                promptText = ""
+                draftAttachments = []
+                runID = ""
+                summaryText = ""
+                transcriptText = ""
+                statusText = "Connection needs repair"
+                runPhaseText = "Reconnect"
+                runStartedAt = nil
+                runEndedAt = nil
+                isLoading = false
+                isRecording = false
+                recordingStartedAt = nil
+                didCompleteRun = false
+                voiceModeEnabled = false
+                voiceModeThreadID = nil
+                connectionRepairState = ConnectionRepairState(
+                    title: "Reconnect this phone",
+                    message: "This phone is no longer paired with demo.mobaile.app. Open the latest pairing QR on that computer and scan it again here."
+                )
             }
         }
     }
@@ -592,6 +674,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     func sendPrompt() async {
+        guard !needsConnectionRepair else {
+            statusText = "Connection needs repair"
+            errorText = connectionRepairMessage
+            return
+        }
         await submitPrompt(
             text: promptText,
             stagedAttachments: draftAttachments,
@@ -602,6 +689,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     func startRecording() async {
         guard !isLoading else {
             statusText = "A run is already in progress."
+            return
+        }
+        guard !needsConnectionRepair else {
+            statusText = "Connection needs repair"
+            errorText = connectionRepairMessage
             return
         }
         guard hasConfiguredConnection else {
@@ -689,15 +781,26 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         }
                         return
                     } catch {
+                        _ = registerConnectionRepairIfNeeded(from: error)
                         errorText = error.localizedDescription
                         return
                     }
+                }
+                if let repairMessage = registerConnectionRepairIfNeeded(from: apiError) {
+                    errorText = repairMessage
+                    statusText = "Connection needs repair"
+                    return
                 }
                 errorText = apiError.localizedDescription
             default:
                 errorText = apiError.localizedDescription
             }
         } catch {
+            if let repairMessage = registerConnectionRepairIfNeeded(from: error) {
+                errorText = repairMessage
+                statusText = "Connection needs repair"
+                return
+            }
             errorText = error.localizedDescription
         }
     }
@@ -892,6 +995,24 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 }
                 return
             }
+            if let repairMessage = registerConnectionRepairIfNeeded(from: error) {
+                if activeThreadID == originThreadID {
+                    errorText = repairMessage
+                    statusText = "Connection needs repair"
+                    isLoading = false
+                    runPhaseText = "Reconnect"
+                    runEndedAt = Date()
+                } else if let originThreadID {
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Connection needs repair")
+                }
+                emitFailureFeedback()
+                if let originThreadID {
+                    persistThreadSnapshot(threadID: originThreadID)
+                } else {
+                    persistActiveThreadSnapshot()
+                }
+                return
+            }
             maybeAutoFixWorkingDirectory(from: error)
             if activeThreadID == originThreadID {
                 errorText = error.localizedDescription
@@ -945,6 +1066,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func toggleRecordingFromHeadsetControl() async {
         guard airPodsClickToRecordEnabled else { return }
+        guard !needsConnectionRepair else {
+            statusText = "Connection needs repair"
+            errorText = connectionRepairMessage
+            return
+        }
         guard hasConfiguredConnection else {
             statusText = "Run setup on your computer or enter connection details first."
             return
@@ -1013,6 +1139,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func beginVoiceMode() async {
+        guard !needsConnectionRepair else {
+            statusText = "Connection needs repair"
+            errorText = connectionRepairMessage
+            return
+        }
         guard hasConfiguredConnection else {
             statusText = "Run setup on your computer or enter connection details first."
             return
@@ -1198,6 +1329,19 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     return
                 }
             } catch {
+                if let repairMessage = registerConnectionRepairIfNeeded(from: error) {
+                    if activeThreadID == threadID {
+                        isLoading = false
+                        errorText = repairMessage
+                        statusText = "Connection needs repair"
+                        runPhaseText = "Reconnect"
+                        runEndedAt = Date()
+                    }
+                    updateThreadMetadata(threadID: threadID, statusText: "Connection needs repair")
+                    removeObservedRunContext(runID: runID)
+                    persistThreadSnapshot(threadID: threadID)
+                    return
+                }
                 if isTerminalStatusText(statusText(for: threadID)) {
                     return
                 }
@@ -1361,14 +1505,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     }
                 }
             } else {
-                directoryBrowserError = apiError.localizedDescription
+                directoryBrowserError = registerConnectionRepairIfNeeded(from: apiError) ?? apiError.localizedDescription
             }
             directoryBrowserEntries = []
             directoryBrowserTruncated = false
         } catch {
             directoryBrowserEntries = []
             directoryBrowserTruncated = false
-            directoryBrowserError = error.localizedDescription
+            directoryBrowserError = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
             directoryBrowserMissingPath = ""
         }
         isLoadingDirectoryBrowser = false
@@ -1390,7 +1534,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             directoryBrowserMissingPath = ""
             await refreshDirectoryBrowser(path: response.path)
         } catch {
-            directoryBrowserError = error.localizedDescription
+            directoryBrowserError = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
             isLoadingDirectoryBrowser = false
         }
     }
@@ -1422,7 +1566,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             await refreshDirectoryBrowser(path: basePath.isEmpty ? response.path : basePath)
             return true
         } catch {
-            directoryBrowserError = error.localizedDescription
+            directoryBrowserError = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
             isLoadingDirectoryBrowser = false
             return false
         }
@@ -1587,7 +1731,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             let context = try await syncSessionContextToBackend()
             return "Working directory set to \(context.resolvedWorkingDirectory)."
         } catch {
-            errorText = error.localizedDescription
+            errorText = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
             return fallback
         }
     }
@@ -1615,7 +1759,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             _ = try await syncSessionContextToBackend()
             return "Executor set to \(effectiveExecutor.uppercased()) (\(currentBackendModelLabel))."
         } catch {
-            errorText = error.localizedDescription
+            errorText = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
             return fallback
         }
     }
@@ -1626,12 +1770,18 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             backendSlashCommands = []
             throw APIError.missingCredentials
         }
-        let descriptors = try await client.fetchSlashCommands(
-            serverURL: normalizedServerURL,
-            token: apiToken
-        )
-        backendSlashCommands = descriptors.map(ComposerSlashCommand.init(descriptor:))
-        return backendSlashCommands
+        do {
+            let descriptors = try await client.fetchSlashCommands(
+                serverURL: normalizedServerURL,
+                token: apiToken
+            )
+            clearConnectionRepairState()
+            backendSlashCommands = descriptors.map(ComposerSlashCommand.init(descriptor:))
+            return backendSlashCommands
+        } catch {
+            _ = registerConnectionRepairIfNeeded(from: error)
+            throw error
+        }
     }
 
     @discardableResult
@@ -1642,17 +1792,23 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         guard hasConfiguredConnection else {
             throw APIError.missingCredentials
         }
-        let response = try await client.executeSlashCommand(
-            serverURL: normalizedServerURL,
-            token: apiToken,
-            sessionID: sessionID,
-            commandID: command.id,
-            arguments: arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : arguments
-        )
-        if let sessionContext = response.sessionContext {
-            applySessionContext(sessionContext)
+        do {
+            let response = try await client.executeSlashCommand(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                sessionID: sessionID,
+                commandID: command.id,
+                arguments: arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : arguments
+            )
+            clearConnectionRepairState()
+            if let sessionContext = response.sessionContext {
+                applySessionContext(sessionContext)
+            }
+            return response
+        } catch {
+            _ = registerConnectionRepairIfNeeded(from: error)
+            throw error
         }
-        return response
     }
 
     @discardableResult
@@ -1660,13 +1816,18 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         guard hasConfiguredConnection else {
             throw APIError.missingCredentials
         }
-        let context = try await client.fetchSessionContext(
-            serverURL: normalizedServerURL,
-            token: apiToken,
-            sessionID: sessionID
-        )
-        applySessionContext(context)
-        return context
+        do {
+            let context = try await client.fetchSessionContext(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                sessionID: sessionID
+            )
+            applySessionContext(context)
+            return context
+        } catch {
+            _ = registerConnectionRepairIfNeeded(from: error)
+            throw error
+        }
     }
 
     @discardableResult
@@ -1674,7 +1835,23 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         guard hasConfiguredConnection else {
             throw APIError.missingCredentials
         }
+        do {
+            let context = try await client.updateSessionContext(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                sessionID: sessionID,
+                requestBody: runtimeSessionContextUpdateRequest()
+            )
+            clearConnectionRepairState()
+            applySessionContext(context)
+            return context
+        } catch {
+            _ = registerConnectionRepairIfNeeded(from: error)
+            throw error
+        }
+    }
 
+    func runtimeSessionContextUpdateRequest() -> SessionContextUpdateRequest {
         let executorOverride: String? = {
             let current = effectiveExecutor
             let backendDefault = normalizedExecutor(from: backendDefaultExecutor) ?? current
@@ -1691,47 +1868,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             return normalized
         }()
 
-        let codexModelOverrideValue: String? = {
-            let normalized = codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalized.isEmpty else { return nil }
-            if normalized == normalizedBackendCodexModel {
-                return nil
-            }
-            return normalized
-        }()
-
-        let codexReasoningEffortOverrideValue: String? = {
-            let normalized = codexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !normalized.isEmpty else { return nil }
-            if normalized == normalizedBackendCodexReasoningEffort {
-                return nil
-            }
-            return normalized
-        }()
-
-        let claudeModelOverrideValue: String? = {
-            let normalized = claudeModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalized.isEmpty else { return nil }
-            if normalized == normalizedBackendClaudeModel {
-                return nil
-            }
-            return normalized
-        }()
-
-        let context = try await client.updateSessionContext(
-            serverURL: normalizedServerURL,
-            token: apiToken,
-            sessionID: sessionID,
-            requestBody: SessionContextUpdateRequest(
-                executor: executorOverride,
-                workingDirectory: workingDirectoryOverride,
-                codexModel: codexModelOverrideValue,
-                codexReasoningEffort: codexReasoningEffortOverrideValue,
-                claudeModel: claudeModelOverrideValue
-            )
+        return SessionContextUpdateRequest(
+            executor: executorOverride,
+            workingDirectory: workingDirectoryOverride,
+            runtimeSettings: runtimeSessionContextSettingsPayload(),
+            codexModel: runtimeSessionContextValue(for: "model", executor: "codex"),
+            codexReasoningEffort: runtimeSessionContextValue(for: "reasoning_effort", executor: "codex"),
+            claudeModel: runtimeSessionContextValue(for: "model", executor: "claude")
         )
-        applySessionContext(context)
-        return context
     }
 
     func persistAndSyncRuntimeSettings() async {
@@ -1748,11 +1892,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             }
             errorText = ""
         } catch {
-            errorText = error.localizedDescription
+            errorText = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
         }
     }
 
     private func applySessionContext(_ context: SessionContext) {
+        clearConnectionRepairState()
         let normalizedSession = context.sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
         if !normalizedSession.isEmpty {
             sessionID = normalizedSession
@@ -1772,9 +1917,23 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if !resolved.isEmpty {
             resolvedWorkingDirectory = resolved
         }
-        codexModelOverride = context.codexModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        codexReasoningEffort = context.codexReasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        claudeModelOverride = context.claudeModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let runtimeSettings = context.runtimeSettings, !runtimeSettings.isEmpty {
+            var appliedKeys: Set<String> = []
+            for setting in runtimeSettings {
+                setRuntimeSettingValue(setting.value, for: setting.settingID, executor: setting.executor)
+                appliedKeys.insert("\(setting.executor).\(setting.settingID)")
+            }
+            for (executorID, setting) in allRuntimeSettingDescriptors() {
+                let key = "\(executorID).\(setting.id)"
+                if !appliedKeys.contains(key) {
+                    setRuntimeSettingValue(nil, for: setting.id, executor: executorID)
+                }
+            }
+        } else {
+            setRuntimeSettingValue(context.codexModel, for: "model", executor: "codex")
+            setRuntimeSettingValue(context.codexReasoningEffort, for: "reasoning_effort", executor: "codex")
+            setRuntimeSettingValue(context.claudeModel, for: "model", executor: "claude")
+        }
         lastHydratedSessionContextID = normalizedSession.isEmpty ? lastHydratedSessionContextID : normalizedSession
         lastHydratedSessionContextServerURL = normalizedServerURL
         persistSettings()
@@ -1960,6 +2119,24 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 } else if let originThreadID {
                     updateThreadMetadata(threadID: originThreadID, statusText: "Cancelled")
                 }
+                if let originThreadID {
+                    persistThreadSnapshot(threadID: originThreadID)
+                } else {
+                    persistActiveThreadSnapshot()
+                }
+                return
+            }
+            if let repairMessage = registerConnectionRepairIfNeeded(from: error) {
+                if activeThreadID == originThreadID {
+                    errorText = repairMessage
+                    statusText = "Connection needs repair"
+                    isLoading = false
+                    runPhaseText = "Reconnect"
+                    runEndedAt = Date()
+                } else if let originThreadID {
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Connection needs repair")
+                }
+                emitFailureFeedback()
                 if let originThreadID {
                     persistThreadSnapshot(threadID: originThreadID)
                 } else {
@@ -2290,6 +2467,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         defaults.set(workingDirectory, forKey: DefaultsKey.workingDirectory)
         defaults.set(runTimeoutSeconds, forKey: DefaultsKey.runTimeoutSeconds)
         defaults.set(executor, forKey: DefaultsKey.executor)
+        if let data = try? JSONEncoder().encode(runtimeSettingOverrides) {
+            defaults.set(data, forKey: DefaultsKey.runtimeSettingOverrides)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.runtimeSettingOverrides)
+        }
         defaults.set(codexModelOverride, forKey: DefaultsKey.codexModelOverride)
         defaults.set(codexReasoningEffort, forKey: DefaultsKey.codexReasoningEffort)
         defaults.set(claudeModelOverride, forKey: DefaultsKey.claudeModelOverride)
@@ -2352,7 +2534,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             }
             persistThreadSnapshot(threadID: targetThreadID)
         } catch {
-            // Ignore bootstrap errors to avoid blocking first render.
+            if registerConnectionRepairIfNeeded(from: error) != nil {
+                statusText = "Connection needs repair"
+            }
         }
     }
 
@@ -2362,7 +2546,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             let context = try await refreshSessionContextFromBackend()
             _ = try? await restoreLatestRunFromSessionContext(context)
         } catch {
-            // Ignore foreground refresh failures to keep the UI responsive.
+            if registerConnectionRepairIfNeeded(from: error) != nil {
+                statusText = "Connection needs repair"
+            }
         }
     }
 
@@ -2672,46 +2858,85 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             clearRuntimeConfiguration()
             throw APIError.missingCredentials
         }
-        let cfg = try await client.fetchRuntimeConfig(
-            serverURL: normalizedServerURL,
-            token: apiToken
-        )
-        applyAdvertisedServerURLs(
-            primaryServerURL: cfg.serverURL,
-            advertisedServerURLs: cfg.serverURLs ?? [],
-            persist: true
-        )
-        backendSecurityMode = cfg.securityMode
-        backendDefaultExecutor = normalizedExecutor(from: cfg.defaultExecutor) ?? "codex"
-        backendExecutorDescriptors = normalizedRuntimeExecutors(
-            cfg.executors,
-            config: cfg,
-            defaultExecutor: backendDefaultExecutor
-        )
-        backendAvailableExecutors = normalizedAvailableExecutors(
-            cfg.availableExecutors,
-            descriptors: backendExecutorDescriptors,
-            defaultExecutor: backendDefaultExecutor
-        )
-        backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
-        backendTranscribeReady = cfg.transcribeReady ?? false
-        backendWorkdirRoot = cfg.workdirRoot ?? ""
-        backendCodexReasoningEffort = cfg.codexReasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        let advertisedEffortOptions = (cfg.codexReasoningEffortOptions ?? [])
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .filter { !$0.isEmpty }
-        backendCodexReasoningEffortOptions = advertisedEffortOptions.isEmpty
-            ? Self.defaultCodexReasoningEffortOptions
-            : advertisedEffortOptions
-        let slashDescriptors = try await client.fetchSlashCommands(
-            serverURL: normalizedServerURL,
-            token: apiToken
-        )
-        backendSlashCommands = slashDescriptors.map(ComposerSlashCommand.init(descriptor:))
-        if normalizedExecutor(from: executor) == nil {
-            executor = backendDefaultExecutor
+        do {
+            let cfg = try await client.fetchRuntimeConfig(
+                serverURL: normalizedServerURL,
+                token: apiToken
+            )
+            clearConnectionRepairState()
+            applyAdvertisedServerURLs(
+                primaryServerURL: cfg.serverURL,
+                advertisedServerURLs: cfg.serverURLs ?? [],
+                persist: true
+            )
+            backendSecurityMode = cfg.securityMode
+            backendDefaultExecutor = normalizedExecutor(from: cfg.defaultExecutor) ?? "codex"
+            backendExecutorDescriptors = normalizedRuntimeExecutors(
+                cfg.executors,
+                config: cfg,
+                defaultExecutor: backendDefaultExecutor
+            )
+            backendAvailableExecutors = normalizedAvailableExecutors(
+                cfg.availableExecutors,
+                descriptors: backendExecutorDescriptors,
+                defaultExecutor: backendDefaultExecutor
+            )
+            backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
+            backendTranscribeReady = cfg.transcribeReady ?? false
+            backendWorkdirRoot = cfg.workdirRoot ?? ""
+            let codexSetting = backendExecutorDescriptors
+                .first(where: { $0.id == "codex" })?
+                .settings?
+                .first(where: { $0.id == "model" })
+            let advertisedCodexModels = ((cfg.codexModelOptions ?? []).isEmpty
+                ? (codexSetting?.options ?? [])
+                : (cfg.codexModelOptions ?? []))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            backendCodexModelOptions = advertisedCodexModels.isEmpty
+                ? Self.defaultCodexModelOptions
+                : dedupedRuntimeModelOptions(advertisedCodexModels)
+            let codexEffortSetting = backendExecutorDescriptors
+                .first(where: { $0.id == "codex" })?
+                .settings?
+                .first(where: { $0.id == "reasoning_effort" })
+            backendCodexReasoningEffort = (
+                cfg.codexReasoningEffort
+                ?? codexEffortSetting?.value
+            )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            let advertisedEffortOptions = ((cfg.codexReasoningEffortOptions ?? []).isEmpty
+                ? (codexEffortSetting?.options ?? [])
+                : (cfg.codexReasoningEffortOptions ?? []))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+            backendCodexReasoningEffortOptions = advertisedEffortOptions.isEmpty
+                ? Self.defaultCodexReasoningEffortOptions
+                : advertisedEffortOptions
+            let claudeSetting = backendExecutorDescriptors
+                .first(where: { $0.id == "claude" })?
+                .settings?
+                .first(where: { $0.id == "model" })
+            let advertisedClaudeModels = ((cfg.claudeModelOptions ?? []).isEmpty
+                ? (claudeSetting?.options ?? [])
+                : (cfg.claudeModelOptions ?? []))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            backendClaudeModelOptions = advertisedClaudeModels.isEmpty
+                ? Self.defaultClaudeModelOptions
+                : dedupedRuntimeModelOptions(advertisedClaudeModels)
+            let slashDescriptors = try await client.fetchSlashCommands(
+                serverURL: normalizedServerURL,
+                token: apiToken
+            )
+            backendSlashCommands = slashDescriptors.map(ComposerSlashCommand.init(descriptor:))
+            if normalizedExecutor(from: executor) == nil {
+                executor = backendDefaultExecutor
+            }
+            return cfg
+        } catch {
+            _ = registerConnectionRepairIfNeeded(from: error)
+            throw error
         }
-        return cfg
     }
 
     func useCurrentBrowserDirectoryAsWorkingDirectory() async {
@@ -2725,7 +2950,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             _ = try await syncSessionContextToBackend()
             errorText = ""
         } catch {
-            errorText = error.localizedDescription
+            errorText = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
         }
     }
 
@@ -2798,6 +3023,43 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         !normalizedServerURL.isEmpty && !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var needsConnectionRepair: Bool {
+        connectionRepairState != nil
+    }
+
+    var connectionRepairTitle: String {
+        connectionRepairState?.title ?? "Reconnect this phone"
+    }
+
+    var connectionRepairMessage: String {
+        connectionRepairState?.message ?? "Open the latest pairing QR on your computer and scan it again here."
+    }
+
+    @discardableResult
+    func registerConnectionRepairIfNeeded(from error: Error) -> String? {
+        guard let apiError = error as? APIError, apiError.isMissingOrInvalidBearerToken else {
+            return nil
+        }
+
+        let host = URL(string: normalizedServerURL)?.host?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let message: String
+        if host.isEmpty {
+            message = "This phone is no longer paired with your computer. Open the latest pairing QR on the computer and scan it again here."
+        } else {
+            message = "This phone is no longer paired with \(host). Open the latest pairing QR on that computer and scan it again here."
+        }
+
+        connectionRepairState = ConnectionRepairState(
+            title: "Reconnect this phone",
+            message: message
+        )
+        return message
+    }
+
+    func clearConnectionRepairState() {
+        connectionRepairState = nil
+    }
+
     private var normalizedWorkingDirectory: String? {
         let value = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty {
@@ -2859,6 +3121,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         return values
     }
 
+    var selectedRuntimeExecutorDescriptor: RuntimeExecutorDescriptor? {
+        runtimeExecutorDescriptor(for: effectiveExecutor)
+    }
+
+    var selectedRuntimeSettings: [RuntimeSettingDescriptor] {
+        runtimeSettings(for: effectiveExecutor)
+    }
+
     var backendExecutorModelRows: [(id: String, title: String, model: String)] {
         backendExecutorDescriptors
             .filter { $0.kind == "agent" }
@@ -2872,44 +3142,382 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     var currentBackendModelLabel: String {
-        modelLabel(for: effectiveExecutor)
+        if effectiveExecutor == "local" {
+            return "n/a"
+        }
+        return runtimeSettingDisplayValue(for: "model", executor: effectiveExecutor)
     }
 
     var currentCodexModelLabel: String {
-        let overrideValue = codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !overrideValue.isEmpty {
-            return overrideValue
-        }
-        return displayModelName(normalizedBackendCodexModel)
+        runtimeSettingDisplayValue(for: "model", executor: "codex")
+    }
+
+    var codexRuntimeModelOptions: [String] {
+        runtimeSettingPickerOptions(for: "model", executor: "codex").filter { !$0.isEmpty }
+    }
+
+    var codexBackendDefaultOptionLabel: String {
+        runtimeSettingDefaultOptionLabel(for: "model", executor: "codex")
     }
 
     var currentClaudeModelLabel: String {
-        let overrideValue = claudeModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !overrideValue.isEmpty {
-            return overrideValue
-        }
-        return displayModelName(normalizedBackendClaudeModel)
+        runtimeSettingDisplayValue(for: "model", executor: "claude")
+    }
+
+    var claudeRuntimeModelOptions: [String] {
+        runtimeSettingPickerOptions(for: "model", executor: "claude").filter { !$0.isEmpty }
+    }
+
+    var claudeBackendDefaultOptionLabel: String {
+        runtimeSettingDefaultOptionLabel(for: "model", executor: "claude")
     }
 
     var currentCodexReasoningEffortLabel: String {
-        let overrideValue = codexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if !overrideValue.isEmpty {
-            return overrideValue.uppercased()
-        }
-        let backendValue = normalizedBackendCodexReasoningEffort
-        if !backendValue.isEmpty {
-            return backendValue.uppercased()
-        }
-        return "DEFAULT"
+        runtimeSettingDisplayValue(for: "reasoning_effort", executor: "codex")
     }
 
     var hasCodexRuntimeOverrides: Bool {
-        !codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !codexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        runtimeSettingHasOverride(for: "model", executor: "codex")
+            || runtimeSettingHasOverride(for: "reasoning_effort", executor: "codex")
     }
 
     var hasClaudeRuntimeOverrides: Bool {
-        !claudeModelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        runtimeSettingHasOverride(for: "model", executor: "claude")
+    }
+
+    func runtimeSettings(for executor: String? = nil) -> [RuntimeSettingDescriptor] {
+        guard let descriptor = runtimeExecutorDescriptor(for: executor) else {
+            return []
+        }
+        if let settings = descriptor.settings, !settings.isEmpty {
+            return settings
+        }
+        return legacyRuntimeSettings(for: descriptor.id)
+    }
+
+    func runtimeSettingDescriptor(for settingID: String, executor: String? = nil) -> RuntimeSettingDescriptor? {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        return runtimeSettings(for: executor).first(where: { $0.id == normalizedSettingID })
+    }
+
+    func runtimeSettingCurrentValue(for settingID: String, executor: String? = nil) -> String? {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let override = runtimeSettingStoredValue(for: normalizedSettingID, executor: executor)
+        if !override.isEmpty {
+            return override
+        }
+        let backendValue = runtimeSettingBackendValue(for: normalizedSettingID, executor: executor)
+        return backendValue.isEmpty ? nil : backendValue
+    }
+
+    func runtimeSettingDisplayValue(for settingID: String, executor: String? = nil) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        guard let currentValue = runtimeSettingCurrentValue(for: normalizedSettingID, executor: executor) else {
+            return "Backend default"
+        }
+        return runtimeSettingPresentationValue(currentValue, settingID: normalizedSettingID)
+    }
+
+    func runtimeSettingPickerOptions(for settingID: String, executor: String? = nil) -> [String] {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let descriptor = runtimeSettingDescriptor(for: normalizedSettingID, executor: executor)
+        let backendValue = runtimeSettingBackendValue(for: normalizedSettingID, executor: executor)
+        var values: [String] = [""]
+
+        if !backendValue.isEmpty {
+            values.append(backendValue)
+        }
+
+        if let currentValue = runtimeSettingCurrentValue(for: normalizedSettingID, executor: executor),
+           !currentValue.isEmpty,
+           !values.contains(currentValue) {
+            values.append(currentValue)
+        }
+
+        for option in descriptor?.options ?? [] {
+            let normalizedValue = normalizedRuntimeSettingText(option) ?? ""
+            guard !normalizedValue.isEmpty, !values.contains(normalizedValue) else { continue }
+            values.append(normalizedValue)
+        }
+
+        return values
+    }
+
+    func runtimeSettingDefaultOptionLabel(for settingID: String, executor: String? = nil) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let backendValue = runtimeSettingBackendValue(for: normalizedSettingID, executor: executor)
+        guard !backendValue.isEmpty else { return "Backend default" }
+        return "Backend default (\(runtimeSettingPresentationValue(backendValue, settingID: normalizedSettingID)))"
+    }
+
+    func runtimeSettingHasOverride(for settingID: String, executor: String? = nil) -> Bool {
+        !runtimeSettingStoredValue(for: settingID, executor: executor).isEmpty
+    }
+
+    func runtimeSettingPickerTitle(for value: String, settingID: String, executor: String? = nil) -> String {
+        if value.isEmpty {
+            return runtimeSettingDefaultOptionLabel(for: settingID, executor: executor)
+        }
+        return runtimeSettingPresentationValue(value, settingID: settingID)
+    }
+
+    func runtimeSettingIconName(for settingID: String) -> String {
+        switch normalizedRuntimeSettingIdentifier(settingID) {
+        case "model":
+            return "sparkles"
+        case "reasoning_effort":
+            return "brain.head.profile"
+        default:
+            return "slider.horizontal.3"
+        }
+    }
+
+    func runtimeSettingAllowsCustom(_ settingID: String, executor: String? = nil) -> Bool {
+        runtimeSettingDescriptor(for: settingID, executor: executor)?.allowCustom ?? false
+    }
+
+    func runtimeSettingStoredValue(for settingID: String, executor: String? = nil) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let targetExecutor = normalizedExecutor(from: executor ?? effectiveExecutor) ?? effectiveExecutor
+        return runtimeSettingOverrides[targetExecutor]?[normalizedSettingID] ?? ""
+    }
+
+    func setRuntimeSettingValue(_ value: String?, for settingID: String, executor: String? = nil) {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let targetExecutor = normalizedExecutor(from: executor ?? effectiveExecutor) ?? effectiveExecutor
+        updateRuntimeSettingOverride(value, for: normalizedSettingID, executor: targetExecutor)
+    }
+
+    private func runtimeSessionContextValue(for settingID: String, executor: String) -> String? {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let overrideValue = runtimeSettingStoredValue(for: normalizedSettingID, executor: executor)
+        guard !overrideValue.isEmpty else { return nil }
+        let backendValue = runtimeSettingBackendValue(for: normalizedSettingID, executor: executor)
+        if overrideValue == backendValue {
+            return nil
+        }
+        return overrideValue
+    }
+
+    private func runtimeSessionContextSettingsPayload() -> [SessionRuntimeSetting] {
+        runtimeSettingPayloadEntries().map { executorID, settingID in
+            SessionRuntimeSetting(
+                executor: executorID,
+                settingID: settingID,
+                value: runtimeSessionContextValue(for: settingID, executor: executorID)
+            )
+        }
+    }
+
+    private func runtimeSettingBackendValue(for settingID: String, executor: String? = nil) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        if let descriptor = runtimeSettingDescriptor(for: normalizedSettingID, executor: executor) {
+            if let value = normalizedRuntimeSettingText(descriptor.value) {
+                return value
+            }
+        }
+
+        let targetExecutor = normalizedExecutor(from: executor ?? effectiveExecutor) ?? effectiveExecutor
+        switch targetExecutor {
+        case "codex":
+            switch normalizedSettingID {
+            case "model":
+                return normalizedBackendCodexModel
+            case "reasoning_effort":
+                return normalizedBackendCodexReasoningEffort
+            default:
+                return ""
+            }
+        case "claude":
+            switch normalizedSettingID {
+            case "model":
+                return normalizedBackendClaudeModel
+            default:
+                return ""
+            }
+        default:
+            return ""
+        }
+    }
+
+    private func runtimeSettingPresentationValue(_ value: String, settingID: String) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        switch normalizedSettingID {
+        case "reasoning_effort":
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        default:
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func runtimeExecutorDescriptor(for executor: String? = nil) -> RuntimeExecutorDescriptor? {
+        let normalizedExecutorValue = normalizedExecutor(from: executor ?? effectiveExecutor)
+        if let normalizedExecutorValue,
+           let descriptor = backendExecutorDescriptors.first(where: { $0.id == normalizedExecutorValue }) {
+            return descriptor
+        }
+        if let descriptor = backendExecutorDescriptors.first(where: { $0.id == backendDefaultExecutor }) {
+            return descriptor
+        }
+        return backendExecutorDescriptors.first(where: { $0.available && !$0.internalOnly })
+            ?? backendExecutorDescriptors.first
+    }
+
+    private func allRuntimeSettingDescriptors() -> [(String, RuntimeSettingDescriptor)] {
+        var pairs: [(String, RuntimeSettingDescriptor)] = []
+        for descriptor in backendExecutorDescriptors {
+            for setting in descriptor.settings ?? [] {
+                pairs.append((descriptor.id, setting))
+            }
+        }
+        if !pairs.isEmpty {
+            return pairs
+        }
+        return [
+            ("codex", legacyRuntimeSettings(for: "codex")),
+            ("claude", legacyRuntimeSettings(for: "claude")),
+        ].flatMap { executorID, settings in
+            settings.map { (executorID, $0) }
+        }
+    }
+
+    private func runtimeSettingPayloadEntries() -> [(String, String)] {
+        var entries: [(String, String)] = []
+        var seen: Set<String> = []
+
+        for (executorID, setting) in allRuntimeSettingDescriptors() {
+            let key = "\(executorID).\(setting.id)"
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            entries.append((executorID, setting.id))
+        }
+
+        for executorID in runtimeSettingOverrides.keys.sorted() {
+            let settings = runtimeSettingOverrides[executorID] ?? [:]
+            for settingID in settings.keys.sorted() {
+                let key = "\(executorID).\(settingID)"
+                guard !seen.contains(key) else { continue }
+                seen.insert(key)
+                entries.append((executorID, settingID))
+            }
+        }
+
+        return entries
+    }
+
+    private func runtimeSettingOverrideValue(for settingID: String, executor: String) -> String {
+        let normalizedExecutorValue = normalizedExecutor(from: executor) ?? executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        return runtimeSettingOverrides[normalizedExecutorValue]?[normalizedSettingID] ?? ""
+    }
+
+    private func updateRuntimeSettingOverride(_ value: String?, for settingID: String, executor: String) {
+        let normalizedExecutorValue = normalizedExecutor(from: executor) ?? executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        guard !normalizedExecutorValue.isEmpty, !normalizedSettingID.isEmpty else { return }
+
+        let normalizedValue: String? = {
+            guard let text = normalizedRuntimeSettingText(value) else { return nil }
+            if normalizedSettingID == "reasoning_effort" {
+                return text.lowercased()
+            }
+            return text
+        }()
+
+        var next = runtimeSettingOverrides
+        var executorOverrides = next[normalizedExecutorValue] ?? [:]
+        if let normalizedValue {
+            executorOverrides[normalizedSettingID] = normalizedValue
+        } else {
+            executorOverrides.removeValue(forKey: normalizedSettingID)
+        }
+
+        if executorOverrides.isEmpty {
+            next.removeValue(forKey: normalizedExecutorValue)
+        } else {
+            next[normalizedExecutorValue] = executorOverrides
+        }
+
+        if next != runtimeSettingOverrides {
+            runtimeSettingOverrides = next
+        }
+    }
+
+    private func normalizedRuntimeSettingOverrides(_ raw: [String: [String: String]]) -> [String: [String: String]] {
+        var normalized: [String: [String: String]] = [:]
+        for (executorID, settings) in raw {
+            let normalizedExecutorValue = normalizedExecutor(from: executorID) ?? executorID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalizedExecutorValue.isEmpty else { continue }
+
+            var normalizedSettings: [String: String] = normalized[normalizedExecutorValue] ?? [:]
+            for (settingID, value) in settings {
+                let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+                guard !normalizedSettingID.isEmpty else { continue }
+                guard let normalizedValue = normalizedRuntimeSettingText(value) else {
+                    normalizedSettings.removeValue(forKey: normalizedSettingID)
+                    continue
+                }
+                if normalizedSettingID == "reasoning_effort" {
+                    normalizedSettings[normalizedSettingID] = normalizedValue.lowercased()
+                } else {
+                    normalizedSettings[normalizedSettingID] = normalizedValue
+                }
+            }
+
+            if normalizedSettings.isEmpty {
+                normalized.removeValue(forKey: normalizedExecutorValue)
+            } else {
+                normalized[normalizedExecutorValue] = normalizedSettings
+            }
+        }
+        return normalized
+    }
+
+    private func legacyRuntimeSettings(for executorID: String) -> [RuntimeSettingDescriptor] {
+        switch executorID {
+        case "codex":
+            return [
+                RuntimeSettingDescriptor(
+                    id: "model",
+                    title: "Model",
+                    kind: "enum",
+                    allowCustom: true,
+                    value: normalizedBackendCodexModel.isEmpty ? nil : normalizedBackendCodexModel,
+                    options: backendCodexModelOptions.isEmpty ? Self.defaultCodexModelOptions : backendCodexModelOptions
+                ),
+                RuntimeSettingDescriptor(
+                    id: "reasoning_effort",
+                    title: "Reasoning effort",
+                    kind: "enum",
+                    allowCustom: false,
+                    value: normalizedBackendCodexReasoningEffort.isEmpty ? nil : normalizedBackendCodexReasoningEffort,
+                    options: backendCodexReasoningEffortOptions.isEmpty ? Self.defaultCodexReasoningEffortOptions : backendCodexReasoningEffortOptions
+                ),
+            ]
+        case "claude":
+            return [
+                RuntimeSettingDescriptor(
+                    id: "model",
+                    title: "Model",
+                    kind: "enum",
+                    allowCustom: true,
+                    value: normalizedBackendClaudeModel.isEmpty ? nil : normalizedBackendClaudeModel,
+                    options: backendClaudeModelOptions.isEmpty ? Self.defaultClaudeModelOptions : backendClaudeModelOptions
+                )
+            ]
+        default:
+            return []
+        }
+    }
+
+    private func normalizedRuntimeSettingIdentifier(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return trimmed.replacingOccurrences(of: " ", with: "_")
+    }
+
+    private func normalizedRuntimeSettingText(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     var effectiveExecutor: String {
@@ -3279,14 +3887,21 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if let value = defaults.string(forKey: DefaultsKey.executor), !value.isEmpty {
             executor = value
         }
-        if let value = defaults.string(forKey: DefaultsKey.codexModelOverride) {
-            codexModelOverride = value
+        if let data = defaults.data(forKey: DefaultsKey.runtimeSettingOverrides),
+           let decoded = try? JSONDecoder().decode([String: [String: String]].self, from: data) {
+            runtimeSettingOverrides = normalizedRuntimeSettingOverrides(decoded)
         }
-        if let value = defaults.string(forKey: DefaultsKey.codexReasoningEffort) {
-            codexReasoningEffort = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let value = defaults.string(forKey: DefaultsKey.codexModelOverride),
+           runtimeSettingOverrideValue(for: "model", executor: "codex").isEmpty {
+            updateRuntimeSettingOverride(value, for: "model", executor: "codex")
         }
-        if let value = defaults.string(forKey: DefaultsKey.claudeModelOverride) {
-            claudeModelOverride = value
+        if let value = defaults.string(forKey: DefaultsKey.codexReasoningEffort),
+           runtimeSettingOverrideValue(for: "reasoning_effort", executor: "codex").isEmpty {
+            updateRuntimeSettingOverride(value, for: "reasoning_effort", executor: "codex")
+        }
+        if let value = defaults.string(forKey: DefaultsKey.claudeModelOverride),
+           runtimeSettingOverrideValue(for: "model", executor: "claude").isEmpty {
+            updateRuntimeSettingOverride(value, for: "model", executor: "claude")
         }
         if let value = defaults.string(forKey: DefaultsKey.responseMode), !value.isEmpty {
             responseMode = value == "verbose" ? "concise" : value
@@ -3374,6 +3989,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             self.backendSecurityMode = response.securityMode
             _ = try? await self.refreshRuntimeConfiguration()
             _ = try? await self.refreshSessionContextFromBackend()
+            self.clearConnectionRepairState()
             self.persistSettings()
             self.errorText = ""
             self.statusText = "Paired successfully (\(response.securityMode))"
@@ -3390,19 +4006,29 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private var normalizedBackendCodexModel: String {
-        backendExecutorDescriptors
-            .first(where: { $0.id == "codex" })?
-            .model?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? ""
+        let descriptor = backendExecutorDescriptors.first(where: { $0.id == "codex" })
+        if let value = descriptor?
+            .settings?
+            .first(where: { $0.id == "model" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty {
+            return value
+        }
+        return descriptor?.model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private var normalizedBackendClaudeModel: String {
-        backendExecutorDescriptors
-            .first(where: { $0.id == "claude" })?
-            .model?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? ""
+        let descriptor = backendExecutorDescriptors.first(where: { $0.id == "claude" })
+        if let value = descriptor?
+            .settings?
+            .first(where: { $0.id == "model" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty {
+            return value
+        }
+        return descriptor?.model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private var normalizedBackendCodexReasoningEffort: String {
@@ -3412,6 +4038,16 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private func displayModelName(_ rawModel: String?) -> String {
         let value = rawModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return value.isEmpty ? "default" : value
+    }
+
+    private func dedupedRuntimeModelOptions(_ rawValues: [String]) -> [String] {
+        var values: [String] = []
+        for rawValue in rawValues {
+            let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty, !values.contains(normalized) else { continue }
+            values.append(normalized)
+        }
+        return values
     }
 
     private func normalizedExecutor(from rawValue: String?) -> String? {
@@ -3446,6 +4082,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     ) -> [RuntimeExecutorDescriptor] {
         var descriptors = (rawDescriptors ?? []).compactMap { descriptor -> RuntimeExecutorDescriptor? in
             guard let normalized = normalizedExecutor(from: descriptor.id) else { return nil }
+            let settings = descriptor.settings ?? []
             return RuntimeExecutorDescriptor(
                 id: normalized,
                 title: descriptor.title,
@@ -3453,7 +4090,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 available: descriptor.available,
                 isDefault: descriptor.isDefault,
                 internalOnly: descriptor.internalOnly,
-                model: descriptor.model
+                model: descriptor.model,
+                settings: settings.isEmpty ? legacyRuntimeSettings(for: normalized) : settings
             )
         }
 
@@ -3466,7 +4104,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     available: (config.availableExecutors ?? []).contains("codex"),
                     isDefault: defaultExecutor == "codex",
                     internalOnly: false,
-                    model: config.codexModel
+                    model: config.codexModel,
+                    settings: legacyRuntimeSettings(for: "codex")
                 ),
                 RuntimeExecutorDescriptor(
                     id: "claude",
@@ -3475,7 +4114,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     available: (config.availableExecutors ?? []).contains("claude"),
                     isDefault: defaultExecutor == "claude",
                     internalOnly: false,
-                    model: config.claudeModel
+                    model: config.claudeModel,
+                    settings: legacyRuntimeSettings(for: "claude")
                 ),
                 RuntimeExecutorDescriptor(
                     id: "local",
@@ -3484,7 +4124,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     available: defaultExecutor == "local",
                     isDefault: defaultExecutor == "local",
                     internalOnly: true,
-                    model: nil
+                    model: nil,
+                    settings: []
                 ),
             ]
         }
@@ -3498,7 +4139,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     available: defaultExecutor == "local",
                     isDefault: defaultExecutor == "local",
                     internalOnly: true,
-                    model: nil
+                    model: nil,
+                    settings: []
                 )
             )
         }
@@ -3519,8 +4161,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         backendExecutorDescriptors = []
         backendSlashCommands = []
         backendWorkdirRoot = ""
+        backendCodexModelOptions = Self.defaultCodexModelOptions
         backendCodexReasoningEffort = ""
         backendCodexReasoningEffortOptions = Self.defaultCodexReasoningEffortOptions
+        backendClaudeModelOptions = Self.defaultClaudeModelOptions
     }
 
     private func isLocalOrPrivateHost(_ host: String) -> Bool {
@@ -3573,8 +4217,27 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func persistDraftStateIfNeeded() {
-        guard !isRestoringThreadState else { return }
-        persistActiveThreadSnapshot()
+        pendingDraftPersistenceTask?.cancel()
+        pendingDraftPersistenceTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 250_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.persistDraftStateNowIfNeeded()
+        }
+    }
+
+    private func persistDraftStateNowIfNeeded() {
+        guard !isRestoringThreadState,
+              let threadID = activeThreadID,
+              let idx = threadIndex(for: threadID) else { return }
+        pendingDraftPersistenceTask = nil
+        var snapshot = threads[idx]
+        snapshot.draftText = promptText
+        snapshot.draftAttachments = draftAttachments
+        threadStore.upsertThread(snapshot)
     }
 
     private var hasFailedDraftAttachments: Bool {

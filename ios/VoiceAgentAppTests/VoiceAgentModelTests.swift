@@ -75,6 +75,38 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
     }
 
+    @MainActor
+    func testRegisterConnectionRepairIfNeededStagesReconnectState() {
+        let vm = VoiceAgentViewModel()
+        vm.serverURL = "http://vemunds-macbook-air.tail6a5903.ts.net:8000"
+        vm.apiToken = "stale-token"
+
+        let message = vm.registerConnectionRepairIfNeeded(
+            from: APIError.httpError(401, #"{"detail":"missing or invalid bearer token"}"#)
+        )
+
+        XCTAssertEqual(
+            message,
+            "This phone is no longer paired with vemunds-macbook-air.tail6a5903.ts.net. Open the latest pairing QR on that computer and scan it again here."
+        )
+        XCTAssertTrue(vm.needsConnectionRepair)
+        XCTAssertEqual(vm.connectionRepairTitle, "Reconnect this phone")
+        XCTAssertEqual(vm.connectionRepairMessage, message)
+        XCTAssertTrue(vm.hasConfiguredConnection)
+    }
+
+    @MainActor
+    func testRegisterConnectionRepairIfNeededIgnoresNonAuthErrors() {
+        let vm = VoiceAgentViewModel()
+
+        let message = vm.registerConnectionRepairIfNeeded(
+            from: APIError.httpError(503, #"{"detail":"server auth token is not configured"}"#)
+        )
+
+        XCTAssertNil(message)
+        XCTAssertFalse(vm.needsConnectionRepair)
+    }
+
     func testPairingQRCodeImageDecoderDecodesGeneratedQRCode() throws {
         let payload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123"
         let filter = CIFilter.qrCodeGenerator()
@@ -367,13 +399,38 @@ final class VoiceAgentModelTests: XCTestCase {
           "available_executors":["codex","claude"],
           "executors":[
             {"id":"local","title":"Local fallback","kind":"internal","available":true,"default":false,"internal_only":true},
-            {"id":"codex","title":"Codex","kind":"agent","available":true,"default":false,"internal_only":false,"model":"gpt-5.1"},
-            {"id":"claude","title":"Claude Code","kind":"agent","available":true,"default":true,"internal_only":false,"model":"claude-sonnet-4-5"}
+            {
+              "id":"codex",
+              "title":"Codex",
+              "kind":"agent",
+              "available":true,
+              "default":false,
+              "internal_only":false,
+              "model":"gpt-5.1",
+              "settings":[
+                {"id":"model","title":"Model","kind":"enum","allow_custom":true,"value":"gpt-5.1","options":["gpt-5.4","gpt-5.4-mini","gpt-5.1"]},
+                {"id":"reasoning_effort","title":"Reasoning Effort","kind":"enum","allow_custom":false,"value":"high","options":["minimal","low","medium","high","xhigh"]}
+              ]
+            },
+            {
+              "id":"claude",
+              "title":"Claude Code",
+              "kind":"agent",
+              "available":true,
+              "default":true,
+              "internal_only":false,
+              "model":"claude-sonnet-4-5",
+              "settings":[
+                {"id":"model","title":"Model","kind":"enum","allow_custom":true,"value":"claude-sonnet-4-5","options":["claude-sonnet-4-5"]}
+              ]
+            }
           ],
           "transcribe_provider":"openai",
           "transcribe_ready":true,
           "codex_model":"gpt-5.1",
+          "codex_model_options":["gpt-5.4","gpt-5.4-mini","gpt-5.1"],
           "claude_model":"claude-sonnet-4-5",
+          "claude_model_options":["claude-sonnet-4-5"],
           "workdir_root":"/Users/test/work",
           "allow_absolute_file_reads":false,
           "file_roots":["/Users/test/work"],
@@ -388,12 +445,47 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.availableExecutors, ["codex", "claude"])
         XCTAssertEqual(decoded.executors?.count, 3)
         XCTAssertEqual(decoded.executors?.first(where: { $0.id == "claude" })?.isDefault, true)
+        XCTAssertEqual(decoded.executors?.first(where: { $0.id == "codex" })?.settings?.first?.allowCustom, true)
+        XCTAssertEqual(decoded.executors?.first(where: { $0.id == "codex" })?.settings?.last?.options ?? [], ["minimal", "low", "medium", "high", "xhigh"])
         XCTAssertEqual(decoded.transcribeProvider, "openai")
         XCTAssertEqual(decoded.transcribeReady, true)
         XCTAssertEqual(decoded.codexModel, "gpt-5.1")
+        XCTAssertEqual(decoded.codexModelOptions ?? [], ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"])
         XCTAssertEqual(decoded.claudeModel, "claude-sonnet-4-5")
+        XCTAssertEqual(decoded.claudeModelOptions ?? [], ["claude-sonnet-4-5"])
         XCTAssertEqual(decoded.serverURL, "https://relay.example.com")
         XCTAssertEqual(decoded.serverURLs ?? [], ["https://relay.example.com", "http://100.111.99.51:8000"])
+    }
+
+    @MainActor
+    func testCodexRuntimeModelOptionsKeepBackendAndCustomValuesVisible() {
+        let vm = VoiceAgentViewModel()
+        vm.backendExecutorDescriptors = [
+            RuntimeExecutorDescriptor(
+                id: "codex",
+                title: "Codex",
+                kind: "agent",
+                available: true,
+                isDefault: true,
+                internalOnly: false,
+                model: "gpt-5.1",
+                settings: [
+                    RuntimeSettingDescriptor(
+                        id: "model",
+                        title: "Model",
+                        kind: "enum",
+                        allowCustom: true,
+                        value: "gpt-5.1",
+                        options: ["gpt-5.4", "gpt-5.4-mini"]
+                    )
+                ]
+            )
+        ]
+        vm.codexModelOverride = "gpt-5.2-custom"
+
+        XCTAssertEqual(vm.codexRuntimeModelOptions, ["gpt-5.1", "gpt-5.2-custom", "gpt-5.4", "gpt-5.4-mini"])
+        XCTAssertEqual(vm.codexBackendDefaultOptionLabel, "Backend default (gpt-5.1)")
+        XCTAssertTrue(vm.runtimeSettingAllowsCustom("model", executor: "codex"))
     }
 
     func testSessionContextDecodingSupportsResolvedDefaults() throws {
@@ -402,6 +494,11 @@ final class VoiceAgentModelTests: XCTestCase {
           "session_id":"iphone-app",
           "executor":"codex",
           "working_directory":"/Users/test/work/project",
+          "runtime_settings":[
+            {"executor":"codex","id":"model","value":"gpt-5.4-mini"},
+            {"executor":"codex","id":"reasoning_effort","value":"high"},
+            {"executor":"claude","id":"model","value":null}
+          ],
           "resolved_working_directory":"/Users/test/work/project",
           "updated_at":"2026-03-26T18:00:00Z"
         }
@@ -412,7 +509,116 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.sessionId, "iphone-app")
         XCTAssertEqual(decoded.executor, "codex")
         XCTAssertEqual(decoded.workingDirectory, "/Users/test/work/project")
+        XCTAssertEqual(decoded.runtimeSettings?.count, 3)
+        XCTAssertEqual(decoded.runtimeSettings?.first?.settingID, "model")
+        XCTAssertEqual(decoded.runtimeSettings?.first?.value, "gpt-5.4-mini")
         XCTAssertEqual(decoded.resolvedWorkingDirectory, "/Users/test/work/project")
+    }
+
+    @MainActor
+    func testRuntimeSessionContextUpdateRequestIncludesGenericRuntimeSettings() {
+        let vm = VoiceAgentViewModel()
+        vm.backendExecutorDescriptors = [
+            RuntimeExecutorDescriptor(
+                id: "codex",
+                title: "Codex",
+                kind: "agent",
+                available: true,
+                isDefault: true,
+                internalOnly: false,
+                model: "gpt-5.4",
+                settings: [
+                    RuntimeSettingDescriptor(
+                        id: "model",
+                        title: "Model",
+                        kind: "enum",
+                        allowCustom: true,
+                        value: "gpt-5.4",
+                        options: ["gpt-5.4", "gpt-5.4-mini"]
+                    ),
+                    RuntimeSettingDescriptor(
+                        id: "reasoning_effort",
+                        title: "Reasoning Effort",
+                        kind: "enum",
+                        allowCustom: false,
+                        value: "medium",
+                        options: ["medium", "high"]
+                    ),
+                    RuntimeSettingDescriptor(
+                        id: "approval_mode",
+                        title: "Approval Mode",
+                        kind: "enum",
+                        allowCustom: false,
+                        value: "balanced",
+                        options: ["balanced", "strict"]
+                    ),
+                ]
+            ),
+            RuntimeExecutorDescriptor(
+                id: "claude",
+                title: "Claude",
+                kind: "agent",
+                available: true,
+                isDefault: false,
+                internalOnly: false,
+                model: "claude-sonnet-4-5",
+                settings: [
+                    RuntimeSettingDescriptor(
+                        id: "model",
+                        title: "Model",
+                        kind: "enum",
+                        allowCustom: true,
+                        value: "claude-sonnet-4-5",
+                        options: ["claude-sonnet-4-5", "claude-opus-4"]
+                    )
+                ]
+            ),
+        ]
+        vm.backendDefaultExecutor = "codex"
+        vm.executor = "codex"
+        vm.codexModelOverride = "gpt-5.4-mini"
+        vm.codexReasoningEffort = ""
+        vm.claudeModelOverride = "claude-opus-4"
+        vm.setRuntimeSettingValue("strict", for: "approval_mode", executor: "codex")
+
+        let request = vm.runtimeSessionContextUpdateRequest()
+        let runtimeSettings = Dictionary(
+            uniqueKeysWithValues: (request.runtimeSettings ?? []).map { ("\($0.executor).\($0.settingID)", $0.value) }
+        )
+
+        XCTAssertEqual(runtimeSettings.count, 4)
+        XCTAssertEqual(runtimeSettings["codex.model"]!, "gpt-5.4-mini")
+        XCTAssertNil(runtimeSettings["codex.reasoning_effort"]!)
+        XCTAssertEqual(runtimeSettings["codex.approval_mode"]!, "strict")
+        XCTAssertEqual(runtimeSettings["claude.model"]!, "claude-opus-4")
+    }
+
+    func testSessionContextUpdateRequestEncodesExplicitNullClears() throws {
+        let request = SessionContextUpdateRequest(
+            executor: nil,
+            workingDirectory: nil,
+            runtimeSettings: [
+                SessionRuntimeSetting(executor: "codex", settingID: "model", value: nil)
+            ],
+            codexModel: nil,
+            codexReasoningEffort: nil,
+            claudeModel: nil
+        )
+
+        let data = try JSONEncoder().encode(request)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let runtimeSettings = try XCTUnwrap(payload["runtime_settings"] as? [[String: Any]])
+        let firstSetting = try XCTUnwrap(runtimeSettings.first)
+
+        XCTAssertTrue(payload.keys.contains("executor"))
+        XCTAssertTrue(payload.keys.contains("working_directory"))
+        XCTAssertTrue(payload.keys.contains("codex_model"))
+        XCTAssertTrue(payload.keys.contains("codex_reasoning_effort"))
+        XCTAssertTrue(payload.keys.contains("claude_model"))
+        XCTAssertEqual(firstSetting["executor"] as? String, "codex")
+        XCTAssertEqual(firstSetting["id"] as? String, "model")
+        XCTAssertTrue(firstSetting.keys.contains("value"))
+        XCTAssertTrue(firstSetting["value"] is NSNull)
     }
 
     func testSlashCommandDescriptorDecodingSupportsDynamicCatalog() throws {

@@ -86,6 +86,7 @@ class RunStore:
                     session_id TEXT PRIMARY KEY,
                     executor TEXT,
                     working_directory TEXT,
+                    runtime_settings_json TEXT,
                     codex_model TEXT,
                     codex_reasoning_effort TEXT,
                     claude_model TEXT,
@@ -100,6 +101,8 @@ class RunStore:
             )
             columns = conn.execute("PRAGMA table_info(session_context)").fetchall()
             column_names = {row["name"] for row in columns}
+            if "runtime_settings_json" not in column_names:
+                conn.execute("ALTER TABLE session_context ADD COLUMN runtime_settings_json TEXT")
             if "codex_model" not in column_names:
                 conn.execute("ALTER TABLE session_context ADD COLUMN codex_model TEXT")
             if "codex_reasoning_effort" not in column_names:
@@ -279,6 +282,7 @@ class RunStore:
                     session_id,
                     executor,
                     working_directory,
+                    runtime_settings_json,
                     codex_model,
                     codex_reasoning_effort,
                     claude_model,
@@ -300,6 +304,7 @@ class RunStore:
         *,
         executor: str | None,
         working_directory: str | None,
+        runtime_settings_json: str | None,
         codex_model: str | None,
         codex_reasoning_effort: str | None,
         claude_model: str | None,
@@ -311,15 +316,17 @@ class RunStore:
                     session_id,
                     executor,
                     working_directory,
+                    runtime_settings_json,
                     codex_model,
                     codex_reasoning_effort,
                     claude_model,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(session_id) DO UPDATE SET
                     executor=excluded.executor,
                     working_directory=excluded.working_directory,
+                    runtime_settings_json=excluded.runtime_settings_json,
                     codex_model=excluded.codex_model,
                     codex_reasoning_effort=excluded.codex_reasoning_effort,
                     claude_model=excluded.claude_model,
@@ -329,6 +336,7 @@ class RunStore:
                     session_id,
                     executor,
                     working_directory,
+                    runtime_settings_json,
                     codex_model,
                     codex_reasoning_effort,
                     claude_model,
@@ -340,6 +348,7 @@ class RunStore:
                     session_id,
                     executor,
                     working_directory,
+                    runtime_settings_json,
                     codex_model,
                     codex_reasoning_effort,
                     claude_model,

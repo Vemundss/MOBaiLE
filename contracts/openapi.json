@@ -946,6 +946,13 @@
             ],
             "title": "Claude Model"
           },
+          "claude_model_options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Claude Model Options",
+            "type": "array"
+          },
           "codex_model": {
             "anyOf": [
               {
@@ -956,6 +963,13 @@
               }
             ],
             "title": "Codex Model"
+          },
+          "codex_model_options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Codex Model Options",
+            "type": "array"
           },
           "codex_reasoning_effort": {
             "anyOf": [
@@ -1112,6 +1126,13 @@
             ],
             "title": "Model"
           },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeSettingDescriptor"
+            },
+            "title": "Settings",
+            "type": "array"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -1124,6 +1145,53 @@
           "available"
         ],
         "title": "RuntimeExecutorDescriptor",
+        "type": "object"
+      },
+      "RuntimeSettingDescriptor": {
+        "properties": {
+          "allow_custom": {
+            "default": false,
+            "title": "Allow Custom",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "enum",
+            "title": "Kind",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "kind"
+        ],
+        "title": "RuntimeSettingDescriptor",
         "type": "object"
       },
       "SessionContextResponse": {
@@ -1243,6 +1311,13 @@
             "title": "Resolved Working Directory",
             "type": "string"
           },
+          "runtime_settings": {
+            "items": {
+              "$ref": "#/components/schemas/SessionRuntimeSettingValue"
+            },
+            "title": "Runtime Settings",
+            "type": "array"
+          },
           "session_id": {
             "title": "Session Id",
             "type": "string"
@@ -1336,6 +1411,20 @@
             ],
             "title": "Executor"
           },
+          "runtime_settings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SessionRuntimeSettingValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Settings"
+          },
           "working_directory": {
             "anyOf": [
               {
@@ -1349,6 +1438,41 @@
           }
         },
         "title": "SessionContextUpdateRequest",
+        "type": "object"
+      },
+      "SessionRuntimeSettingValue": {
+        "properties": {
+          "executor": {
+            "enum": [
+              "local",
+              "codex",
+              "claude"
+            ],
+            "title": "Executor",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "executor",
+          "id"
+        ],
+        "title": "SessionRuntimeSettingValue",
         "type": "object"
       },
       "SlashCommandDescriptor": {

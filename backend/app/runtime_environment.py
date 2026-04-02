@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+from typing import Callable
 from typing import Literal
 
 from app.agent_runtime import build_agent_prompt
@@ -15,6 +16,7 @@ from app.models.schemas import ResponseProfile
 from app.models.schemas import RunExecutorName
 from app.models.schemas import RuntimeConfigResponse
 from app.models.schemas import RuntimeExecutorDescriptor
+from app.models.schemas import RuntimeSettingDescriptor
 
 AGENT_TITLES: dict[RunExecutorName, str] = {
     "local": "Local fallback",
@@ -27,6 +29,8 @@ AGENT_HOME_HINTS: dict[AgentExecutorName, str] = {
     "claude": "~/.claude/*",
 }
 
+CODEX_MODEL_OPTIONS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.1")
+CLAUDE_MODEL_OPTIONS = ("claude-sonnet-4-5",)
 CODEX_REASONING_EFFORT_OPTIONS = ("minimal", "low", "medium", "high", "xhigh")
 PHONE_ACCESS_MODE_OPTIONS = ("tailscale", "wifi", "local")
 PhoneAccessMode = Literal["tailscale", "wifi", "local"]
@@ -83,6 +87,36 @@ def _read_phone_access_mode_env() -> PhoneAccessMode:
     return raw_value  # type: ignore[return-value]
 
 
+def _runtime_option_values(
+    raw_value: str | None,
+    fallback_values: tuple[str, ...],
+    *,
+    normalize: Callable[[str], str] = lambda value: value.strip(),
+    allowed: Callable[[str], bool] | None = None,
+) -> list[str]:
+    options: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw_item: str) -> None:
+        normalized = normalize(raw_item)
+        if not normalized:
+            return
+        if allowed is not None and not allowed(normalized):
+            return
+        key = normalized.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        options.append(normalized)
+
+    if raw_value:
+        for item in raw_value.split(","):
+            add(item)
+    for item in fallback_values:
+        add(item)
+    return options
+
+
 @dataclass(frozen=True)
 class RuntimeEnvironment:
     backend_root: Path
@@ -102,8 +136,11 @@ class RuntimeEnvironment:
     codex_home: Path
     codex_enable_web_search: bool
     codex_model_override: str
+    codex_model_options: tuple[str, ...]
     codex_reasoning_effort_override: str
+    codex_reasoning_effort_options: tuple[CodexReasoningEffort, ...]
     claude_model_override: str
+    claude_model_options: tuple[str, ...]
     codex_timeout_sec: int
     claude_timeout_sec: int
     playwright_output_dir: Path
@@ -202,10 +239,26 @@ class RuntimeEnvironment:
         }
         codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 0)
         codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
+        codex_model_options = _runtime_option_values(
+            os.getenv("VOICE_AGENT_CODEX_MODEL_OPTIONS"),
+            CODEX_MODEL_OPTIONS,
+        )
         codex_reasoning_effort_override = os.getenv("VOICE_AGENT_CODEX_REASONING_EFFORT", "").strip().lower()
         if codex_reasoning_effort_override not in CODEX_REASONING_EFFORT_OPTIONS:
             codex_reasoning_effort_override = ""
+        codex_reasoning_effort_options = tuple(
+            _runtime_option_values(
+                os.getenv("VOICE_AGENT_CODEX_REASONING_EFFORT_OPTIONS"),
+                CODEX_REASONING_EFFORT_OPTIONS,
+                normalize=lambda value: value.strip().lower(),
+                allowed=lambda value: value in CODEX_REASONING_EFFORT_OPTIONS,
+            )
+        )
         claude_model_override = os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
+        claude_model_options = _runtime_option_values(
+            os.getenv("VOICE_AGENT_CLAUDE_MODEL_OPTIONS"),
+            CLAUDE_MODEL_OPTIONS,
+        )
         claude_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", codex_timeout_sec)
         playwright_output_dir = _resolve_path_value(
             os.getenv("VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR", "data/playwright").strip() or "data/playwright",
@@ -301,8 +354,11 @@ class RuntimeEnvironment:
             codex_home=codex_home,
             codex_enable_web_search=codex_enable_web_search,
             codex_model_override=codex_model_override,
+            codex_model_options=tuple(codex_model_options),
             codex_reasoning_effort_override=codex_reasoning_effort_override,
+            codex_reasoning_effort_options=codex_reasoning_effort_options,
             claude_model_override=claude_model_override,
+            claude_model_options=tuple(claude_model_options),
             codex_timeout_sec=codex_timeout_sec,
             claude_timeout_sec=claude_timeout_sec,
             playwright_output_dir=playwright_output_dir,
@@ -463,6 +519,24 @@ class RuntimeEnvironment:
                 available="codex" in available_agents,
                 default=self.default_executor == "codex",
                 model=self.codex_model_override or None,
+                settings=[
+                    RuntimeSettingDescriptor(
+                        id="model",
+                        title="Model",
+                        kind="enum",
+                        allow_custom=True,
+                        value=self.codex_model_override or None,
+                        options=list(self.codex_model_options),
+                    ),
+                    RuntimeSettingDescriptor(
+                        id="reasoning_effort",
+                        title="Reasoning Effort",
+                        kind="enum",
+                        allow_custom=False,
+                        value=self.codex_reasoning_effort_override or None,
+                        options=list(self.codex_reasoning_effort_options),
+                    ),
+                ],
             ),
             RuntimeExecutorDescriptor(
                 id="claude",
@@ -471,6 +545,16 @@ class RuntimeEnvironment:
                 available="claude" in available_agents,
                 default=self.default_executor == "claude",
                 model=self.claude_model_override or None,
+                settings=[
+                    RuntimeSettingDescriptor(
+                        id="model",
+                        title="Model",
+                        kind="enum",
+                        allow_custom=True,
+                        value=self.claude_model_override or None,
+                        options=list(self.claude_model_options),
+                    ),
+                ],
             ),
         ]
         return descriptors
@@ -491,9 +575,11 @@ class RuntimeEnvironment:
             transcribe_provider=transcribe_provider,
             transcribe_ready=transcribe_ready,
             codex_model=self.codex_model_override or None,
+            codex_model_options=list(self.codex_model_options),
             codex_reasoning_effort=self.codex_reasoning_effort_override or None,
-            codex_reasoning_effort_options=list(CODEX_REASONING_EFFORT_OPTIONS),
+            codex_reasoning_effort_options=list(self.codex_reasoning_effort_options),
             claude_model=self.claude_model_override or None,
+            claude_model_options=list(self.claude_model_options),
             workdir_root=str(self.workdir_root) if self.workdir_root is not None else None,
             allow_absolute_file_reads=self.allow_absolute_file_reads,
             file_roots=[str(root) for root in self.file_roots],
