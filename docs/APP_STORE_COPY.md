@@ -5,39 +5,39 @@ This file is the copy pack for the current MOBaiLE App Store submission.
 ## Listing Metadata
 
 - Name: `MOBaiLE`
-- Subtitle: `Your computer in your pocket`
+- Subtitle: `Run tasks on your own machine`
 - Promotional text:
-  `Start work from iPhone, run it on your own Mac or Linux machine, and follow every step live.`
+  `Pair your Mac or Linux machine, send text or voice tasks, and follow live progress from iPhone.`
 - Keywords:
-  `developer,terminal,remote,voice,repo,coding,productivity,automation,assistant`
+  `developer,remote,coding,terminal,voice,assistant,git,linux,mac,agent`
 
 ## Store Description
 
-MOBaiLE is a handheld agent-control app for your own computer.
+MOBaiLE lets you start and follow developer tasks on a paired Mac or Linux machine from your iPhone.
 
-Pair the app with a backend running on your Mac or Linux machine, then send a text or voice request, keep it anchored to a working directory, and watch planning, execution, and results stream back live in one thread.
+Send a text or voice request, keep it tied to the right workspace, and see live progress, results, and follow-ups in one chat.
 
 What you can do:
-- Inspect a repo when you are away from the keyboard
-- Run a smoke test and get the summary back in one place
-- Dictate a task from your phone and send it hands-free
-- Keep conversation history, run logs, and artifacts together
-- Switch workspaces and keep future tasks pointed at the right folder
+- Kick off repo checks and smoke tests when you are away from the keyboard
+- Watch live activity and final output in the same conversation
+- Send voice tasks hands-free and auto-send after a short pause
+- Keep separate chats anchored to the right workspace
+- Reconnect, retry, or inspect run details when something needs attention
 
 MOBaiLE is a client for a backend you configure and control. The app does not execute code on-device. It sends prompts, audio, attachments, and related metadata to the backend you pair with.
 
 ## Screenshot Captions
 
-1. `Your computer, in your pocket`
-   `Start a task from iPhone and keep every run anchored to your own machine.`
-2. `Watch every run stream live`
-   `Progress, summaries, and the next step stay in one thread instead of disappearing into a black box.`
-3. `Capture voice tasks hands-free`
-   `Record, review, and send with inline attachments, haptics, and auto-send after silence.`
-4. `Dial in the setup once, then move`
-   `Connection, voice, and support controls stay in one native settings sheet.`
-5. `Keep work ready across threads`
-   `Jump between active conversations without losing workspace context or the next follow-up.`
+1. `Run tasks on your own computer`
+   `Pair your Mac or Linux machine once, then send the next task from iPhone.`
+2. `See live progress in one chat`
+   `The run, the next step, and the final result stay in the same conversation.`
+3. `Send voice tasks hands-free`
+   `Speak the request, add context, and auto-send after a short pause.`
+4. `Tune connection and runtime in-app`
+   `Backend, voice, appearance, and runtime controls stay in one native settings sheet.`
+5. `Keep every task in the right chat`
+   `Switch between active workspaces without losing context or the next follow-up.`
 
 ## Public URLs
 
@@ -60,11 +60,11 @@ Functional review:
 3. Enter the review backend URL and API token supplied for App Review.
 4. Keep Session ID as `iphone-app`.
 5. Return to the main screen and send:
-   `create a hello world python script and run it`
+   `map the repo and summarize the current workspace`
 
 Expected behavior:
 - the app sends the request to the paired backend
-- progress appears in the conversation
+- live progress appears in the conversation
 - a final summary is returned in the same thread
 
 ## Claims To Avoid

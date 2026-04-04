@@ -8,24 +8,24 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 COPY = {
     "01-configured-empty": {
-        "headline": "Your computer,\nin your pocket",
-        "body": "Start a task from iPhone and keep every run anchored to your own machine.",
+        "headline": "Run tasks on\nyour computer",
+        "body": "Pair your Mac or Linux machine once, then send the next task from iPhone.",
     },
     "02-live-conversation": {
-        "headline": "Watch every run\nstream live",
-        "body": "Progress, summaries, and the next step stay in one thread instead of disappearing into a black box.",
+        "headline": "See live progress\nin one chat",
+        "body": "Follow the run, the next step, and the final result without leaving the conversation.",
     },
     "03-voice-recording": {
-        "headline": "Capture voice tasks\nhands-free",
-        "body": "Record, review, and send with inline attachments, haptics, and auto-send after silence.",
+        "headline": "Send voice tasks\nhands-free",
+        "body": "Speak the request, add context, and auto-send after a short pause.",
     },
     "04-settings": {
-        "headline": "Dial in the setup\nonce, then move",
-        "body": "Connection, voice, and support controls stay in one native settings sheet.",
+        "headline": "Pair once.\nTune it in-app.",
+        "body": "Backend, runtime, voice, and appearance controls stay in one native settings sheet.",
     },
     "05-threads": {
-        "headline": "Keep work ready\nacross threads",
-        "body": "Jump between active conversations without losing workspace context or the next follow-up.",
+        "headline": "Keep work split\nby chat",
+        "body": "Switch between active tasks without losing workspace context or follow-ups.",
     },
 }
 

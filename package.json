@@ -1,7 +1,7 @@
 {
   "name": "mobaile",
   "private": true,
-  "version": "1.0",
+  "version": "1.1.0",
   "description": "MOBaiLE onboarding and utility command wrappers",
   "scripts": {
     "setup:server": "bash ./scripts/bootstrap_server.sh --mode safe",

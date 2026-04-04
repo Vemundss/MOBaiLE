@@ -13,11 +13,11 @@ Functional review:
 5. Return to the main screen.
 
 Suggested test prompt:
-"create a hello world python script and run it"
+"map the repo and summarize the current workspace"
 
 Expected behavior:
 - the app sends the request to the paired backend
-- progress appears in the conversation
+- live progress appears in the conversation
 - a final summary is returned in the same thread
 
 Notes:

@@ -5,7 +5,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_PATH="${ROOT_DIR}/ios/VoiceAgentApp.xcodeproj"
 SCHEME="VoiceAgentApp"
-BUNDLE_ID="com.vemundss.voiceagentapp"
 DERIVED_DATA_PATH="${ROOT_DIR}/build/app-store-screenshots/DerivedData"
 RAW_OUTPUT_DIR="${ROOT_DIR}/build/app-store-screenshots/raw"
 OUTPUT_DIR="${ROOT_DIR}/fastlane/screenshots/en-US"
@@ -14,6 +13,8 @@ RENDERER="${ROOT_DIR}/scripts/render_app_store_screenshots.py"
 DEVICES=(
   "iPhone 17 Pro Max"
 )
+
+BUILD_DESTINATION="platform=iOS Simulator,name=${DEVICES[0]}"
 
 SCENARIOS=(
   "configured-empty|main|01-configured-empty"
@@ -38,11 +39,11 @@ run_renderer() {
   exit 1
 }
 
-echo "Building ${SCHEME} for iOS Simulator..."
+echo "Building ${SCHEME} for ${BUILD_DESTINATION}..."
 xcodebuild \
   -project "${PROJECT_PATH}" \
   -scheme "${SCHEME}" \
-  -destination 'generic/platform=iOS Simulator' \
+  -destination "${BUILD_DESTINATION}" \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
   CODE_SIGNING_ALLOWED=NO \
   build >/tmp/mobaile-app-store-screens-build.log
@@ -50,6 +51,12 @@ xcodebuild \
 APP_PATH="$(find "${DERIVED_DATA_PATH}/Build/Products" -path '*iphonesimulator/VoiceAgentApp.app' -print -quit)"
 if [[ -z "${APP_PATH}" ]]; then
   echo "Could not locate built simulator app" >&2
+  exit 1
+fi
+
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${APP_PATH}/Info.plist")"
+if [[ -z "${BUNDLE_ID}" ]]; then
+  echo "Could not determine app bundle identifier from ${APP_PATH}/Info.plist" >&2
   exit 1
 fi
 
@@ -92,7 +99,7 @@ for device in "${DEVICES[@]}"; do
         xcrun simctl launch "${device}" "${BUNDLE_ID}" >/dev/null
     fi
 
-    sleep 3
+    sleep 6
     xcrun simctl io "${device}" screenshot "${output_path}" >/dev/null
   done
 

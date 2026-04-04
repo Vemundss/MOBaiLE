@@ -1,3 +1,3 @@
-Cleaner onboarding, updated GitHub/App Store assets, and smoother voice-first flow.
+Live activity now streams directly in chat, voice capture is cleaner, and runtime settings are easier to understand.
 
-This build adds session-level model controls, a faster new-voice-thread shortcut, and a calmer empty-state/runtime experience.
+This release also improves reconnect and recovery flows, run diagnostics, thread switching, and overall polish across chats, recording, and settings.
