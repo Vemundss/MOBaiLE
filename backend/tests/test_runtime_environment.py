@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.agent_runtime import build_agent_prompt
 from app.agent_runtime import load_runtime_context
 from app.runtime_environment import RuntimeEnvironment
 
@@ -59,3 +60,26 @@ def test_load_runtime_context_falls_back_to_hidden_mobaile_dir(tmp_path: Path):
     loaded = load_runtime_context("AGENT_CONTEXT.md", tmp_path / "backend")
 
     assert loaded == "hidden runtime context"
+
+
+def test_guided_agent_prompt_includes_phone_feedback_guidance() -> None:
+    prompt = build_agent_prompt(
+        "Fix the bug",
+        response_profile="guided",
+        runtime_context="Runtime notes",
+    )
+
+    assert "Phone UX feedback guidance:" in prompt
+    assert "Backend activity events are the source of truth for progress in the phone UI." in prompt
+    assert "planning, executing, blocked, or summarizing" in prompt
+    assert "Keep that note concise and non-repetitive" in prompt
+
+
+def test_minimal_agent_prompt_omits_phone_feedback_guidance() -> None:
+    prompt = build_agent_prompt(
+        "Fix the bug",
+        response_profile="minimal",
+        runtime_context="Runtime notes",
+    )
+
+    assert "Phone UX feedback guidance:" not in prompt

@@ -1,15 +1,138 @@
 from __future__ import annotations
 
-import ipaddress
 import json
 import socket
 import subprocess
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
 
-PhoneAccessMode = Literal["tailscale", "wifi", "local"]
-PHONE_ACCESS_MODE_OPTIONS = ("tailscale", "wifi", "local")
+try:
+    from app.pairing_url_policy import dedupe_server_urls as _dedupe_server_urls
+    from app.pairing_url_policy import is_ipv4 as _is_ipv4
+    from app.pairing_url_policy import is_loopback_host as _is_loopback_host
+    from app.pairing_url_policy import is_loopback_only_server_urls as _is_loopback_only_server_urls
+    from app.pairing_url_policy import is_network_exposed_host as _is_network_exposed_host
+    from app.pairing_url_policy import is_private_non_loopback_ipv4 as _is_private_non_loopback_ipv4
+    from app.pairing_url_policy import is_public_server_url as _is_public_server_url
+    from app.pairing_url_policy import is_routable_local_ipv4 as _is_routable_local_ipv4
+    from app.pairing_url_policy import is_tailscale_ipv4 as _is_tailscale_ipv4
+    from app.pairing_url_policy import loopback_server_url as _loopback_server_url
+    from app.pairing_url_policy import normalize_server_url as _normalize_server_url
+    from app.pairing_url_policy import server_url_matches_mode as _server_url_matches_mode
+    from app.phone_access_mode import PhoneAccessMode
+    from app.phone_access_mode import normalize_phone_access_mode as _normalize_phone_access_mode
+except ModuleNotFoundError:
+    import ipaddress
+    from urllib.parse import urlparse
+
+    PhoneAccessMode = Literal["tailscale", "wifi", "local"]
+    _PHONE_ACCESS_MODE_OPTIONS = ("tailscale", "wifi", "local")
+
+    def _normalize_phone_access_mode(phone_access_mode: str) -> PhoneAccessMode:
+        normalized = phone_access_mode.strip().lower()
+        if normalized not in _PHONE_ACCESS_MODE_OPTIONS:
+            return "tailscale"
+        return normalized  # type: ignore[return-value]
+
+    def _is_network_exposed_host(host: str) -> bool:
+        return not host or host in {"0.0.0.0", "::", "[::]"}
+
+    def _is_loopback_host(host: str) -> bool:
+        return host in {"localhost", "::1", "[::1]"} or host.startswith("127.")
+
+    def _loopback_server_url(bind_port: int) -> str:
+        return f"http://127.0.0.1:{bind_port}"
+
+    def _is_loopback_only_server_urls(urls: list[str], *, bind_port: int) -> bool:
+        normalized = _dedupe_server_urls(urls)
+        return normalized == [_loopback_server_url(bind_port)]
+
+    def _normalize_server_url(server_url: str) -> str:
+        candidate = server_url.strip().rstrip("/")
+        if not candidate:
+            return ""
+        if "://" not in candidate:
+            candidate = f"https://{candidate}"
+        try:
+            parsed = urlparse(candidate)
+        except ValueError:
+            return ""
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").strip()
+        if scheme not in {"http", "https"} or not host:
+            return ""
+        netloc = host
+        if parsed.port is not None:
+            netloc = f"{host}:{parsed.port}"
+        return f"{scheme}://{netloc}"
+
+    def _dedupe_server_urls(urls: list[str]) -> list[str]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for url in urls:
+            normalized = _normalize_server_url(url)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(normalized)
+        return ordered
+
+    def _server_url_matches_mode(server_url: str, *, phone_access_mode: PhoneAccessMode) -> bool:
+        try:
+            parsed = urlparse(server_url)
+        except ValueError:
+            return False
+        host = (parsed.hostname or "").strip().lower()
+        if not host:
+            return False
+        if phone_access_mode == "tailscale":
+            return host.endswith(".ts.net") or _is_tailscale_ipv4(host)
+        if phone_access_mode == "wifi":
+            if host.endswith(".local"):
+                return True
+            return _is_private_non_loopback_ipv4(host)
+        return False
+
+    def _is_public_server_url(server_url: str) -> bool:
+        try:
+            parsed = urlparse(server_url)
+        except ValueError:
+            return False
+        host = (parsed.hostname or "").strip().lower()
+        if not host:
+            return False
+        if host.endswith(".local") or _is_loopback_host(host):
+            return False
+        if _is_tailscale_ipv4(host) or host.endswith(".ts.net"):
+            return False
+        if _is_private_non_loopback_ipv4(host):
+            return False
+        return True
+
+    def _is_ipv4(value: str) -> bool:
+        try:
+            return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
+        except ValueError:
+            return False
+
+    def _is_private_non_loopback_ipv4(value: str) -> bool:
+        try:
+            addr = ipaddress.ip_address(value)
+        except ValueError:
+            return False
+        return bool(addr.is_private and not addr.is_loopback)
+
+    def _is_tailscale_ipv4(value: str) -> bool:
+        try:
+            addr = ipaddress.ip_address(value)
+        except ValueError:
+            return False
+        return addr.version == 4 and addr in ipaddress.ip_network("100.64.0.0/10")
+
+    def _is_routable_local_ipv4(value: str) -> bool:
+        if not _is_ipv4(value):
+            return False
+        return not value.startswith("127.") and value != "0.0.0.0"
 
 
 def refresh_pairing_server_url(
@@ -238,130 +361,3 @@ def _previous_public_server_urls(payload: dict[str, object]) -> list[str]:
         for url in _read_pairing_server_urls(payload)
         if _is_public_server_url(url)
     ]
-
-
-def _normalize_phone_access_mode(phone_access_mode: str) -> PhoneAccessMode:
-    normalized = phone_access_mode.strip().lower()
-    if normalized not in PHONE_ACCESS_MODE_OPTIONS:
-        return "tailscale"
-    return normalized  # type: ignore[return-value]
-
-
-def _is_network_exposed_host(host: str) -> bool:
-    return not host or host in {"0.0.0.0", "::", "[::]"}
-
-
-def _is_loopback_host(host: str) -> bool:
-    return host in {"localhost", "::1", "[::1]"} or host.startswith("127.")
-
-
-def _loopback_server_url(bind_port: int) -> str:
-    return f"http://127.0.0.1:{bind_port}"
-
-
-def _is_loopback_only_server_urls(urls: list[str], *, bind_port: int) -> bool:
-    normalized = _dedupe_server_urls(urls)
-    return normalized == [_loopback_server_url(bind_port)]
-
-
-def _normalize_server_url(server_url: str) -> str:
-    candidate = server_url.strip().rstrip("/")
-    if not candidate:
-        return ""
-    if "://" not in candidate:
-        candidate = f"https://{candidate}"
-    try:
-        parsed = urlparse(candidate)
-    except ValueError:
-        return ""
-    scheme = parsed.scheme.lower()
-    host = (parsed.hostname or "").strip()
-    if scheme not in {"http", "https"} or not host:
-        return ""
-    netloc = host
-    if parsed.port is not None:
-        netloc = f"{host}:{parsed.port}"
-    return f"{scheme}://{netloc}"
-
-
-def _dedupe_server_urls(urls: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for url in urls:
-        normalized = _normalize_server_url(url)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        ordered.append(normalized)
-    return ordered
-
-
-def _server_url_matches_mode(server_url: str, *, phone_access_mode: PhoneAccessMode) -> bool:
-    try:
-        parsed = urlparse(server_url)
-    except ValueError:
-        return False
-    host = (parsed.hostname or "").strip().lower()
-    if not host:
-        return False
-    if phone_access_mode == "tailscale":
-        return host.endswith(".ts.net") or _is_tailscale_ipv4(host)
-    if phone_access_mode == "wifi":
-        if host.endswith(".local"):
-            return True
-        return _is_private_non_loopback_ipv4(host)
-    return False
-
-
-def _is_public_server_url(server_url: str) -> bool:
-    try:
-        parsed = urlparse(server_url)
-    except ValueError:
-        return False
-    host = (parsed.hostname or "").strip().lower()
-    if not host:
-        return False
-    if host.endswith(".local") or _is_loopback_host(host):
-        return False
-    if _is_tailscale_ipv4(host) or host.endswith(".ts.net"):
-        return False
-    if _is_private_non_loopback_ipv4(host):
-        return False
-    return True
-
-
-def _is_ipv4(value: str) -> bool:
-    try:
-        return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
-    except ValueError:
-        return False
-
-
-def _is_private_or_loopback_ipv4(value: str) -> bool:
-    try:
-        addr = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    return bool(addr.is_loopback or addr.is_private)
-
-
-def _is_private_non_loopback_ipv4(value: str) -> bool:
-    try:
-        addr = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    return bool(addr.is_private and not addr.is_loopback)
-
-
-def _is_tailscale_ipv4(value: str) -> bool:
-    try:
-        addr = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    return addr.version == 4 and addr in ipaddress.ip_network("100.64.0.0/10")
-
-
-def _is_routable_local_ipv4(value: str) -> bool:
-    if not _is_ipv4(value):
-        return False
-    return not value.startswith("127.") and value != "0.0.0.0"

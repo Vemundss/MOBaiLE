@@ -114,6 +114,17 @@ Extra options on `release`:
 - `beta` is the main "push a new version to TestFlight" command.
 - `release` uploads the binary to App Store Connect and can optionally submit it for review, but you still need your metadata, screenshots, privacy answers, and review notes to be correct.
 
+## Stable Release Gate
+
+Do not treat a build as shippable until these checks are green:
+
+1. Backend test workflow passes and preserves the pytest report and log.
+2. iOS test workflow passes and preserves the `xcresult` bundle plus the `xcodebuild` log.
+3. The current release candidate has been exercised on a real device for pairing, launch, text run, voice run, and reconnect behavior.
+4. Any blocking recovery flows have been reviewed in the app UI, not just in raw logs.
+
+The CI jobs are intentionally set up to keep the evidence around when something fails. Use those artifacts first before rerunning a long local reproduction.
+
 ## Caveats
 
 - This setup assumes local Xcode signing is already working.

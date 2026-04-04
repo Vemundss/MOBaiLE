@@ -65,6 +65,9 @@ class ExecutionEvent(BaseModel):
         "action.stderr",
         "action.completed",
         "assistant.message",
+        "activity.started",
+        "activity.updated",
+        "activity.completed",
         "run.completed",
         "run.failed",
         "run.blocked",
@@ -72,6 +75,10 @@ class ExecutionEvent(BaseModel):
     ]
     action_index: int | None = None
     message: str
+    stage: str | None = None
+    title: str | None = None
+    display_message: str | None = None
+    level: Literal["info", "warning", "error"] | None = None
     event_id: str | None = None
     created_at: str | None = None
 
@@ -158,6 +165,8 @@ class RunDiagnostics(BaseModel):
     summary: str
     event_count: int
     event_type_counts: dict[str, int]
+    activity_stage_counts: dict[str, int] = Field(default_factory=dict)
+    latest_activity: str | None = None
     has_stderr: bool
     last_error: str | None = None
     created_at: str | None = None

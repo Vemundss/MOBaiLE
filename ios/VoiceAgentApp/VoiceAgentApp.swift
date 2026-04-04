@@ -1,6 +1,46 @@
 import SwiftUI
 import UIKit
 
+enum AppAppearancePreference: String, CaseIterable, Identifiable {
+    static let storageKey = "ui.appearancePreference"
+
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system:
+            return "System"
+        case .light:
+            return "Light"
+        case .dark:
+            return "Dark"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system:
+            return nil
+        case .light:
+            return .light
+        case .dark:
+            return .dark
+        }
+    }
+
+    static func resolve(from rawValue: String?) -> AppAppearancePreference {
+        guard let rawValue,
+              let preference = AppAppearancePreference(rawValue: rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
+            return .system
+        }
+        return preference
+    }
+}
+
 @MainActor
 final class IncomingURLStore: ObservableObject {
     static let shared = IncomingURLStore()
@@ -65,11 +105,21 @@ final class VoiceAgentSceneDelegate: NSObject, UIWindowSceneDelegate {
 struct VoiceAgentApp: App {
     @UIApplicationDelegateAdaptor(VoiceAgentAppDelegate.self) private var appDelegate
     @StateObject private var incomingURLStore = IncomingURLStore.shared
+    @AppStorage(AppAppearancePreference.storageKey) private var appearancePreferenceRaw = AppAppearancePreference.system.rawValue
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(incomingURLStore)
+                .preferredColorScheme(resolvedAppearancePreference.colorScheme)
         }
+    }
+
+    private var resolvedAppearancePreference: AppAppearancePreference {
+        let previewOverride = ProcessInfo.processInfo.environment["MOBAILE_PREVIEW_APPEARANCE"]
+        if let previewOverride, !previewOverride.isEmpty {
+            return AppAppearancePreference.resolve(from: previewOverride)
+        }
+        return AppAppearancePreference.resolve(from: appearancePreferenceRaw)
     }
 }

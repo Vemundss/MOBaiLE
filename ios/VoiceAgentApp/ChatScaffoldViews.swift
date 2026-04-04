@@ -73,12 +73,32 @@ private struct ConnectionBadge: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(backgroundFill)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+                .stroke(borderTint, lineWidth: 1)
         )
+    }
+
+    private var backgroundFill: Color {
+        if requiresRepair {
+            return Color.orange.opacity(0.12)
+        }
+        if isConnected {
+            return Color.green.opacity(0.10)
+        }
+        return Color(.systemBackground)
+    }
+
+    private var borderTint: Color {
+        if requiresRepair {
+            return Color.orange.opacity(0.20)
+        }
+        if isConnected {
+            return Color.green.opacity(0.18)
+        }
+        return Color(.separator).opacity(0.12)
     }
 }
 
@@ -134,21 +154,28 @@ struct ConversationEmptyStateView: View {
         VStack(alignment: .leading, spacing: 18) {
             if isConfigured && !needsConnectionRepair {
                 VStack(alignment: .leading, spacing: 16) {
-                    Label(statusText, systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.green.opacity(0.12))
-                        .clipShape(Capsule())
+                    HStack(alignment: .top, spacing: 12) {
+                        MobaileLogoMark()
+                            .frame(width: 40, height: 40)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Start with a focused task")
-                            .font(.title3.weight(.semibold))
-                        Text("Ask about this repo directly, or use a quick start to keep the first run narrow and useful.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Start with a focused task")
+                                .font(.title3.weight(.semibold))
+                            Text("Ask directly in the composer below, or use a quick start to keep the first run narrow and useful.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 0)
+
+                        Label(statusText, systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.green.opacity(0.12))
+                            .clipShape(Capsule())
                     }
 
                     if let runtimeContext {
@@ -167,46 +194,48 @@ struct ConversationEmptyStateView: View {
                         }
                     }
 
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 10) {
-                            Button {
-                                onStartVoiceMode()
-                            } label: {
-                                Label("Start voice mode", systemImage: "waveform.circle.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            if canRetryLastPrompt {
+                    if canRetryLastPrompt {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) {
                                 Button {
                                     onRetryLastPrompt()
                                 } label: {
                                     Label("Retry last prompt", systemImage: "arrow.clockwise")
                                         .frame(maxWidth: .infinity)
                                 }
+                                .buttonStyle(.borderedProminent)
+
+                                Button {
+                                    onStartVoiceMode()
+                                } label: {
+                                    Label("Start voice mode", systemImage: "waveform.circle.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
                                 .buttonStyle(.bordered)
                             }
-                        }
 
-                        VStack(spacing: 10) {
-                            Button {
-                                onStartVoiceMode()
-                            } label: {
-                                Label("Start voice mode", systemImage: "waveform.circle.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            if canRetryLastPrompt {
+                            VStack(spacing: 10) {
                                 Button {
                                     onRetryLastPrompt()
                                 } label: {
                                     Label("Retry last prompt", systemImage: "arrow.clockwise")
                                         .frame(maxWidth: .infinity)
                                 }
+                                .buttonStyle(.borderedProminent)
+
+                                Button {
+                                    onStartVoiceMode()
+                                } label: {
+                                    Label("Start voice mode", systemImage: "waveform.circle.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
                                 .buttonStyle(.bordered)
                             }
                         }
+                    } else {
+                        Label("Use the mic in the composer for voice mode.", systemImage: "waveform.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             } else {
@@ -313,28 +342,39 @@ struct ConversationEmptyStateView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(needsConnectionRepair ? Color.orange.opacity(0.08) : Color(.systemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color(.separator).opacity(0.20), lineWidth: 1)
+                .stroke(
+                    needsConnectionRepair
+                        ? Color.orange.opacity(0.18)
+                        : Color(.separator).opacity(0.16),
+                    lineWidth: 1
+                )
         )
+        .shadow(color: Color.black.opacity(0.04), radius: 12, y: 4)
     }
 
     @ViewBuilder
     private func configuredRuntimeContextRow(context: EmptyStateRuntimeContext) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Current runtime")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.horizontal.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text("Connected runtime")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
-                    EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
                     EmptyStateMetaPill(systemImage: "sparkles", text: context.model)
+                    EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
                     if let effort = context.effort {
                         EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
                     }
@@ -343,8 +383,8 @@ struct ConversationEmptyStateView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
                         EmptyStateMetaPill(systemImage: "sparkles", text: context.model)
+                        EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
                         if let effort = context.effort {
                             EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
                         }
@@ -354,6 +394,11 @@ struct ConversationEmptyStateView: View {
                 }
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 }
 
@@ -370,15 +415,14 @@ private struct EmptyStateMetaPill: View {
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.primary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color(.systemBackground))
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
-            )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(.systemBackground))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+        )
     }
 }
 
@@ -472,6 +516,28 @@ struct InlineNoticeCard: View {
     let systemImage: String
     let actionTitle: String?
     let action: (() -> Void)?
+    let secondaryActionTitle: String?
+    let secondaryAction: (() -> Void)?
+
+    init(
+        title: String,
+        message: String,
+        tint: Color,
+        systemImage: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil,
+        secondaryActionTitle: String? = nil,
+        secondaryAction: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.message = message
+        self.tint = tint
+        self.systemImage = systemImage
+        self.actionTitle = actionTitle
+        self.action = action
+        self.secondaryActionTitle = secondaryActionTitle
+        self.secondaryAction = secondaryAction
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -488,12 +554,24 @@ struct InlineNoticeCard: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if let actionTitle, let action {
-                    Button(actionTitle) {
-                        action()
+                if actionTitle != nil || secondaryActionTitle != nil {
+                    HStack(spacing: 8) {
+                        if let actionTitle, let action {
+                            Button(actionTitle) {
+                                action()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+
+                        if let secondaryActionTitle, let secondaryAction {
+                            Button(secondaryActionTitle) {
+                                secondaryAction()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
             }
 
@@ -543,7 +621,66 @@ private struct SheetIntroCard: View {
 
 struct LogsView: View {
     let events: [ExecutionEvent]
+    let diagnostics: RunDiagnostics?
     @Environment(\.dismiss) private var dismiss
+    @State private var scope: LogScope = .all
+
+    private enum LogScope: String, CaseIterable, Identifiable {
+        case all
+        case highlights
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all:
+                return "All"
+            case .highlights:
+                return "Highlights"
+            }
+        }
+
+        var introTitle: String {
+            switch self {
+            case .all:
+                return "Raw Execution Events"
+            case .highlights:
+                return "Run Highlights"
+            }
+        }
+
+        var introMessage: String {
+            switch self {
+            case .all:
+                return "Chat shows the curated live activity. This sheet keeps the full event tape for diagnostics."
+            case .highlights:
+                return "A quieter view of key milestones. Switch back to All if you need the raw event timeline."
+            }
+        }
+    }
+
+    private var effectiveDiagnostics: RunDiagnostics? {
+        if let diagnostics {
+            return diagnostics
+        }
+        guard !events.isEmpty else { return nil }
+        return RunDiagnostics.derived(runId: "", status: "unknown", summary: "", events: events)
+    }
+
+    private var highlightEventCount: Int {
+        events.filter(isHighlightEvent(_:)).count
+    }
+
+    private var displayedEvents: [ExecutionEvent] {
+        let source: [ExecutionEvent]
+        switch scope {
+        case .all:
+            source = events
+        case .highlights:
+            source = events.filter(isHighlightEvent(_:))
+        }
+        return Array(source.enumerated().reversed()).map(\.element)
+    }
 
     var body: some View {
         NavigationStack {
@@ -557,35 +694,39 @@ struct LogsView: View {
                 } else {
                     List {
                         Section {
-                            SheetIntroCard(
-                                title: "Execution Timeline",
-                                message: "Newest events appear first. Long-press any row to select and copy text.",
-                                systemImage: "waveform.path.ecg",
-                                tint: .blue
-                            )
+                            VStack(alignment: .leading, spacing: 12) {
+                                SheetIntroCard(
+                                    title: scope.introTitle,
+                                    message: scope.introMessage,
+                                    systemImage: "waveform.path.ecg",
+                                    tint: .blue
+                                )
+
+                                if let effectiveDiagnostics {
+                                    RunHealthSummaryCard(
+                                        diagnostics: effectiveDiagnostics,
+                                        highlightEventCount: highlightEventCount
+                                    )
+                                }
+
+                                Picker("View", selection: $scope) {
+                                    ForEach(LogScope.allCases) { option in
+                                        Text(option.title)
+                                            .tag(option)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                            }
                             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }
 
-                        ForEach(Array(events.enumerated().reversed()), id: \.offset) { _, event in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(event.type)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Text(event.message)
-                                    .font(.footnote.monospaced())
-                                    .textSelection(.enabled)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        ForEach(Array(displayedEvents.enumerated()), id: \.offset) { _, event in
+                            LogEventRow(event: event)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                         }
                     }
                     .listStyle(.plain)
@@ -603,6 +744,429 @@ struct LogsView: View {
                 }
             }
         }
+    }
+
+    private func isHighlightEvent(_ event: ExecutionEvent) -> Bool {
+        switch event.type {
+        case "assistant.message", "chat.message", "run.completed", "run.failed", "run.blocked", "run.cancelled":
+            return true
+        case "activity.started", "activity.updated", "activity.completed":
+            return true
+        case "action.started", "action.completed":
+            return true
+        case "log.message":
+            let lower = event.message.lowercased()
+            return lower.contains("failed") || lower.contains("timed out") || lower.contains("blocked")
+        default:
+            return false
+        }
+    }
+}
+
+private struct LogEventRow: View {
+    let event: ExecutionEvent
+
+    private var descriptor: LogEventDescriptor {
+        logEventDescriptor(for: event)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: descriptor.systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(descriptor.tint)
+                .frame(width: 30, height: 30)
+                .background(descriptor.tint.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(descriptor.title)
+                        .font(.subheadline.weight(.semibold))
+
+                    Spacer(minLength: 0)
+
+                    if let metadata = logEventMetadata(for: event) {
+                        Text(metadata)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(event.displayMessage ?? event.message)
+                    .font(descriptor.usesMonospacedBody ? .footnote.monospaced() : .footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+}
+
+private struct RunHealthSummaryCard: View {
+    let diagnostics: RunDiagnostics
+    let highlightEventCount: Int
+
+    private var statusLabel: String {
+        logDiagnosticStatusLabel(for: diagnostics.status)
+    }
+
+    private var statusTint: Color {
+        logDiagnosticStatusTint(for: diagnostics.status)
+    }
+
+    private var latestActivity: String? {
+        normalizedLogSummaryText(diagnostics.latestActivity)
+    }
+
+    private var summary: String? {
+        normalizedLogSummaryText(diagnostics.summary)
+    }
+
+    private var lastError: String? {
+        normalizedLogSummaryText(diagnostics.lastError)
+    }
+
+    private var orderedStageCounts: [(String, Int)] {
+        diagnostics.activityStageCounts
+            .filter { !$0.key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { lhs, rhs in
+                let leftRank = logStageSortRank(lhs.key)
+                let rightRank = logStageSortRank(rhs.key)
+                if leftRank == rightRank {
+                    return lhs.key < rhs.key
+                }
+                return leftRank < rightRank
+            }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Run Health")
+                        .font(.subheadline.weight(.semibold))
+
+                    if let latestActivity {
+                        Text("Latest activity")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text(latestActivity)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let summary {
+                        Text(summary)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Text(statusLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusTint)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(statusTint.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    LogSummaryPill(systemImage: "doc.text", text: "\(diagnostics.eventCount) raw events", tint: .blue)
+                    LogSummaryPill(systemImage: "sparkles", text: "\(highlightEventCount) highlights", tint: .purple)
+                    if diagnostics.hasStderr {
+                        LogSummaryPill(systemImage: "exclamationmark.bubble.fill", text: "stderr seen", tint: .orange)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    LogSummaryPill(systemImage: "doc.text", text: "\(diagnostics.eventCount) raw events", tint: .blue)
+                    LogSummaryPill(systemImage: "sparkles", text: "\(highlightEventCount) highlights", tint: .purple)
+                    if diagnostics.hasStderr {
+                        LogSummaryPill(systemImage: "exclamationmark.bubble.fill", text: "stderr seen", tint: .orange)
+                    }
+                }
+            }
+
+            if !orderedStageCounts.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Stages")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            ForEach(orderedStageCounts, id: \.0) { stage, count in
+                                LogSummaryPill(
+                                    systemImage: logStageSystemImage(for: stage),
+                                    text: "\(logStageTitle(for: stage)) ×\(count)",
+                                    tint: logStageTint(for: stage)
+                                )
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(orderedStageCounts, id: \.0) { stage, count in
+                                LogSummaryPill(
+                                    systemImage: logStageSystemImage(for: stage),
+                                    text: "\(logStageTitle(for: stage)) ×\(count)",
+                                    tint: logStageTint(for: stage)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let lastError {
+                Label(lastError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.red.opacity(0.10))
+                    )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+}
+
+private struct LogSummaryPill: View {
+    let systemImage: String
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(tint.opacity(0.12))
+            .clipShape(Capsule())
+    }
+}
+
+private struct LogEventDescriptor {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let usesMonospacedBody: Bool
+}
+
+private func logEventDescriptor(for event: ExecutionEvent) -> LogEventDescriptor {
+    let lowerMessage = event.message.lowercased()
+
+    switch event.type {
+    case "assistant.message", "chat.message":
+        return LogEventDescriptor(title: "Assistant Update", systemImage: "text.bubble.fill", tint: .blue, usesMonospacedBody: false)
+    case "activity.started", "activity.updated", "activity.completed":
+        return LogEventDescriptor(
+            title: event.title ?? logStageTitle(for: event.stage),
+            systemImage: logStageSystemImage(for: event.stage),
+            tint: logActivityTint(for: event),
+            usesMonospacedBody: false
+        )
+    case "action.started":
+        if lowerMessage.contains("starting write_file") {
+            return LogEventDescriptor(title: "Writing Files", systemImage: "square.and.pencil", tint: .blue, usesMonospacedBody: false)
+        }
+        if lowerMessage.contains("starting run_command") {
+            return LogEventDescriptor(title: "Running Command", systemImage: "terminal", tint: .blue, usesMonospacedBody: false)
+        }
+        if lowerMessage.contains("starting calendar adapter") {
+            return LogEventDescriptor(title: "Checking Calendar", systemImage: "calendar", tint: .blue, usesMonospacedBody: false)
+        }
+        if lowerMessage.contains("starting codex exec") || lowerMessage.contains("starting claude exec") {
+            return LogEventDescriptor(title: "Agent Started", systemImage: "sparkles", tint: .blue, usesMonospacedBody: false)
+        }
+        return LogEventDescriptor(title: "Action Started", systemImage: "play.circle.fill", tint: .blue, usesMonospacedBody: false)
+    case "action.completed":
+        let didFail = lowerMessage.contains("failed") || lowerMessage.contains("unsupported")
+        return LogEventDescriptor(
+            title: didFail ? "Action Reported a Problem" : "Action Completed",
+            systemImage: didFail ? "exclamationmark.circle.fill" : "checkmark.circle.fill",
+            tint: didFail ? .orange : .green,
+            usesMonospacedBody: false
+        )
+    case "action.stdout":
+        return LogEventDescriptor(title: "Command Output", systemImage: "text.alignleft", tint: .secondary, usesMonospacedBody: true)
+    case "action.stderr":
+        return LogEventDescriptor(title: "Command Error", systemImage: "exclamationmark.bubble.fill", tint: .red, usesMonospacedBody: true)
+    case "run.completed":
+        return LogEventDescriptor(title: "Run Completed", systemImage: "checkmark.circle.fill", tint: .green, usesMonospacedBody: false)
+    case "run.failed":
+        return LogEventDescriptor(title: "Run Failed", systemImage: "xmark.circle.fill", tint: .red, usesMonospacedBody: false)
+    case "run.blocked":
+        return LogEventDescriptor(title: "Needs Input", systemImage: "hand.raised.fill", tint: .orange, usesMonospacedBody: false)
+    case "run.cancelled":
+        return LogEventDescriptor(title: "Run Cancelled", systemImage: "slash.circle.fill", tint: .secondary, usesMonospacedBody: false)
+    case "log.message":
+        return LogEventDescriptor(title: "Internal Log", systemImage: "doc.plaintext", tint: .secondary, usesMonospacedBody: true)
+    default:
+        return LogEventDescriptor(title: event.type, systemImage: "circle.fill", tint: .secondary, usesMonospacedBody: false)
+    }
+}
+
+private func logEventMetadata(for event: ExecutionEvent) -> String? {
+    var parts: [String] = []
+    if let stage = normalizedLogSummaryText(event.stage) {
+        parts.append(logStageTitle(for: stage))
+    }
+    parts.append(event.type)
+    if let actionIndex = event.actionIndex {
+        parts.append("step \(actionIndex + 1)")
+    }
+    if let seq = event.seq {
+        parts.append("#\(seq)")
+    }
+    if let level = normalizedLogSummaryText(event.level), level != "info" {
+        parts.append(level.uppercased())
+    }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+}
+
+private func normalizedLogSummaryText(_ text: String?) -> String? {
+    guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
+    return trimmed
+}
+
+private func logDiagnosticStatusLabel(for rawStatus: String) -> String {
+    let status = rawStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if status.contains("block") || status.contains("input") {
+        return "Needs Input"
+    }
+    if status.contains("timed out") {
+        return "Timed Out"
+    }
+    if status.contains("fail") || status.contains("reject") {
+        return "Failed"
+    }
+    if status.contains("cancel") {
+        return "Cancelled"
+    }
+    if status.contains("complete") {
+        return "Completed"
+    }
+    if status.contains("run") || status.contains("execut") || status.contains("planning") || status.contains("summar") {
+        return "Running"
+    }
+    if status.isEmpty || status == "unknown" {
+        return "In Progress"
+    }
+    return status.capitalized
+}
+
+private func logDiagnosticStatusTint(for rawStatus: String) -> Color {
+    let status = rawStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if status.contains("block") || status.contains("input") {
+        return .orange
+    }
+    if status.contains("timed out") || status.contains("fail") || status.contains("reject") {
+        return .red
+    }
+    if status.contains("cancel") {
+        return .secondary
+    }
+    if status.contains("complete") {
+        return .green
+    }
+    return .blue
+}
+
+private func logStageSortRank(_ stage: String) -> Int {
+    switch stage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "planning":
+        return 0
+    case "executing":
+        return 1
+    case "summarizing":
+        return 2
+    case "blocked":
+        return 3
+    default:
+        return 99
+    }
+}
+
+private func logStageTitle(for rawStage: String?) -> String {
+    let stage = rawStage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    switch stage {
+    case "planning":
+        return "Planning"
+    case "executing":
+        return "Executing"
+    case "summarizing":
+        return "Summarizing"
+    case "blocked":
+        return "Needs Input"
+    default:
+        return stage.isEmpty ? "Activity" : stage.capitalized
+    }
+}
+
+private func logStageSystemImage(for rawStage: String?) -> String {
+    let stage = rawStage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    switch stage {
+    case "planning":
+        return "list.bullet"
+    case "executing":
+        return "terminal"
+    case "summarizing":
+        return "text.bubble.fill"
+    case "blocked":
+        return "hand.raised.fill"
+    default:
+        return "waveform.path.ecg"
+    }
+}
+
+private func logStageTint(for rawStage: String?) -> Color {
+    let stage = rawStage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    switch stage {
+    case "planning":
+        return .blue
+    case "executing":
+        return .indigo
+    case "summarizing":
+        return .green
+    case "blocked":
+        return .orange
+    default:
+        return .secondary
+    }
+}
+
+private func logActivityTint(for event: ExecutionEvent) -> Color {
+    switch event.level?.lowercased() {
+    case "error":
+        return .red
+    case "warning":
+        return .orange
+    default:
+        return logStageTint(for: event.stage)
     }
 }
 
@@ -644,45 +1208,48 @@ struct ThreadsView: View {
                             Button {
                                 onSelect(thread.id)
                             } label: {
-                                HStack(spacing: 10) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack(spacing: 8) {
-                                            Text(thread.title)
-                                                .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
-                                                .lineLimit(1)
-                                            if activeThreadID == thread.id {
-                                                Text("Current")
-                                                    .font(.caption2.weight(.semibold))
-                                                    .padding(.horizontal, 7)
-                                                    .padding(.vertical, 3)
-                                                    .background(Color.accentColor.opacity(0.12))
-                                                    .foregroundStyle(Color.accentColor)
-                                                    .clipShape(Capsule())
-                                            }
-                                        }
-                                        Text(threadPreview(for: thread))
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                        Text(thread.title)
+                                            .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
                                             .lineLimit(1)
-                                        HStack(spacing: 8) {
-                                            Text(thread.updatedAt, style: .relative)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                            Text(threadStatusText(for: thread))
+
+                                        Spacer(minLength: 0)
+
+                                        Text(thread.updatedAt, style: .relative)
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Text(threadPreview(for: thread))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+
+                                    HStack(spacing: 8) {
+                                        Text(threadStatusText(for: thread))
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(threadStatusColor(for: thread).opacity(0.14))
+                                            .foregroundStyle(threadStatusColor(for: thread))
+                                            .clipShape(Capsule())
+
+                                        if activeThreadID == thread.id {
+                                            Text("Current")
                                                 .font(.caption2.weight(.semibold))
-                                                .padding(.horizontal, 7)
-                                                .padding(.vertical, 3)
-                                                .background(threadStatusColor(for: thread).opacity(0.14))
-                                                .foregroundStyle(threadStatusColor(for: thread))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.accentColor.opacity(0.12))
+                                                .foregroundStyle(Color.accentColor)
                                                 .clipShape(Capsule())
                                         }
                                     }
-                                    Spacer()
                                 }
                             }
                             .buttonStyle(.plain)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 14)
                             .background(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                                     .fill(activeThreadID == thread.id ? Color.accentColor.opacity(0.06) : Color(.secondarySystemBackground))
@@ -720,7 +1287,7 @@ struct ThreadsView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Threads")
+            .navigationTitle("Chats")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

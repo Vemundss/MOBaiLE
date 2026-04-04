@@ -7,6 +7,53 @@ from pathlib import Path
 from app.models.schemas import ActionPlan, ExecutionEvent, HumanUnblockRequest, RunRecord
 
 LEGACY_CODEX_THREAD_MAP_COMPAT_REMOVE_AFTER = "2026-07-01"
+RUN_COLUMNS = """
+run_id,
+session_id,
+executor,
+utterance_text,
+working_directory,
+status,
+pending_human_unblock_json,
+plan_json,
+summary,
+created_at,
+updated_at
+"""
+RUN_EVENT_COLUMNS = """
+run_id,
+seq,
+event_id,
+type,
+action_index,
+message,
+created_at
+"""
+SESSION_CONTEXT_COLUMNS = """
+session_id,
+executor,
+working_directory,
+runtime_settings_json,
+codex_model,
+codex_reasoning_effort,
+claude_model,
+latest_run_id,
+latest_run_status,
+latest_run_summary,
+latest_run_pending_human_unblock_json,
+latest_run_updated_at,
+updated_at
+"""
+SESSION_CONTEXT_MUTABLE_COLUMNS = """
+session_id,
+executor,
+working_directory,
+runtime_settings_json,
+codex_model,
+codex_reasoning_effort,
+claude_model
+"""
+SESSION_CONTEXT_MUTABLE_COLUMNS_WITH_UPDATED_AT = SESSION_CONTEXT_MUTABLE_COLUMNS + ",\nupdated_at"
 
 
 class RunStore:
@@ -198,7 +245,10 @@ class RunStore:
         with self._connect() as conn:
             run_row = conn.execute(
                 """
-                SELECT run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, created_at, updated_at
+                SELECT
+                    """
+                + RUN_COLUMNS
+                + """
                 FROM runs
                 WHERE run_id = ?
                 """,
@@ -206,15 +256,7 @@ class RunStore:
             ).fetchone()
             if run_row is None:
                 return None
-            event_rows = conn.execute(
-                """
-                SELECT run_id, seq, event_id, type, action_index, message, created_at
-                FROM run_events
-                WHERE run_id = ?
-                ORDER BY seq
-                """,
-                (run_id,),
-            ).fetchall()
+            event_rows = self._load_event_rows_for_run_ids(conn, [run_id]).get(run_id, [])
         return self._hydrate_run(run_row, event_rows)
 
     def load_all(self) -> dict[str, RunRecord]:
@@ -222,30 +264,31 @@ class RunStore:
         with self._connect() as conn:
             run_rows = conn.execute(
                 """
-                SELECT run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, created_at, updated_at
+                SELECT
+                    """
+                + RUN_COLUMNS
+                + """
                 FROM runs
                 """
             ).fetchall()
-            event_rows = conn.execute(
-                """
-                SELECT run_id, seq, event_id, type, action_index, message, created_at
-                FROM run_events
-                ORDER BY run_id, seq
-                """
-            ).fetchall()
+            event_rows_by_run = self._load_event_rows_for_run_ids(
+                conn,
+                [str(row["run_id"]) for row in run_rows],
+            )
 
         for row in run_rows:
-            runs[row["run_id"]] = self._hydrate_run(
-                row,
-                [event_row for event_row in event_rows if event_row["run_id"] == row["run_id"]],
-            )
+            run_id = str(row["run_id"])
+            runs[run_id] = self._hydrate_run(row, event_rows_by_run.get(run_id, []))
         return runs
 
     def list_runs_for_session(self, session_id: str, limit: int = 20) -> list[RunRecord]:
         with self._connect() as conn:
             run_rows = conn.execute(
                 """
-                SELECT run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, created_at, updated_at
+                SELECT
+                    """
+                + RUN_COLUMNS
+                + """
                 FROM runs
                 WHERE session_id = ?
                 ORDER BY datetime(updated_at) DESC
@@ -253,25 +296,13 @@ class RunStore:
                 """,
                 (session_id, limit),
             ).fetchall()
-            run_ids = [row["run_id"] for row in run_rows]
-            event_rows = conn.execute(
-                f"""
-                SELECT run_id, seq, event_id, type, action_index, message, created_at
-                FROM run_events
-                WHERE run_id IN ({",".join(["?"] * len(run_ids))})
-                ORDER BY run_id, seq
-                """,
-                run_ids,
-            ).fetchall() if run_ids else []
+            run_ids = [str(row["run_id"]) for row in run_rows]
+            event_rows_by_run = self._load_event_rows_for_run_ids(conn, run_ids)
 
         results: list[RunRecord] = []
         for row in run_rows:
-            results.append(
-                self._hydrate_run(
-                    row,
-                    [event_row for event_row in event_rows if event_row["run_id"] == row["run_id"]],
-                )
-            )
+            run_id = str(row["run_id"])
+            results.append(self._hydrate_run(row, event_rows_by_run.get(run_id, [])))
         return results
 
     def get_session_context(self, session_id: str) -> sqlite3.Row | None:
@@ -279,19 +310,9 @@ class RunStore:
             return conn.execute(
                 """
                 SELECT
-                    session_id,
-                    executor,
-                    working_directory,
-                    runtime_settings_json,
-                    codex_model,
-                    codex_reasoning_effort,
-                    claude_model,
-                    latest_run_id,
-                    latest_run_status,
-                    latest_run_summary,
-                    latest_run_pending_human_unblock_json,
-                    latest_run_updated_at,
-                    updated_at
+                    """
+                + SESSION_CONTEXT_COLUMNS
+                + """
                 FROM session_context
                 WHERE session_id = ?
                 """,
@@ -313,14 +334,9 @@ class RunStore:
             conn.execute(
                 """
                 INSERT INTO session_context (
-                    session_id,
-                    executor,
-                    working_directory,
-                    runtime_settings_json,
-                    codex_model,
-                    codex_reasoning_effort,
-                    claude_model,
-                    updated_at
+                    """
+                + SESSION_CONTEXT_MUTABLE_COLUMNS_WITH_UPDATED_AT
+                + """
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(session_id) DO UPDATE SET
@@ -345,14 +361,9 @@ class RunStore:
             row = conn.execute(
                 """
                 SELECT
-                    session_id,
-                    executor,
-                    working_directory,
-                    runtime_settings_json,
-                    codex_model,
-                    codex_reasoning_effort,
-                    claude_model,
-                    updated_at
+                    """
+                + SESSION_CONTEXT_MUTABLE_COLUMNS_WITH_UPDATED_AT
+                + """
                 FROM session_context
                 WHERE session_id = ?
                 """,
@@ -496,6 +507,35 @@ class RunStore:
                 event.created_at,
             ),
         )
+
+    def _load_event_rows_for_run_ids(
+        self,
+        conn: sqlite3.Connection,
+        run_ids: list[str],
+    ) -> dict[str, list[sqlite3.Row]]:
+        if not run_ids:
+            return {}
+        placeholders = ",".join(["?"] * len(run_ids))
+        event_rows = conn.execute(
+            f"""
+            SELECT
+                {RUN_EVENT_COLUMNS}
+            FROM run_events
+            WHERE run_id IN ({placeholders})
+            ORDER BY run_id, seq
+            """,
+            run_ids,
+        ).fetchall()
+        return self._group_event_rows_by_run_id(event_rows)
+
+    @staticmethod
+    def _group_event_rows_by_run_id(
+        event_rows: list[sqlite3.Row],
+    ) -> dict[str, list[sqlite3.Row]]:
+        grouped: dict[str, list[sqlite3.Row]] = {}
+        for row in event_rows:
+            grouped.setdefault(str(row["run_id"]), []).append(row)
+        return grouped
 
     def _hydrate_run(
         self,

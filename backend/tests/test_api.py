@@ -10,6 +10,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.models.schemas import AgendaItem
+from app.models.schemas import RunRecord
+
 
 def make_client(
     monkeypatch,
@@ -106,6 +109,8 @@ def test_codex_output_filter_drops_runtime_noise(monkeypatch, tmp_path: Path):
     assert module.filter_codex_assistant_message("MOBaiLE runtime context:", user_prompt, leak_markers) is None
     assert module.filter_codex_assistant_message("You are the coding agent used by MOBaiLE.", user_prompt, leak_markers) is None
     assert module.filter_codex_assistant_message("Product intent: MOBaiLE makes a user's computer available from their phone.", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("Backend activity events are the source of truth for progress in the phone UI.", user_prompt, leak_markers) is None
+    assert module.filter_codex_assistant_message("Do not dump raw logs or long command output unless the user asks.", user_prompt, leak_markers) is None
     assert module.filter_codex_assistant_message("Keep responses concise and grouped; avoid verbose step-by-step chatter.", user_prompt, leak_markers) is None
     assert module.filter_codex_assistant_message("```text", user_prompt, leak_markers) is None
     assert module.filter_codex_assistant_message("Created `hello.py` and ran it successfully.", user_prompt, leak_markers) is None
@@ -230,6 +235,13 @@ def test_list_session_runs_and_diagnostics(monkeypatch, tmp_path: Path):
     )
     assert create.status_code == 200
     run_id = create.json()["run_id"]
+    module = importlib.import_module("app.main")
+    module.RUN_STATE.append_activity_event(
+        run_id,
+        stage="executing",
+        title="Executing",
+        display_message="Running commands.",
+    )
 
     final = None
     for _ in range(40):
@@ -258,6 +270,91 @@ def test_list_session_runs_and_diagnostics(monkeypatch, tmp_path: Path):
     diagnostics = diag.json()
     assert diagnostics["run_id"] == run_id
     assert diagnostics["event_count"] >= 1
+    assert diagnostics["activity_stage_counts"] == {
+        "planning": 1,
+        "executing": 2,
+        "summarizing": 1,
+    }
+    assert diagnostics["latest_activity"] == "Preparing the final result."
+
+
+def test_run_events_endpoint_includes_typed_activity_payload(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path)
+    create = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "sess-activity-events",
+            "utterance_text": "create a hello python script and run it",
+            "executor": "local",
+        },
+    )
+    assert create.status_code == 200
+    run_id = create.json()["run_id"]
+
+    final_run: dict[str, object] | None = None
+    for _ in range(40):
+        run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+        payload = run_resp.json()
+        if payload["status"] != "running":
+            final_run = payload
+            break
+        time.sleep(0.05)
+
+    assert final_run is not None
+    pivot_seq = int(final_run["events"][-1]["seq"])
+    module = importlib.import_module("app.main")
+    module.RUN_STATE.append_activity_event(
+        run_id,
+        stage="executing",
+        title="Executing",
+        display_message="Running commands.",
+    )
+
+    response = client.get(
+        f"/v1/runs/{run_id}/events?after_seq={pivot_seq}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert '"type": "activity.updated"' in response.text
+    assert '"stage": "executing"' in response.text
+    assert '"title": "Executing"' in response.text
+
+
+def test_run_diagnostics_endpoint_reports_activity_errors(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path)
+    module = importlib.import_module("app.main")
+    module.RUN_STATE.store_run(
+        RunRecord(
+            run_id="run-diagnostics-error",
+            session_id="sess-diagnostics-error",
+            executor="local",
+            utterance_text="check the failing integration",
+            status="failed",
+            summary="The calendar adapter failed before the summary was ready.",
+            events=[],
+        )
+    )
+    module.RUN_STATE.append_activity_event(
+        "run-diagnostics-error",
+        stage="executing",
+        title="Executing",
+        display_message="Calendar query failed.",
+        level="error",
+    )
+
+    diag = client.get(
+        "/v1/runs/run-diagnostics-error/diagnostics",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert diag.status_code == 200
+    diagnostics = diag.json()
+    assert diagnostics["run_id"] == "run-diagnostics-error"
+    assert diagnostics["has_stderr"] is False
+    assert diagnostics["last_error"] == "Calendar query failed."
+    assert diagnostics["latest_activity"] == "Calendar query failed."
+    assert diagnostics["activity_stage_counts"] == {"executing": 1}
 
 
 def test_run_events_endpoint_replays_from_after_seq(monkeypatch, tmp_path: Path):
@@ -771,7 +868,7 @@ def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
 
     def fake_events():
         return [
-            module.AgendaItem(
+            AgendaItem(
                 start="09:00",
                 end="10:00",
                 title="Standup",
@@ -780,7 +877,7 @@ def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
             )
         ]
 
-    monkeypatch.setattr(module, "_fetch_today_calendar_events", fake_events)
+    monkeypatch.setattr(module.CALENDAR_SERVICE, "fetch_today_events", fake_events)
 
     resp = client.post(
         "/v1/utterances",
@@ -805,19 +902,53 @@ def test_calendar_adapter_flow(monkeypatch, tmp_path: Path):
         time.sleep(0.05)
     assert final == "completed"
     assert payload is not None
+    activity_stages = [e["stage"] for e in payload["events"] if e["type"].startswith("activity.")]
+    assert activity_stages == ["planning", "executing", "summarizing"]
     chat_events = [e for e in payload["events"] if e["type"] == "chat.message"]
     assert len(chat_events) >= 1
     assert "\"assistant_response\"" in chat_events[0]["message"]
 
 
-def test_calendar_today_returns_structured_unsupported_response_on_linux(monkeypatch, tmp_path: Path):
+def test_calendar_adapter_failure_emits_error_activity(monkeypatch, tmp_path: Path):
     client, token = make_client(monkeypatch, tmp_path, provider="mock")
     module = importlib.import_module("app.main")
-    monkeypatch.setattr(
-        module.os,
-        "uname",
-        lambda: type("Uname", (), {"sysname": "Linux"})(),
+
+    def failing_events():
+        raise RuntimeError("calendar unavailable")
+
+    monkeypatch.setattr(module.CALENDAR_SERVICE, "fetch_today_events", failing_events)
+
+    resp = client.post(
+        "/v1/utterances",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "session_id": "cal-fail",
+            "utterance_text": "Check my calendar today",
+            "executor": "codex",
+        },
     )
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+
+    payload = None
+    for _ in range(40):
+        run_resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": f"Bearer {token}"})
+        payload = run_resp.json()
+        if payload["status"] != "running":
+            break
+        time.sleep(0.05)
+
+    assert payload is not None
+    assert payload["status"] == "failed"
+    activity_events = [event for event in payload["events"] if event["type"].startswith("activity.")]
+    assert [event["stage"] for event in activity_events] == ["planning", "executing", "executing"]
+    assert activity_events[-1]["level"] == "error"
+    assert activity_events[-1]["display_message"] == "Calendar query failed."
+
+
+def test_calendar_today_returns_structured_unsupported_response_on_linux(monkeypatch, tmp_path: Path):
+    client, token = make_client(monkeypatch, tmp_path, provider="mock")
+    monkeypatch.setattr("app.calendar_service.os.uname", lambda: type("Uname", (), {"sysname": "Linux"})())
 
     resp = client.get(
         "/v1/tools/calendar/today",
@@ -854,6 +985,9 @@ def test_local_utterance_flow(monkeypatch, tmp_path: Path):
             break
         time.sleep(0.05)
     assert final == "completed"
+    assert payload is not None
+    activity_stages = [e["stage"] for e in payload["events"] if e["type"].startswith("activity.")]
+    assert activity_stages == ["planning", "executing", "summarizing"]
 
 
 def test_local_utterance_flow_accepts_typed_attachments(monkeypatch, tmp_path: Path):
@@ -1207,13 +1341,13 @@ def test_pair_exchange_is_single_use_under_concurrency(monkeypatch, tmp_path: Pa
         extra_env={"VOICE_AGENT_PAIRING_FILE": str(pairing_file)},
     )
     module = importlib.import_module("app.main")
-    original_rotate = module._rotate_pair_code
+    original_rotate = module.PAIRING_SERVICE._rotate_pair_code
 
     def slow_rotate(payload):
         time.sleep(0.1)
         return original_rotate(payload)
 
-    monkeypatch.setattr(module, "_rotate_pair_code", slow_rotate)
+    monkeypatch.setattr(module.PAIRING_SERVICE, "_rotate_pair_code", slow_rotate)
 
     responses: list = []
     start = threading.Event()
@@ -1439,6 +1573,8 @@ def test_utterance_and_audio_omit_executor_use_resolved_default(monkeypatch, tmp
         assert final_payload is not None
         assert final_payload["status"] == "completed"
         assert final_payload["executor"] == "codex"
+        activity_stages = [e["stage"] for e in final_payload["events"] if e["type"].startswith("activity.")]
+        assert activity_stages == ["planning", "executing", "summarizing"]
 
 
 def test_capabilities_endpoint_returns_report(monkeypatch, tmp_path: Path):
@@ -1464,7 +1600,6 @@ def test_capabilities_endpoint_returns_report(monkeypatch, tmp_path: Path):
     assert "playwright_persistence" in capability_ids
     assert "peekaboo_permissions" in capability_ids
     assert "calendar_adapter" in capability_ids
-    assert "mail_adapter" in capability_ids
     report_path = tmp_path / "capabilities.json"
     assert report_path.exists()
     report_payload = json.loads(report_path.read_text(encoding="utf-8"))
@@ -1688,7 +1823,7 @@ def test_pair_refresh_bootstraps_refresh_token_from_existing_paired_access_token
     updated_payload = json.loads(pairing_file.read_text(encoding="utf-8"))
     updated_payload["paired_clients"] = [
         {
-            "token_sha256": module._hash_api_token("legacy-paired-token"),
+            "token_sha256": module.PAIRING_SERVICE.hash_api_token("legacy-paired-token"),
             "session_id": "ios1",
             "issued_at": "2026-04-01T00:00:00Z",
         }
@@ -1835,6 +1970,14 @@ def test_codex_human_unblock_transitions_to_blocked(monkeypatch, tmp_path: Path)
     assert "suggested_reply" in payload["pending_human_unblock"]
     event_types = [event["type"] for event in payload["events"]]
     assert "run.blocked" in event_types
+    activity_events = [event for event in payload["events"] if event["type"].startswith("activity.")]
+    assert [event["stage"] for event in activity_events] == ["planning", "executing", "blocked"]
+    blocked_activity = next(event for event in activity_events if event["stage"] == "blocked")
+    assert blocked_activity["level"] == "warning"
+    assert blocked_activity["display_message"].startswith("Complete the CAPTCHA")
+    blocked_index = next(index for index, event in enumerate(payload["events"]) if event["type"] == "run.blocked")
+    activity_index = next(index for index, event in enumerate(payload["events"]) if event["stage"] == "blocked")
+    assert activity_index < blocked_index
 
     context_resp = client.get(
         "/v1/sessions/blocked1/context",

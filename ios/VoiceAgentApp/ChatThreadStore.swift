@@ -107,7 +107,7 @@ final class ChatThreadStore {
         defer { sqlite3_close(db) }
 
         let sql = """
-        SELECT message_id, role, text, attachments_json
+        SELECT message_id, role, text, attachments_json, presentation, source_run_id
         FROM thread_messages
         WHERE thread_id = ?
         ORDER BY position ASC
@@ -123,7 +123,18 @@ final class ChatThreadStore {
             let role = stringColumn(statement, index: 1)
             let text = stringColumn(statement, index: 2)
             let attachments = decodeAttachments(from: stringColumn(statement, index: 3))
-            rows.append(ConversationMessage(id: id, role: role, text: text, attachments: attachments))
+            let presentation = ConversationMessagePresentation(rawValue: stringColumn(statement, index: 4)) ?? .standard
+            let sourceRunID = stringColumn(statement, index: 5)
+            rows.append(
+                ConversationMessage(
+                    id: id,
+                    role: role,
+                    text: text,
+                    attachments: attachments,
+                    presentation: presentation,
+                    sourceRunID: sourceRunID.isEmpty ? nil : sourceRunID
+                )
+            )
         }
         return rows
     }
@@ -174,13 +185,15 @@ final class ChatThreadStore {
         defer { sqlite3_close(db) }
 
         let sql = """
-        INSERT INTO thread_messages (thread_id, position, message_id, role, text, attachments_json)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO thread_messages (thread_id, position, message_id, role, text, attachments_json, presentation, source_run_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(thread_id, position) DO UPDATE SET
             message_id=excluded.message_id,
             role=excluded.role,
             text=excluded.text,
-            attachments_json=excluded.attachments_json
+            attachments_json=excluded.attachments_json,
+            presentation=excluded.presentation,
+            source_run_id=excluded.source_run_id
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
@@ -192,7 +205,49 @@ final class ChatThreadStore {
         bindText(statement, index: 4, value: message.role)
         bindText(statement, index: 5, value: message.text)
         bindText(statement, index: 6, value: encodeAttachments(message.attachments))
+        bindText(statement, index: 7, value: message.presentation.rawValue)
+        bindText(statement, index: 8, value: message.sourceRunID ?? "")
         _ = sqlite3_step(statement)
+    }
+
+    func replaceMessages(threadID: UUID, messages: [ConversationMessage]) {
+        guard let db = openConnection() else { return }
+        defer { sqlite3_close(db) }
+
+        _ = sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION;", nil, nil, nil)
+        defer {
+            _ = sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+        }
+
+        var deleteStatement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM thread_messages WHERE thread_id = ?;", -1, &deleteStatement, nil) == SQLITE_OK else {
+            return
+        }
+        bindText(deleteStatement, index: 1, value: threadID.uuidString)
+        _ = sqlite3_step(deleteStatement)
+        sqlite3_finalize(deleteStatement)
+
+        let sql = """
+        INSERT INTO thread_messages (thread_id, position, message_id, role, text, attachments_json, presentation, source_run_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+
+        for (index, message) in messages.enumerated() {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            bindText(statement, index: 1, value: threadID.uuidString)
+            sqlite3_bind_int64(statement, 2, sqlite3_int64(index))
+            bindText(statement, index: 3, value: message.id.uuidString)
+            bindText(statement, index: 4, value: message.role)
+            bindText(statement, index: 5, value: message.text)
+            bindText(statement, index: 6, value: encodeAttachments(message.attachments))
+            bindText(statement, index: 7, value: message.presentation.rawValue)
+            bindText(statement, index: 8, value: message.sourceRunID ?? "")
+            _ = sqlite3_step(statement)
+        }
     }
 
     func deleteThread(threadID: UUID) {
@@ -231,6 +286,8 @@ final class ChatThreadStore {
             role TEXT NOT NULL,
             text TEXT NOT NULL,
             attachments_json TEXT NOT NULL DEFAULT '[]',
+            presentation TEXT NOT NULL DEFAULT 'standard',
+            source_run_id TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (thread_id, position),
             FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
         );
@@ -241,6 +298,8 @@ final class ChatThreadStore {
         ensureDraftAttachmentsColumnExists(db)
         ensureAttachmentsColumnExists(db)
         ensurePendingHumanUnblockColumnExists(db)
+        ensureMessagePresentationColumnExists(db)
+        ensureMessageSourceRunIDColumnExists(db)
     }
 
     private func openConnection() -> OpaquePointer? {
@@ -269,6 +328,28 @@ final class ChatThreadStore {
         _ = sqlite3_exec(
             db,
             "ALTER TABLE thread_messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]';",
+            nil,
+            nil,
+            nil
+        )
+    }
+
+    private func ensureMessagePresentationColumnExists(_ db: OpaquePointer?) {
+        guard !hasColumn(named: "presentation", in: "thread_messages", db: db) else { return }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE thread_messages ADD COLUMN presentation TEXT NOT NULL DEFAULT 'standard';",
+            nil,
+            nil,
+            nil
+        )
+    }
+
+    private func ensureMessageSourceRunIDColumnExists(_ db: OpaquePointer?) {
+        guard !hasColumn(named: "source_run_id", in: "thread_messages", db: db) else { return }
+        _ = sqlite3_exec(
+            db,
+            "ALTER TABLE thread_messages ADD COLUMN source_run_id TEXT NOT NULL DEFAULT '';",
             nil,
             nil,
             nil

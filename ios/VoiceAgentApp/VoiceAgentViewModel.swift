@@ -4,74 +4,6 @@ import Foundation
 import MediaPlayer
 import UIKit
 
-private enum PreviewScenario: String {
-    case configuredEmpty = "configured-empty"
-    case conversation = "conversation"
-    case recording = "recording"
-    case repair = "repair"
-
-    static var current: PreviewScenario? {
-        let processInfo = ProcessInfo.processInfo
-
-        if let raw = processInfo.environment["MOBAILE_PREVIEW_SCENARIO"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased(),
-           let scenario = PreviewScenario(rawValue: raw) {
-            return scenario
-        }
-
-        for argument in processInfo.arguments {
-            guard argument.hasPrefix("--mobaile-preview-scenario=") else { continue }
-            let raw = String(argument.dropFirst("--mobaile-preview-scenario=".count)).lowercased()
-            if let scenario = PreviewScenario(rawValue: raw) {
-                return scenario
-            }
-        }
-
-        return nil
-    }
-}
-
-private enum PairingHostRules {
-    static func isLocalOrPrivateHost(_ host: String) -> Bool {
-        if host.isEmpty { return false }
-        return isLoopbackOrBonjourHost(host) || isRFC1918LANHost(host) || isTailscaleHost(host)
-    }
-
-    static func isLoopbackOrBonjourHost(_ host: String) -> Bool {
-        let lower = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return lower == "localhost" || lower == "::1" || lower.hasSuffix(".local") || lower.hasPrefix("127.")
-    }
-
-    static func isRFC1918LANHost(_ host: String) -> Bool {
-        let lower = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if lower.hasPrefix("10.") || lower.hasPrefix("192.168.") {
-            return true
-        }
-        if lower.hasPrefix("172.") {
-            let parts = lower.split(separator: ".")
-            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
-                return true
-            }
-        }
-        return false
-    }
-
-    static func isTailscaleHost(_ host: String) -> Bool {
-        let lower = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if lower.hasSuffix(".ts.net") {
-            return true
-        }
-        if lower.hasPrefix("100.") {
-            let parts = lower.split(separator: ".")
-            if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
-                return true
-            }
-        }
-        return false
-    }
-}
-
 @MainActor
 final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     struct PendingPairing: Identifiable, Equatable {
@@ -110,6 +42,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         let message: String
     }
 
+    private struct PersistedConnectionRepairState: Codable {
+        let title: String
+        let message: String
+    }
+
     struct DirectoryBreadcrumb: Identifiable, Equatable {
         let id: String
         let title: String
@@ -123,6 +60,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         var seenEventIDs: Set<String> = []
         var seenEventFingerprints: Set<String> = []
         var events: [ExecutionEvent] = []
+        var liveActivityMessageID: UUID?
+        var hasReceivedFinalAssistantMessage = false
     }
 
     @Published var serverURL: String = ""
@@ -153,6 +92,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var transcriptText: String = ""
     @Published var errorText: String = ""
     @Published var events: [ExecutionEvent] = []
+    @Published private(set) var fetchedRunDiagnostics: RunDiagnostics?
     @Published var conversation: [ConversationMessage] = []
     @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
@@ -196,8 +136,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private let speaker = AVSpeechSynthesizer()
     private let recorder = AudioRecorderService()
     private let speechTranscriber = SpeechTranscriptionService()
-    private let threadStore = ChatThreadStore()
-    private let defaults = UserDefaults.standard
+    private let threadStore: ChatThreadStore
+    private let defaults: UserDefaults
     private let draftAttachmentDirectory: URL
     private var pairedRefreshToken: String = ""
     private var lastSubmittedUserMessage: ConversationMessage?
@@ -222,6 +162,25 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private static let defaultCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
     private static let defaultClaudeModelOptions = ["claude-sonnet-4-5"]
 
+    private var runtimeCatalogDefaults: RuntimeCatalogDefaults {
+        RuntimeCatalogDefaults(
+            codexReasoningEffortOptions: Self.defaultCodexReasoningEffortOptions,
+            codexModelOptions: Self.defaultCodexModelOptions,
+            claudeModelOptions: Self.defaultClaudeModelOptions
+        )
+    }
+
+    private var runtimeLegacySettingInputs: RuntimeLegacySettingInputs {
+        RuntimeLegacySettingInputs(
+            codexModel: normalizedBackendCodexModel,
+            codexModelOptions: backendCodexModelOptions,
+            codexReasoningEffort: normalizedBackendCodexReasoningEffort,
+            codexReasoningEffortOptions: backendCodexReasoningEffortOptions,
+            claudeModel: normalizedBackendClaudeModel,
+            claudeModelOptions: backendClaudeModelOptions
+        )
+    }
+
     var codexModelOverride: String {
         get { runtimeSettingOverrideValue(for: "model", executor: "codex") }
         set { updateRuntimeSettingOverride(newValue, for: "model", executor: "codex") }
@@ -235,6 +194,29 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     var claudeModelOverride: String {
         get { runtimeSettingOverrideValue(for: "model", executor: "claude") }
         set { updateRuntimeSettingOverride(newValue, for: "model", executor: "claude") }
+    }
+
+    var currentRunDiagnostics: RunDiagnostics? {
+        let activeRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let fetchedRunDiagnostics,
+           !activeRunID.isEmpty,
+           fetchedRunDiagnostics.runId == activeRunID {
+            return fetchedRunDiagnostics
+        }
+
+        let hasVisibleRunState = !activeRunID.isEmpty
+            || !events.isEmpty
+            || !summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !statusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        guard hasVisibleRunState else { return nil }
+
+        return RunDiagnostics.derived(
+            runId: activeRunID,
+            status: statusText,
+            summary: summaryText,
+            events: events
+        )
     }
 
     deinit {
@@ -260,6 +242,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         static let threads = "mobaile.threads"
         static let activeThreadID = "mobaile.active_thread_id"
         static let trustedPairHosts = "mobaile.trusted_pair_hosts"
+        static let connectionRepairState = "mobaile.connection_repair_state"
         static let airPodsClickToRecordEnabled = "mobaile.airpods_click_to_record"
         static let hideDotFoldersInBrowser = "mobaile.hide_dot_folders"
         static let hapticCuesEnabled = "mobaile.haptic_cues_enabled"
@@ -273,10 +256,28 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     override init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        draftAttachmentDirectory = appSupport
+        self.threadStore = ChatThreadStore()
+        self.defaults = .standard
+        self.draftAttachmentDirectory = appSupport
             .appendingPathComponent("MOBaiLE", isDirectory: true)
             .appendingPathComponent("draft-attachments", isDirectory: true)
         super.init()
+        completeInitialization()
+    }
+
+    init(
+        threadStore: ChatThreadStore,
+        defaults: UserDefaults,
+        draftAttachmentDirectory: URL
+    ) {
+        self.threadStore = threadStore
+        self.defaults = defaults
+        self.draftAttachmentDirectory = draftAttachmentDirectory
+        super.init()
+        completeInitialization()
+    }
+
+    private func completeInitialization() {
         try? FileManager.default.createDirectory(
             at: draftAttachmentDirectory,
             withIntermediateDirectories: true,
@@ -301,163 +302,40 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func applyPreviewScenario(_ scenario: PreviewScenario) {
-        let workspace = "/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE"
-        let primaryThreadID = UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID()
-        let captureThreadID = UUID(uuidString: "22222222-2222-2222-2222-222222222222") ?? UUID()
-        let draftThreadID = UUID(uuidString: "33333333-3333-3333-3333-333333333333") ?? UUID()
-
-        var previewThreads = [
-            ChatThread(
-                id: primaryThreadID,
-                title: "Run smoke test",
-                updatedAt: Date(),
-                conversation: [],
-                runID: "pvw-2048",
-                summaryText: "Summarized the current repo status and the next release step from the phone.",
-                transcriptText: "",
-                statusText: "Completed",
-                resolvedWorkingDirectory: workspace,
-                activeRunExecutor: "codex"
-            ),
-            ChatThread(
-                id: captureThreadID,
-                title: "Review repo changes",
-                updatedAt: Date().addingTimeInterval(-4200),
-                conversation: [],
-                runID: "pvw-1987",
-                summaryText: "Compared the latest workspace changes and kept the release context in one thread.",
-                transcriptText: "",
-                statusText: "Completed",
-                resolvedWorkingDirectory: workspace,
-                activeRunExecutor: "codex"
-            ),
-            ChatThread(
-                id: draftThreadID,
-                title: "Dictate the next task",
-                updatedAt: Date().addingTimeInterval(-8600),
-                conversation: [],
-                runID: "",
-                summaryText: "",
-                transcriptText: "",
-                statusText: "Draft",
-                resolvedWorkingDirectory: workspace,
-                activeRunExecutor: "codex",
-                draftText: "open the workspace browser and switch to ios/VoiceAgentApp",
-                draftAttachments: []
-            ),
-            ChatThread(
-                id: UUID(uuidString: "44444444-4444-4444-4444-444444444444") ?? UUID(),
-                title: "Summarize backend logs",
-                updatedAt: Date().addingTimeInterval(-12400),
-                conversation: [],
-                runID: "pvw-1820",
-                summaryText: "Collected the recent backend output and condensed it into a quick status summary.",
-                transcriptText: "",
-                statusText: "Completed",
-                resolvedWorkingDirectory: workspace,
-                activeRunExecutor: "codex"
-            ),
-            ChatThread(
-                id: UUID(uuidString: "55555555-5555-5555-5555-555555555555") ?? UUID(),
-                title: "Voice follow-up",
-                updatedAt: Date().addingTimeInterval(-18800),
-                conversation: [],
-                runID: "pvw-1742",
-                summaryText: "Captured a hands-free task and kept the repo thread ready for the next run.",
-                transcriptText: "",
-                statusText: "Completed",
-                resolvedWorkingDirectory: workspace,
-                activeRunExecutor: "codex"
-            ),
-        ]
-
-        if scenario == .configuredEmpty,
-           let primaryIndex = previewThreads.firstIndex(where: { $0.id == primaryThreadID }) {
-            previewThreads[primaryIndex].title = "New Chat"
-            previewThreads[primaryIndex].runID = ""
-            previewThreads[primaryIndex].summaryText = ""
-            previewThreads[primaryIndex].statusText = "Ready"
-        }
-
-        let previewExecutors = [
-            RuntimeExecutorDescriptor(
-                id: "codex",
-                title: "Codex",
-                kind: "agent",
-                available: true,
-                isDefault: true,
-                internalOnly: false,
-                model: "gpt-5.4",
-                settings: [
-                    RuntimeSettingDescriptor(
-                        id: "model",
-                        title: "Model",
-                        kind: "enum",
-                        allowCustom: true,
-                        value: "gpt-5.4",
-                        options: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
-                    ),
-                    RuntimeSettingDescriptor(
-                        id: "reasoning_effort",
-                        title: "Reasoning Effort",
-                        kind: "enum",
-                        allowCustom: false,
-                        value: "high",
-                        options: Self.defaultCodexReasoningEffortOptions
-                    ),
-                ]
-            ),
-            RuntimeExecutorDescriptor(
-                id: "claude",
-                title: "Claude Code",
-                kind: "agent",
-                available: true,
-                isDefault: false,
-                internalOnly: false,
-                model: "claude-sonnet-4-5",
-                settings: [
-                    RuntimeSettingDescriptor(
-                        id: "model",
-                        title: "Model",
-                        kind: "enum",
-                        allowCustom: true,
-                        value: "claude-sonnet-4-5",
-                        options: ["claude-sonnet-4-5"]
-                    )
-                ]
-            ),
-        ]
-
+        let preview = VoiceAgentPreviewFactory.make(
+            scenario: scenario,
+            draftAttachmentDirectory: draftAttachmentDirectory,
+            codexReasoningEffortOptions: Self.defaultCodexReasoningEffortOptions
+        )
         serverURL = "https://demo.mobaile.app"
         connectionCandidateServerURLs = ["https://demo.mobaile.app"]
         apiToken = "preview-token"
         sessionID = "app-preview"
-        workingDirectory = workspace
-        resolvedWorkingDirectory = workspace
-        backendWorkdirRoot = workspace
+        workingDirectory = preview.workspace
+        resolvedWorkingDirectory = preview.workspace
+        backendWorkdirRoot = preview.workspace
         backendSecurityMode = "workspace-write"
         executor = "codex"
         activeRunExecutor = "codex"
         backendDefaultExecutor = "codex"
-        backendAvailableExecutors = previewExecutors.map(\.id)
-        backendExecutorDescriptors = previewExecutors
-        backendCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
-        backendCodexReasoningEffort = "high"
-        backendCodexReasoningEffortOptions = Self.defaultCodexReasoningEffortOptions
-        backendClaudeModelOptions = ["claude-sonnet-4-5"]
-        backendSlashCommands = previewSlashCommands()
-        directoryBrowserPath = workspace
+        backendAvailableExecutors = preview.executors.map(\.id)
+        backendExecutorDescriptors = preview.executors
+        backendCodexModelOptions = preview.codexModelOptions
+        backendCodexReasoningEffort = preview.codexReasoningEffort
+        backendCodexReasoningEffortOptions = preview.codexReasoningEffortOptions
+        backendClaudeModelOptions = preview.claudeModelOptions
+        backendSlashCommands = preview.slashCommands
+        directoryBrowserPath = preview.workspace
         directoryBrowserEntries = []
         directoryBrowserError = ""
         directoryBrowserMissingPath = ""
         directoryBrowserTruncated = false
         showDirectoryBrowser = false
-        events = [
-            ExecutionEvent(type: "summary", actionIndex: 1, message: "Ran the repo smoke test and packaged the summary for the current workspace.", eventID: "preview-summary", createdAt: nil),
-            ExecutionEvent(type: "tool", actionIndex: 2, message: "Prepared the screenshot set and release notes for the next step.", eventID: "preview-tool", createdAt: nil),
-        ]
+        events = preview.events
+        fetchedRunDiagnostics = nil
         errorText = ""
         pendingPairing = nil
+        setConnectionRepairState(preview.connectionRepairState, persist: false)
         didBootstrapSession = true
         draftAttachmentTransferStates = [:]
         codexModelOverride = ""
@@ -470,213 +348,60 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         refreshClientConnectionCandidates()
 
         performThreadStateRestore {
-            threads = previewThreads
-            activeThreadID = primaryThreadID
-
-            switch scenario {
-            case .configuredEmpty:
-                conversation = []
-                promptText = ""
-                draftAttachments = []
-                runID = ""
-                summaryText = ""
-                transcriptText = ""
-                statusText = "Ready for prompts"
-                runPhaseText = "Idle"
-                runStartedAt = nil
-                runEndedAt = nil
-                isLoading = false
-                isRecording = false
-                recordingStartedAt = nil
-                didCompleteRun = false
-                voiceModeEnabled = false
-                voiceModeThreadID = nil
-
-            case .conversation:
-                conversation = previewConversation()
-                promptText = ""
-                draftAttachments = []
-                runID = "pvw-2048"
-                summaryText = "Ran the repo smoke test and captured the next release step from the same workspace thread."
-                transcriptText = ""
-                statusText = "Completed"
-                runPhaseText = "Completed"
-                runStartedAt = Date().addingTimeInterval(-160)
-                runEndedAt = Date().addingTimeInterval(-55)
-                isLoading = false
-                isRecording = false
-                recordingStartedAt = nil
-                didCompleteRun = true
-                voiceModeEnabled = false
-                voiceModeThreadID = nil
-
-            case .recording:
-                conversation = previewConversation()
-                promptText = "Run the smoke test again and tell me what changed since the last pass."
-                draftAttachments = previewDraftAttachments()
-                runID = ""
-                summaryText = ""
-                transcriptText = ""
-                statusText = "Recording..."
-                runPhaseText = "Recording"
-                runStartedAt = nil
-                runEndedAt = nil
-                isLoading = false
-                isRecording = true
-                recordingStartedAt = Date().addingTimeInterval(-38)
-                autoSendAfterSilenceEnabled = true
-                didCompleteRun = false
-                voiceModeEnabled = true
-                voiceModeThreadID = primaryThreadID
-
-            case .repair:
-                conversation = previewConversation()
-                promptText = ""
-                draftAttachments = []
-                runID = ""
-                summaryText = ""
-                transcriptText = ""
-                statusText = "Connection needs repair"
-                runPhaseText = "Reconnect"
-                runStartedAt = nil
-                runEndedAt = nil
-                isLoading = false
-                isRecording = false
-                recordingStartedAt = nil
-                didCompleteRun = false
-                voiceModeEnabled = false
-                voiceModeThreadID = nil
-                connectionRepairState = ConnectionRepairState(
-                    title: "Reconnect this phone",
-                    message: "This phone is no longer paired with demo.mobaile.app. Open the latest pairing QR on that computer and scan it again here."
-                )
+            threads = preview.threads
+            activeThreadID = preview.activeThreadID
+            conversation = preview.conversation
+            promptText = preview.promptText
+            draftAttachments = preview.draftAttachments
+            runID = preview.runID
+            summaryText = preview.summaryText
+            transcriptText = preview.transcriptText
+            statusText = preview.statusText
+            runPhaseText = preview.runPhaseText
+            runStartedAt = preview.runStartedAt
+            runEndedAt = preview.runEndedAt
+            isLoading = preview.isLoading
+            isRecording = preview.isRecording
+            recordingStartedAt = preview.recordingStartedAt
+            didCompleteRun = preview.didCompleteRun
+            lastSubmittedUserMessage = preview.conversation.last(where: { $0.role == "user" })
+            voiceModeEnabled = preview.voiceModeEnabled
+            voiceModeThreadID = preview.voiceModeThreadID
+            if let autoSendAfterSilenceEnabled = preview.autoSendAfterSilenceEnabled {
+                self.autoSendAfterSilenceEnabled = autoSendAfterSilenceEnabled
             }
         }
     }
 
-    private func previewConversation() -> [ConversationMessage] {
-        [
-            ConversationMessage(
-                role: "user",
-                text: "Run the smoke test for this repo and summarize the result."
-            ),
-            ConversationMessage(
-                role: "assistant",
-                text: """
-{
-  "type": "assistant_response",
-  "version": "1.0",
-  "summary": "Smoke test finished.",
-  "sections": [
-    {
-      "title": "Result",
-      "body": "Backend tests passed, pairing is stable, and the current workspace thread is ready for the release archive."
-    }
-  ],
-  "agenda_items": [],
-  "artifacts": []
-}
-"""
-            ),
-            ConversationMessage(
-                role: "user",
-                text: "What should I tackle next?"
-            ),
-            ConversationMessage(
-                role: "assistant",
-                text: """
-{
-  "type": "assistant_response",
-  "version": "1.0",
-  "summary": "Recommended next step.",
-  "sections": [
-    {
-      "title": "Next step",
-      "body": "Keep this workspace thread, capture the App Store assets, and then archive the release build."
-    }
-  ],
-  "agenda_items": [],
-  "artifacts": []
-}
-"""
-            ),
-        ]
-    }
-
-    private func previewSlashCommands() -> [ComposerSlashCommand] {
-        [
-            ComposerSlashCommand(
-                descriptor: SlashCommandDescriptor(
-                    id: "cwd",
-                    title: "Working Directory",
-                    description: "Show or change the working directory used for new runs.",
-                    usage: "/cwd [path]",
-                    group: "Runtime",
-                    aliases: ["pwd", "workdir"],
-                    symbol: "arrow.triangle.branch",
-                    argumentKind: "path",
-                    argumentOptions: [],
-                    argumentPlaceholder: "path"
-                )
-            ),
-            ComposerSlashCommand(
-                descriptor: SlashCommandDescriptor(
-                    id: "executor",
-                    title: "Executor",
-                    description: "Show or switch the active executor.",
-                    usage: "/executor [codex|claude|local]",
-                    group: "Runtime",
-                    aliases: ["exec", "agent"],
-                    symbol: "bolt.horizontal.circle",
-                    argumentKind: "enum",
-                    argumentOptions: ["codex", "claude", "local"],
-                    argumentPlaceholder: "executor"
-                )
-            ),
-        ]
-    }
-
-    private func previewDraftAttachments() -> [DraftAttachment] {
-        [
-            makePreviewAttachment(
-                fileName: "ReleaseNotes.md",
-                contents: """
-                1. Capture the App Store screenshots.
-                2. Archive the release build.
-                3. Submit the reviewer backend notes.
-                """
-            ),
-            makePreviewAttachment(
-                fileName: "SmokeTest.sh",
-                contents: """
-                #!/usr/bin/env bash
-                set -euo pipefail
-                echo "Run backend smoke test"
-                echo "Summarize the result"
-                """
-            ),
-        ]
-    }
-
-    private func makePreviewAttachment(fileName: String, contents: String) -> DraftAttachment {
-        let fileURL = draftAttachmentDirectory.appendingPathComponent("preview-\(fileName)")
-        if !FileManager.default.fileExists(atPath: fileURL.path),
-           let data = contents.data(using: .utf8) {
-            try? data.write(to: fileURL, options: .atomic)
+    func refreshRunDiagnosticsIfPossible() async {
+        let activeRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !activeRunID.isEmpty else {
+            fetchedRunDiagnostics = nil
+            return
+        }
+        guard PreviewScenario.current == nil else {
+            fetchedRunDiagnostics = nil
+            return
         }
 
-        let mimeType = inferAttachmentMimeType(fileName: fileName, fallback: "text/plain")
-        let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value
-            ?? Int64(contents.utf8.count)
+        let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedServerURL.isEmpty, !token.isEmpty else {
+            fetchedRunDiagnostics = nil
+            return
+        }
 
-        return DraftAttachment(
-            id: UUID(),
-            localFileURL: fileURL,
-            fileName: fileName,
-            mimeType: mimeType,
-            kind: inferAttachmentKind(fileName: fileName, mimeType: mimeType),
-            sizeBytes: size
-        )
+        do {
+            let diagnostics = try await client.fetchRunDiagnostics(
+                serverURL: normalizedServerURL,
+                token: token,
+                runID: activeRunID
+            )
+            guard runID.trimmingCharacters(in: .whitespacesAndNewlines) == activeRunID else { return }
+            fetchedRunDiagnostics = diagnostics
+        } catch {
+            guard runID.trimmingCharacters(in: .whitespacesAndNewlines) == activeRunID else { return }
+            fetchedRunDiagnostics = nil
+        }
     }
 
     func sendPrompt() async {
@@ -709,20 +434,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         errorText = ""
         recordingStartedAt = nil
         do {
-            let silenceConfig: AudioRecorderService.SilenceConfig?
-            if usesAutoSendForCurrentTurn {
-                silenceConfig = AudioRecorderService.SilenceConfig(
-                    requiredSilenceDuration: normalizedAutoSendAfterSilenceSeconds
-                )
-            } else {
-                silenceConfig = nil
-            }
-
             shouldResumeVoiceModeAfterSpeech = false
             if speaker.isSpeaking {
                 speaker.stopSpeaking(at: .immediate)
             }
-            try await recorder.start(silenceConfig: silenceConfig) { [weak self] in
+            try await recorder.start(silenceConfig: activeSilenceConfig) { [weak self] in
                 guard let self else { return }
                 Task { @MainActor in
                     guard self.isRecording else { return }
@@ -914,6 +630,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         activeRunExecutor: effectiveExecutor,
                         persist: true
                     )
+                    primeLiveActivityIfNeeded(
+                        for: response.runId,
+                        threadID: originThreadID,
+                        text: initialLiveActivityText(
+                            for: utteranceText,
+                            includesAttachments: !explicitAttachments.isEmpty
+                        )
+                    )
                 } else {
                     runID = response.runId
                     activeRunExecutor = effectiveExecutor
@@ -962,6 +686,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         statusText: "Audio run started (\(response.runId))",
                         activeRunExecutor: effectiveExecutor,
                         persist: false
+                    )
+                    primeLiveActivityIfNeeded(
+                        for: response.runId,
+                        threadID: originThreadID,
+                        text: initialLiveActivityText(
+                            for: utteranceText,
+                            includesAttachments: !explicitAttachments.isEmpty
+                        )
                     )
                 } else {
                     runID = response.runId
@@ -2107,6 +1839,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     statusText: "Run started (\(response.runId))",
                     activeRunExecutor: effectiveExecutor
                 )
+                primeLiveActivityIfNeeded(
+                    for: response.runId,
+                    threadID: originThreadID,
+                    text: initialLiveActivityText(
+                        for: trimmedText,
+                        includesAttachments: !explicitAttachments.isEmpty
+                    )
+                )
             } else {
                 runID = response.runId
                 statusText = "Run started (\(response.runId))"
@@ -2763,11 +2503,19 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             deactivateVoiceMode(stopSpeaking: true)
         }
         persistActiveThreadSnapshot()
+        fetchedRunDiagnostics = nil
         let thread = threads[idx]
         let restoredAttachments = availableDraftAttachments(from: thread.draftAttachments)
         let restoredConversation = threadStore.loadMessages(threadID: threadID)
-        let restoredEvents: [ExecutionEvent]
-        restoredEvents = observedRunContext(for: threadID, runID: thread.runID)?.events ?? []
+        let restoredRunID = thread.runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !restoredRunID.isEmpty,
+           !isTerminalStatusText(thread.statusText),
+           restoredConversation.contains(where: {
+               $0.presentation == .liveActivity && $0.sourceRunID == restoredRunID
+           }) {
+            ensureObservedRunContext(runID: restoredRunID, threadID: threadID)
+        }
+        let restoredEvents = observedRunContext(for: threadID, runID: thread.runID)?.events ?? []
         let hasObservedRun = observedRunContext(for: threadID, runID: thread.runID) != nil &&
             !isTerminalStatusText(thread.statusText)
         performThreadStateRestore {
@@ -2800,6 +2548,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             deactivateVoiceMode(stopSpeaking: true)
         }
         persistActiveThreadSnapshot()
+        fetchedRunDiagnostics = nil
         let thread = ChatThread(
             id: UUID(),
             title: "New Chat",
@@ -2891,17 +2640,19 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             )
             backendSecurityMode = cfg.securityMode
             backendDefaultExecutor = normalizedExecutor(from: cfg.defaultExecutor) ?? "codex"
-            backendExecutorDescriptors = normalizedRuntimeExecutors(
+            backendExecutorDescriptors = RuntimeConfigurationCatalog.normalizedRuntimeExecutors(
                 cfg.executors,
                 config: cfg,
-                defaultExecutor: backendDefaultExecutor
+                defaultExecutor: backendDefaultExecutor,
+                inputs: runtimeLegacySettingInputs,
+                defaults: runtimeCatalogDefaults
             )
-            backendAvailableExecutors = normalizedAvailableExecutors(
+            backendAvailableExecutors = RuntimeConfigurationCatalog.normalizedAvailableExecutors(
                 cfg.availableExecutors,
                 descriptors: backendExecutorDescriptors,
                 defaultExecutor: backendDefaultExecutor
             )
-            backendTranscribeProvider = normalizedTranscribeProvider(from: cfg.transcribeProvider)
+            backendTranscribeProvider = RuntimeConfigurationCatalog.normalizedTranscribeProvider(from: cfg.transcribeProvider)
             backendTranscribeReady = cfg.transcribeReady ?? false
             backendWorkdirRoot = cfg.workdirRoot ?? ""
             let codexSetting = backendExecutorDescriptors
@@ -2915,7 +2666,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 .filter { !$0.isEmpty }
             backendCodexModelOptions = advertisedCodexModels.isEmpty
                 ? Self.defaultCodexModelOptions
-                : dedupedRuntimeModelOptions(advertisedCodexModels)
+                : RuntimeConfigurationCatalog.dedupedModelOptions(advertisedCodexModels)
             let codexEffortSetting = backendExecutorDescriptors
                 .first(where: { $0.id == "codex" })?
                 .settings?
@@ -2943,7 +2694,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 .filter { !$0.isEmpty }
             backendClaudeModelOptions = advertisedClaudeModels.isEmpty
                 ? Self.defaultClaudeModelOptions
-                : dedupedRuntimeModelOptions(advertisedClaudeModels)
+                : RuntimeConfigurationCatalog.dedupedModelOptions(advertisedClaudeModels)
             let slashDescriptors = try await client.fetchSlashCommands(
                 serverURL: normalizedServerURL,
                 token: apiToken
@@ -3169,15 +2920,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             message = "This phone is no longer paired with \(host). Open the latest pairing QR on that computer and scan it again here."
         }
 
-        connectionRepairState = ConnectionRepairState(
+        setConnectionRepairState(ConnectionRepairState(
             title: "Reconnect this phone",
             message: message
-        )
+        ))
         return message
     }
 
     func clearConnectionRepairState() {
-        connectionRepairState = nil
+        setConnectionRepairState(nil)
     }
 
     private var normalizedWorkingDirectory: String? {
@@ -3256,7 +3007,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 (
                     id: descriptor.id,
                     title: descriptor.title,
-                    model: displayModelName(descriptor.model)
+                    model: RuntimeConfigurationCatalog.displayModelName(descriptor.model)
                 )
             }
     }
@@ -3594,40 +3345,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func legacyRuntimeSettings(for executorID: String) -> [RuntimeSettingDescriptor] {
-        switch executorID {
-        case "codex":
-            return [
-                RuntimeSettingDescriptor(
-                    id: "model",
-                    title: "Model",
-                    kind: "enum",
-                    allowCustom: true,
-                    value: normalizedBackendCodexModel.isEmpty ? nil : normalizedBackendCodexModel,
-                    options: backendCodexModelOptions.isEmpty ? Self.defaultCodexModelOptions : backendCodexModelOptions
-                ),
-                RuntimeSettingDescriptor(
-                    id: "reasoning_effort",
-                    title: "Reasoning effort",
-                    kind: "enum",
-                    allowCustom: false,
-                    value: normalizedBackendCodexReasoningEffort.isEmpty ? nil : normalizedBackendCodexReasoningEffort,
-                    options: backendCodexReasoningEffortOptions.isEmpty ? Self.defaultCodexReasoningEffortOptions : backendCodexReasoningEffortOptions
-                ),
-            ]
-        case "claude":
-            return [
-                RuntimeSettingDescriptor(
-                    id: "model",
-                    title: "Model",
-                    kind: "enum",
-                    allowCustom: true,
-                    value: normalizedBackendClaudeModel.isEmpty ? nil : normalizedBackendClaudeModel,
-                    options: backendClaudeModelOptions.isEmpty ? Self.defaultClaudeModelOptions : backendClaudeModelOptions
-                )
-            ]
-        default:
-            return []
-        }
+        RuntimeConfigurationCatalog.legacySettings(
+            for: executorID,
+            inputs: runtimeLegacySettingInputs,
+            defaults: runtimeCatalogDefaults
+        )
     }
 
     private func normalizedRuntimeSettingIdentifier(_ value: String?) -> String {
@@ -3689,6 +3411,20 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         return min(5.0, max(0.8, parsed))
     }
 
+    private var activeSilenceConfig: AudioRecorderService.SilenceConfig? {
+        guard usesAutoSendForCurrentTurn else { return nil }
+        if isVoiceModeActiveForCurrentThread {
+            return AudioRecorderService.SilenceConfig(
+                thresholdDB: -39,
+                requiredSilenceDuration: min(1.0, normalizedAutoSendAfterSilenceSeconds),
+                minimumRecordDuration: 0.6
+            )
+        }
+        return AudioRecorderService.SilenceConfig(
+            requiredSilenceDuration: normalizedAutoSendAfterSilenceSeconds
+        )
+    }
+
     func modelLabel(for executor: String) -> String {
         let normalized = executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalized == "local" {
@@ -3701,18 +3437,34 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             return currentClaudeModelLabel
         }
         if let descriptor = backendExecutorDescriptors.first(where: { $0.id == normalized }) {
-            return displayModelName(descriptor.model)
+            return RuntimeConfigurationCatalog.displayModelName(descriptor.model)
         }
         return "default"
     }
 
     private func isTerminalStatus(_ status: String) -> Bool {
-        status == "completed" || status == "failed" || status == "rejected" || status == "blocked" || status == "cancelled"
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "completed"
+            || normalized == "failed"
+            || normalized == "rejected"
+            || normalized == "blocked"
+            || normalized == "cancelled"
+            || normalized == "timed_out"
+            || normalized == "timed out"
     }
 
     private func applyTerminalRunStateIfNeeded(_ run: RunRecord, threadID: UUID) {
         if activeThreadID == threadID, didCompleteRun && summaryText == run.summary {
             return
+        }
+        if let context = observedRunContexts[run.runId], !context.hasReceivedFinalAssistantMessage {
+            compressLiveActivityIfNeeded(
+                runID: run.runId,
+                threadID: threadID,
+                replacementText: fallbackCompressedCompletionText(for: run)
+            )
+        } else {
+            compressLiveActivityIfNeeded(runID: run.runId, threadID: threadID)
         }
         let shouldContinueVoiceMode = voiceModeEnabled && voiceModeThreadID == threadID
         if shouldContinueVoiceMode, run.status != "completed" {
@@ -3781,14 +3533,31 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 events = context.events
             }
             updateRunPhase(for: event, threadID: threadID)
+            if let liveActivityText = liveActivityText(for: event, threadID: threadID) {
+                upsertLiveActivityMessage(liveActivityText, runID: runID, threadID: threadID)
+            }
             if let text = conversationText(for: event, threadID: threadID) {
-                appendConversation(role: "assistant", text: text, to: threadID)
+                if event.type == "chat.message" || event.type == "assistant.message" {
+                    context.hasReceivedFinalAssistantMessage = true
+                    observedRunContexts[runID] = context
+                }
+                compressLiveActivityIfNeeded(runID: runID, threadID: threadID)
+                appendConversation(
+                    role: "assistant",
+                    text: text,
+                    to: threadID,
+                    sourceRunID: runID
+                )
             }
         }
     }
 
     private func updateRunPhase(for event: ExecutionEvent, threadID: UUID) {
         guard activeThreadID == threadID else { return }
+        if let activityPhase = activityPhaseText(for: event), isLoading {
+            runPhaseText = activityPhase
+            return
+        }
         switch event.type {
         case "run.started":
             if isLoading { runPhaseText = "Planning" }
@@ -3829,6 +3598,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         switch event.type {
         case "chat.message":
             if message.isEmpty { return nil }
+            if liveActivitySummary(from: message) != nil {
+                return nil
+            }
             if let envelope = parseEnvelope(message),
                envelope.sections.isEmpty,
                envelope.agendaItems.isEmpty,
@@ -3839,6 +3611,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         case "assistant.message":
             if message.isEmpty { return nil }
             if message == lastSubmitted?.text { return nil }
+            if liveActivitySummary(from: message) != nil {
+                return nil
+            }
             return message
         case "log.message", "action.stdout", "action.stderr":
             return nil
@@ -3857,8 +3632,22 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
-    private func appendConversation(role: String, text: String, to threadID: UUID? = nil) {
-        appendConversation(ConversationMessage(role: role, text: text), to: threadID)
+    private func appendConversation(
+        role: String,
+        text: String,
+        to threadID: UUID? = nil,
+        presentation: ConversationMessagePresentation = .standard,
+        sourceRunID: String? = nil
+    ) {
+        appendConversation(
+            ConversationMessage(
+                role: role,
+                text: text,
+                presentation: presentation,
+                sourceRunID: sourceRunID
+            ),
+            to: threadID
+        )
     }
 
     private func appendConversation(_ message: ConversationMessage, to threadID: UUID? = nil) {
@@ -3870,7 +3659,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             id: message.id,
             role: message.role,
             text: preparedText.trimmingCharacters(in: .whitespacesAndNewlines),
-            attachments: message.attachments
+            attachments: message.attachments,
+            presentation: message.presentation,
+            sourceRunID: message.sourceRunID
         )
         guard !normalized.text.isEmpty || !normalized.attachments.isEmpty else { return }
         var threadConversation = cachedConversation(for: targetThreadID)
@@ -3889,7 +3680,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             return
         }
         if let last = threadConversation.last, last.role == normalized.role {
-            if last.text == normalized.text && last.attachments == normalized.attachments {
+            if last.text == normalized.text
+                && last.attachments == normalized.attachments
+                && last.presentation == normalized.presentation
+                && last.sourceRunID == normalized.sourceRunID {
                 return
             }
             if normalized.role == "assistant" {
@@ -3965,6 +3759,225 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             "working on",
         ]
         return markers.contains { lower.contains($0) }
+    }
+
+    private func liveActivityText(for event: ExecutionEvent, threadID: UUID) -> String? {
+        if isTypedActivityEvent(event.type) {
+            let text = event.displayMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? event.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return compactLiveActivityText(text)
+        }
+        switch event.type {
+        case "chat.message", "assistant.message":
+            return liveActivitySummary(from: event.message)
+        case "action.started":
+            return activityText(forActionEvent: event, threadID: threadID)
+        default:
+            return nil
+        }
+    }
+
+    private func liveActivitySummary(from rawText: String) -> String? {
+        let message = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return nil }
+
+        if let envelope = parseEnvelope(message) {
+            if !envelope.agendaItems.isEmpty || !envelope.artifacts.isEmpty || envelope.sections.count > 1 {
+                return nil
+            }
+            if let section = envelope.sections.first {
+                let title = section.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard title == "result" || title == "status" else { return nil }
+                let body = section.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard looksLikeProgressSentence(body) else { return nil }
+                return compactLiveActivityText(body)
+            }
+            let summary = envelope.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard looksLikeProgressSentence(summary) else { return nil }
+            return compactLiveActivityText(summary)
+        }
+
+        guard looksLikeProgressSentence(message) else { return nil }
+        return compactLiveActivityText(message)
+    }
+
+    private func compactLiveActivityText(_ text: String) -> String {
+        let singleLine = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return singleLine.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func activityText(forActionEvent event: ExecutionEvent, threadID: UUID) -> String? {
+        let message = event.message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if message.hasPrefix("starting codex exec") || message.hasPrefix("starting claude exec") {
+            return "Reviewing your request and planning the next steps…"
+        }
+        if message.hasPrefix("starting calendar adapter") {
+            return "Checking today’s calendar…"
+        }
+        if message.contains("starting write_file") {
+            return "Writing files…"
+        }
+        if message.contains("starting run_command") {
+            return "Running commands…"
+        }
+        return nil
+    }
+
+    private func activityPhaseText(for event: ExecutionEvent) -> String? {
+        guard isTypedActivityEvent(event.type) else { return nil }
+        let normalizedStage = event.stage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        switch normalizedStage {
+        case "planning":
+            return "Planning"
+        case "executing":
+            return "Executing"
+        case "summarizing":
+            return "Summarizing"
+        case "blocked":
+            return "Needs Input"
+        default:
+            break
+        }
+
+        let normalizedTitle = event.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return normalizedTitle.isEmpty ? nil : normalizedTitle
+    }
+
+    private func isTypedActivityEvent(_ type: String) -> Bool {
+        type == "activity.started" || type == "activity.updated" || type == "activity.completed"
+    }
+
+    private func initialLiveActivityText(for requestText: String, includesAttachments: Bool) -> String {
+        let trimmed = compactLiveActivityText(requestText)
+        if !trimmed.isEmpty {
+            return includesAttachments
+                ? "Reviewing your request and attached context…"
+                : "Reviewing your request and planning the next steps…"
+        }
+        return includesAttachments
+            ? "Reviewing the task and attached context…"
+            : "Reviewing the task and planning the next steps…"
+    }
+
+    private func displayTitle(forExecutor executor: String) -> String {
+        let normalized = normalizedExecutor(from: executor) ?? executor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let descriptor = backendExecutorDescriptors.first(where: { $0.id == normalized }) {
+            return descriptor.title
+        }
+        switch normalized {
+        case "codex":
+            return "Codex"
+        case "claude":
+            return "Claude Code"
+        case "local":
+            return "Local Runner"
+        default:
+            return normalized.capitalized
+        }
+    }
+
+    private func primeLiveActivityIfNeeded(for runID: String, threadID: UUID, text: String) {
+        let normalizedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedRunID.isEmpty else { return }
+        let context = observedRunContexts[normalizedRunID] ?? ObservedRunContext(runID: normalizedRunID, threadID: threadID)
+        observedRunContexts[normalizedRunID] = context
+        guard context.liveActivityMessageID == nil else { return }
+        upsertLiveActivityMessage(text, runID: normalizedRunID, threadID: threadID)
+    }
+
+    private func upsertLiveActivityMessage(_ text: String, runID: String, threadID: UUID) {
+        let normalizedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedText = compactLiveActivityText(text)
+        guard !normalizedRunID.isEmpty, !normalizedText.isEmpty else { return }
+        var context = observedRunContexts[normalizedRunID] ?? ObservedRunContext(runID: normalizedRunID, threadID: threadID)
+        guard context.threadID == threadID else { return }
+
+        var messages = cachedConversation(for: threadID)
+        if let messageID = context.liveActivityMessageID,
+           let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            let existing = messages[idx]
+            if existing.text == normalizedText {
+                return
+            }
+            let updated = ConversationMessage(
+                id: existing.id,
+                role: "assistant",
+                text: normalizedText,
+                presentation: .liveActivity,
+                sourceRunID: normalizedRunID
+            )
+            messages[idx] = updated
+            storeConversation(messages, for: threadID)
+            persistConversationMessage(updated, at: idx, threadID: threadID)
+            persistThreadSnapshot(threadID: threadID)
+            return
+        }
+
+        let liveMessage = ConversationMessage(
+            role: "assistant",
+            text: normalizedText,
+            presentation: .liveActivity,
+            sourceRunID: normalizedRunID
+        )
+        messages.append(liveMessage)
+        context.liveActivityMessageID = liveMessage.id
+        observedRunContexts[normalizedRunID] = context
+        storeConversation(messages, for: threadID)
+        persistConversationMessage(liveMessage, at: messages.count - 1, threadID: threadID)
+        persistThreadSnapshot(threadID: threadID)
+    }
+
+    private func compressLiveActivityIfNeeded(runID: String, threadID: UUID, replacementText: String? = nil) {
+        let normalizedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedRunID.isEmpty else { return }
+        guard var context = observedRunContexts[normalizedRunID], context.threadID == threadID else { return }
+        guard let messageID = context.liveActivityMessageID else { return }
+
+        var messages = cachedConversation(for: threadID)
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }) else {
+            context.liveActivityMessageID = nil
+            observedRunContexts[normalizedRunID] = context
+            return
+        }
+
+        let fallback = replacementText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !fallback.isEmpty {
+            messages[idx] = ConversationMessage(
+                id: messageID,
+                role: "assistant",
+                text: fallback,
+                presentation: .standard,
+                sourceRunID: normalizedRunID
+            )
+        } else {
+            messages.remove(at: idx)
+        }
+
+        context.liveActivityMessageID = nil
+        observedRunContexts[normalizedRunID] = context
+        storeConversation(messages, for: threadID)
+        threadStore.replaceMessages(threadID: threadID, messages: messages)
+        persistThreadSnapshot(threadID: threadID)
+    }
+
+    private func fallbackCompressedCompletionText(for run: RunRecord) -> String? {
+        let trimmed = run.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lower = trimmed.lowercased()
+        if lower == "run completed successfully" {
+            return nil
+        }
+        if run.status == "completed" && lower == "completed" {
+            return nil
+        }
+        return trimmed
     }
 
     private func loadSettings() {
@@ -4065,9 +4078,30 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if let value = defaults.string(forKey: DefaultsKey.autoSendAfterSilenceSeconds), !value.isEmpty {
             autoSendAfterSilenceSeconds = value
         }
+        if let data = defaults.data(forKey: DefaultsKey.connectionRepairState),
+           let decoded = try? JSONDecoder().decode(PersistedConnectionRepairState.self, from: data) {
+            setConnectionRepairState(
+                ConnectionRepairState(title: decoded.title, message: decoded.message),
+                persist: false
+            )
+        }
         hasSeenMicrophonePrimer = defaults.bool(forKey: DefaultsKey.microphonePrimerSeen)
         trustedPairHosts = Set(defaults.stringArray(forKey: DefaultsKey.trustedPairHosts) ?? [])
         refreshClientConnectionCandidates()
+    }
+
+    private func setConnectionRepairState(_ state: ConnectionRepairState?, persist: Bool = true) {
+        connectionRepairState = state
+        guard persist else { return }
+
+        if let state,
+           let data = try? JSONEncoder().encode(
+               PersistedConnectionRepairState(title: state.title, message: state.message)
+           ) {
+            defaults.set(data, forKey: DefaultsKey.connectionRepairState)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.connectionRepairState)
+        }
     }
 
     private func migrateLegacyRunTimeoutDefaultIfNeeded() {
@@ -4153,121 +4187,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         backendCodexReasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    private func displayModelName(_ rawModel: String?) -> String {
-        let value = rawModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return value.isEmpty ? "default" : value
-    }
-
-    private func dedupedRuntimeModelOptions(_ rawValues: [String]) -> [String] {
-        var values: [String] = []
-        for rawValue in rawValues {
-            let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalized.isEmpty, !values.contains(normalized) else { continue }
-            values.append(normalized)
-        }
-        return values
-    }
-
     private func normalizedExecutor(from rawValue: String?) -> String? {
-        let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        if value == "local" || value == "codex" || value == "claude" {
-            return value
-        }
-        return nil
-    }
-
-    private func normalizedAvailableExecutors(
-        _ rawValues: [String]?,
-        descriptors: [RuntimeExecutorDescriptor],
-        defaultExecutor: String
-    ) -> [String] {
-        var values = (rawValues ?? []).compactMap(normalizedExecutor(from:))
-        if values.isEmpty {
-            values = descriptors
-                .filter { $0.available && !$0.internalOnly }
-                .compactMap { normalizedExecutor(from: $0.id) }
-        }
-        if let preferred = normalizedExecutor(from: defaultExecutor), !values.contains(preferred) {
-            values.append(preferred)
-        }
-        return Array(NSOrderedSet(array: values)) as? [String] ?? values
-    }
-
-    private func normalizedRuntimeExecutors(
-        _ rawDescriptors: [RuntimeExecutorDescriptor]?,
-        config: RuntimeConfig,
-        defaultExecutor: String
-    ) -> [RuntimeExecutorDescriptor] {
-        var descriptors = (rawDescriptors ?? []).compactMap { descriptor -> RuntimeExecutorDescriptor? in
-            guard let normalized = normalizedExecutor(from: descriptor.id) else { return nil }
-            let settings = descriptor.settings ?? []
-            return RuntimeExecutorDescriptor(
-                id: normalized,
-                title: descriptor.title,
-                kind: descriptor.kind,
-                available: descriptor.available,
-                isDefault: descriptor.isDefault,
-                internalOnly: descriptor.internalOnly,
-                model: descriptor.model,
-                settings: settings.isEmpty ? legacyRuntimeSettings(for: normalized) : settings
-            )
-        }
-
-        if descriptors.isEmpty {
-            descriptors = [
-                RuntimeExecutorDescriptor(
-                    id: "codex",
-                    title: "Codex",
-                    kind: "agent",
-                    available: (config.availableExecutors ?? []).contains("codex"),
-                    isDefault: defaultExecutor == "codex",
-                    internalOnly: false,
-                    model: config.codexModel,
-                    settings: legacyRuntimeSettings(for: "codex")
-                ),
-                RuntimeExecutorDescriptor(
-                    id: "claude",
-                    title: "Claude Code",
-                    kind: "agent",
-                    available: (config.availableExecutors ?? []).contains("claude"),
-                    isDefault: defaultExecutor == "claude",
-                    internalOnly: false,
-                    model: config.claudeModel,
-                    settings: legacyRuntimeSettings(for: "claude")
-                ),
-                RuntimeExecutorDescriptor(
-                    id: "local",
-                    title: "Local fallback",
-                    kind: "internal",
-                    available: defaultExecutor == "local",
-                    isDefault: defaultExecutor == "local",
-                    internalOnly: true,
-                    model: nil,
-                    settings: []
-                ),
-            ]
-        }
-
-        if !descriptors.contains(where: { $0.id == "local" }) {
-            descriptors.append(
-                RuntimeExecutorDescriptor(
-                    id: "local",
-                    title: "Local fallback",
-                    kind: "internal",
-                    available: defaultExecutor == "local",
-                    isDefault: defaultExecutor == "local",
-                    internalOnly: true,
-                    model: nil,
-                    settings: []
-                )
-            )
-        }
-        return descriptors
-    }
-
-    private func normalizedTranscribeProvider(from rawValue: String?) -> String {
-        let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        return value.isEmpty ? "unknown" : value
+        RuntimeConfigurationCatalog.normalizedExecutorID(from: rawValue)
     }
 
     private func clearRuntimeConfiguration() {
@@ -4523,14 +4444,24 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func clearObservedRunContext(for threadID: UUID?) {
         guard let threadID else { return }
-        removeObservedRunContext(runID: runID(for: threadID))
+        let previousRunID = runID(for: threadID)
+        if let context = observedRunContexts[previousRunID], context.liveActivityMessageID != nil {
+            compressLiveActivityIfNeeded(runID: previousRunID, threadID: threadID)
+        }
+        removeObservedRunContext(runID: previousRunID)
     }
 
     private func ensureObservedRunContext(runID: String, threadID: UUID) {
         if observedRunContexts[runID]?.threadID == threadID {
             return
         }
-        observedRunContexts[runID] = ObservedRunContext(runID: runID, threadID: threadID)
+        var context = ObservedRunContext(runID: runID, threadID: threadID)
+        if let liveMessage = cachedConversation(for: threadID).last(where: {
+            $0.presentation == .liveActivity && $0.sourceRunID == runID
+        }) {
+            context.liveActivityMessageID = liveMessage.id
+        }
+        observedRunContexts[runID] = context
     }
 
     private func performThreadStateRestore(_ updates: () -> Void) {
@@ -4619,14 +4550,21 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func isTerminalStatusText(_ value: String) -> Bool {
         let lower = value.lowercased()
-        return lower.contains("completed") || lower.contains("failed") || lower.contains("cancelled") || lower.contains("rejected") || lower.contains("blocked")
+        return lower.contains("completed")
+            || lower.contains("failed")
+            || lower.contains("cancelled")
+            || lower.contains("rejected")
+            || lower.contains("blocked")
+            || lower.contains("timed out")
     }
 
     private func phaseText(forStatusText value: String) -> String {
         let lower = value.lowercased()
         if lower.contains("cancel") { return "Cancelled" }
+        if lower.contains("timed out") { return "Timed Out" }
         if lower.contains("fail") || lower.contains("rejected") { return "Failed" }
         if lower.contains("complete") { return "Completed" }
+        if lower.contains("blocked") || lower.contains("input") { return "Needs Input" }
         if lower.contains("running") { return "Executing" }
         if lower.contains("starting") { return "Planning" }
         return "Idle"
@@ -4636,6 +4574,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         switch status.lowercased() {
         case "completed":
             return "Completed"
+        case "timed_out", "timed out":
+            return "Timed Out"
         case "blocked":
             return "Needs Input"
         case "failed", "rejected":
@@ -4661,6 +4601,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             "secondary use cases include normal remote productivity tasks",
             "output style for phone ux:",
             "prefer short status + result summaries",
+            "phone ux feedback guidance:",
+            "emit short progress updates at meaningful milestones",
+            "finish with a compressed final result",
             "environment notes:",
             "keep responses concise and grouped",
             "do not repeat or summarize this runtime context",
@@ -4754,5 +4697,21 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_usesAutoSendForCurrentTurn() -> Bool {
         usesAutoSendForCurrentTurn
+    }
+
+    func _test_activeSilenceConfig() -> AudioRecorderService.SilenceConfig? {
+        activeSilenceConfig
+    }
+
+    func _test_setPendingHumanUnblock(_ request: HumanUnblockRequest?, threadID: UUID) {
+        setThreadPendingHumanUnblock(threadID: threadID, request: request)
+    }
+
+    func _test_persistActiveThreadSnapshot() {
+        persistActiveThreadSnapshot()
+    }
+
+    func _test_hasObservedRunContext(runID: String, threadID: UUID) -> Bool {
+        observedRunContext(for: threadID, runID: runID) != nil
     }
 }

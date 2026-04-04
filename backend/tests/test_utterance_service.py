@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from app.models.schemas import Action
+from app.models.schemas import ActionPlan
+from app.models.schemas import SessionContextResponse
+from app.models.schemas import UtteranceRequest
+from app.run_state import RunState
+from app.runtime_environment import RuntimeEnvironment
+from app.storage import RunStore
+from app.utterance_service import UtteranceService
+
+
+class FakeExecutionService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def run_calendar_adapter(self, run_id: str, prompt: str) -> None:
+        self.calls.append(("calendar", (run_id, prompt)))
+
+    def run_agent(
+        self,
+        run_id: str,
+        prompt: str,
+        workdir: Path,
+        session_id: str,
+        executor: str,
+        client_thread_id: str | None = None,
+        response_profile: str = "guided",
+        codex_model_override: str | None = None,
+        codex_reasoning_effort_override: str | None = None,
+        claude_model_override: str | None = None,
+        guardrail_message: str | None = None,
+    ) -> None:
+        self.calls.append(
+            (
+                "agent",
+                (
+                    run_id,
+                    prompt,
+                    workdir,
+                    session_id,
+                    executor,
+                    client_thread_id,
+                    response_profile,
+                    codex_model_override,
+                    codex_reasoning_effort_override,
+                    claude_model_override,
+                    guardrail_message,
+                ),
+            )
+        )
+
+    def run_local_plan(self, run_id: str, plan: ActionPlan, workdir: Path) -> None:
+        self.calls.append(("local", (run_id, plan, workdir)))
+
+
+def _environment(monkeypatch, tmp_path: Path, **extra_env: str) -> RuntimeEnvironment:
+    for name in (
+        "VOICE_AGENT_DEFAULT_WORKDIR",
+        "VOICE_AGENT_DEFAULT_EXECUTOR",
+        "VOICE_AGENT_CODEX_GUARDRAILS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("VOICE_AGENT_API_TOKEN", "test-token")
+    monkeypatch.setenv("VOICE_AGENT_DEFAULT_WORKDIR", str(tmp_path / "workspace"))
+    for key, value in extra_env.items():
+        monkeypatch.setenv(key, value)
+    return RuntimeEnvironment.from_env(tmp_path)
+
+
+def _run_state(tmp_path: Path) -> RunState:
+    return RunState(RunStore(tmp_path / "runs.db"), max_event_message_chars=16000)
+
+
+def _session_context(
+    *,
+    session_id: str,
+    executor: str = "local",
+    working_directory: str | None = None,
+    resolved_working_directory: str,
+    codex_model: str | None = None,
+    codex_reasoning_effort: str | None = None,
+    claude_model: str | None = None,
+) -> SessionContextResponse:
+    return SessionContextResponse(
+        session_id=session_id,
+        executor=executor,  # type: ignore[arg-type]
+        working_directory=working_directory,
+        runtime_settings=[],
+        codex_model=codex_model,
+        codex_reasoning_effort=codex_reasoning_effort,  # type: ignore[arg-type]
+        claude_model=claude_model,
+        resolved_working_directory=resolved_working_directory,
+    )
+
+
+def test_utterance_service_routes_calendar_requests_to_calendar_runner(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    run_state = _run_state(tmp_path)
+    execution = FakeExecutionService()
+    launched: list[tuple[str, tuple[object, ...]]] = []
+    workspace = env.default_workdir
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="codex",
+            resolved_working_directory=str(workspace),
+        ),
+        background_launcher=lambda target, args: launched.append((target.__name__, args)),
+        run_id_factory=lambda: "run-calendar",
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-calendar",
+            executor="codex",
+            utterance_text="Check my calendar today",
+        )
+    )
+
+    assert result.status == "accepted"
+    run = run_state.get_run("run-calendar")
+    assert run is not None
+    assert run.status == "running"
+    assert run.executor == "codex"
+    assert launched == [("run_calendar_adapter", ("run-calendar", "Check my calendar today"))]
+
+
+def test_utterance_service_rejects_guardrailed_agent_requests(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path, VOICE_AGENT_CODEX_GUARDRAILS="enforce")
+    run_state = _run_state(tmp_path)
+    execution = FakeExecutionService()
+    launched: list[tuple[str, tuple[object, ...]]] = []
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="codex",
+            resolved_working_directory=str(env.default_workdir),
+        ),
+        background_launcher=lambda target, args: launched.append((target.__name__, args)),
+        run_id_factory=lambda: "run-guardrail",
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-guardrail",
+            executor="codex",
+            utterance_text="please run rm -rf /tmp/test",
+        )
+    )
+
+    assert result.status == "rejected"
+    run = run_state.get_run("run-guardrail")
+    assert run is not None
+    assert run.status == "rejected"
+    assert run.events[0].type == "run.failed"
+    assert launched == []
+
+
+def test_utterance_service_uses_session_defaults_for_local_runs(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    run_state = _run_state(tmp_path)
+    execution = FakeExecutionService()
+    launched: list[tuple[str, tuple[object, ...]]] = []
+    project_dir = env.default_workdir / "project"
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="local",
+            working_directory=str(project_dir),
+            resolved_working_directory=str(project_dir),
+        ),
+        background_launcher=lambda target, args: launched.append((target.__name__, args)),
+        run_id_factory=lambda: "run-local",
+        plan_builder=lambda prompt: ActionPlan(
+            goal=prompt,
+            actions=[Action(type="run_command", command="python3 hello.py")],
+        ),
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-local",
+            utterance_text="create a hello python script and run it",
+        )
+    )
+
+    assert result.status == "accepted"
+    run = run_state.get_run("run-local")
+    assert run is not None
+    assert run.executor == "local"
+    assert run.working_directory == str(project_dir)
+    assert launched[0][0] == "run_local_plan"
+    assert launched[0][1][2] == project_dir

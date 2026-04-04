@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
+
+from app.runtime_environment import RuntimeEnvironment
+from app.workspace_service import WorkspaceService
+
+
+def _environment(monkeypatch, tmp_path: Path, **extra_env: str) -> RuntimeEnvironment:
+    for name in (
+        "VOICE_AGENT_DEFAULT_WORKDIR",
+        "VOICE_AGENT_SECURITY_MODE",
+        "VOICE_AGENT_FILE_ROOTS",
+        "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    monkeypatch.setenv("VOICE_AGENT_API_TOKEN", "test-token")
+    monkeypatch.setenv("VOICE_AGENT_DEFAULT_WORKDIR", str(tmp_path / "workspace"))
+    for key, value in extra_env.items():
+        monkeypatch.setenv(key, value)
+    return RuntimeEnvironment.from_env(tmp_path)
+
+
+def test_workspace_service_lists_directories_before_files(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+    (env.default_workdir / "src").mkdir(parents=True, exist_ok=True)
+    (env.default_workdir / "README.md").write_text("hello", encoding="utf-8")
+
+    listing = service.list_directory(str(env.default_workdir))
+
+    assert listing.path == str(env.default_workdir)
+    names = [entry.name for entry in listing.entries]
+    assert "src" in names
+    assert "README.md" in names
+    assert names.index("src") < names.index("README.md")
+    assert listing.truncated is False
+
+
+def test_workspace_service_create_directory_uses_default_workdir_for_relative_paths(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+
+    created = service.create_directory("notes/archive")
+
+    assert created.created is True
+    assert created.path == str((env.default_workdir / "notes" / "archive").resolve())
+    assert Path(created.path).is_dir()
+
+
+def test_workspace_service_blocks_non_upload_absolute_paths_when_disabled(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(
+        monkeypatch,
+        tmp_path,
+        VOICE_AGENT_FILE_ROOTS=str(tmp_path),
+        VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS="false",
+    )
+    service = WorkspaceService(env)
+    sample = env.default_workdir / "sample.txt"
+    sample.write_text("hello", encoding="utf-8")
+
+    with pytest.raises(HTTPException, match="absolute file paths are disabled in safe mode"):
+        service.file_response(str(sample))
+
+
+def test_workspace_service_allows_uploaded_artifact_paths_when_absolute_reads_disabled(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env = _environment(monkeypatch, tmp_path, VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS="false")
+    service = WorkspaceService(env)
+
+    upload = service.store_upload(
+        session_id="ios-session",
+        filename="notes.txt",
+        content_type="text/plain",
+        file_bytes=b"hello from phone",
+    )
+    response = service.file_response(upload.artifact.path)
+
+    assert upload.artifact.title == "notes.txt"
+    assert Path(upload.artifact.path).exists()
+    assert response.path == upload.artifact.path

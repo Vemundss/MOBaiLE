@@ -16,10 +16,14 @@
 		22AEDB5CC51E75B437988A88 /* VoiceTaskWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA945BA92E3B0DFAE3BCA72 /* VoiceTaskWidget.swift */; };
 		31FA65E68D46BC9327B6EFE0 /* PairingScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18728D4EF5C801CB2F70F8A0 /* PairingScannerView.swift */; };
 		3D1DC632A5EF8251A764491E /* ChatRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968552A59D7CC89642B2EFFB /* ChatRenderers.swift */; };
+		5F2D7E91C3AB4D80A61E42F7 /* RuntimeConfigurationCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E45D7B2F9C4A61BE807123 /* RuntimeConfigurationCatalog.swift */; };
 		5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D91AF3EDBB51ECC1F494AC /* Models.swift */; };
 		60CA8106724593E7295EC968 /* MOBaiLEShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */; };
+		6C0C924B43AB40FE83C57D2B /* PairingHostRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960ABFCD94F24444A4A05EEE /* PairingHostRules.swift */; };
+		7AB174406D0B427CBACD0A4B /* ContentViewSupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 249A8834F19845A2B0679177 /* ContentViewSupportViews.swift */; };
 		8DAE313D0CFB3DB28FFAE81D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */; };
 		94980E4F676D67E7F0C2CE05 /* VoiceAgentModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */; };
+		A4750A57487840AFA0F6D013 /* VoiceAgentPreviewFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = D145A1D08A484157A2F9F2B6 /* VoiceAgentPreviewFixtures.swift */; };
 		A1862D9871A32EF06B8E9B46 /* SpeechTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */; };
 		B120A06EEC64BEA0F9DE734A /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */; };
 		B243A2C4EE00ACD44CEE8302 /* mobaile_logo.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */; };
@@ -90,7 +94,9 @@
 		70E9E6ACE1E337A83BEB3CE6 /* WidgetURLSchemeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetURLSchemeConfiguration.swift; sourceTree = "<group>"; };
 		8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
 		9252A15BA709EE17F97318A3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		960ABFCD94F24444A4A05EEE /* PairingHostRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingHostRules.swift; sourceTree = "<group>"; };
 		968552A59D7CC89642B2EFFB /* ChatRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatRenderers.swift; sourceTree = "<group>"; };
+		A3E45D7B2F9C4A61BE807123 /* RuntimeConfigurationCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConfigurationCatalog.swift; sourceTree = "<group>"; };
 		A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBaiLEShortcuts.swift; sourceTree = "<group>"; };
 		AAA945BA92E3B0DFAE3BCA72 /* VoiceTaskWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTaskWidget.swift; sourceTree = "<group>"; };
 		AFB87F32B46B087DBF769104 /* URLSchemeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLSchemeConfiguration.swift; sourceTree = "<group>"; };
@@ -99,6 +105,8 @@
 		D32D1CF6D42860D7BC4B6CB6 /* VoiceAgentAppUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceAgentAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D76C6B8E01B639BDDA79423E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		D145A1D08A484157A2F9F2B6 /* VoiceAgentPreviewFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentPreviewFixtures.swift; sourceTree = "<group>"; };
+		249A8834F19845A2B0679177 /* ContentViewSupportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewSupportViews.swift; sourceTree = "<group>"; };
 		EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTranscriptionService.swift; sourceTree = "<group>"; };
 		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3E6198279CE9DE1A7E6A096 /* VoiceAgentAppTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceAgentAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -165,6 +173,7 @@
 				14543222250EAE3887C38275 /* ChatScaffoldViews.swift */,
 				2F921FA3DE0D828EC5A1C6C6 /* ChatThreadStore.swift */,
 				DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */,
+				249A8834F19845A2B0679177 /* ContentViewSupportViews.swift */,
 				3AA8B32BD6EF877DC0ACE40C /* Info-Debug.plist */,
 				55BD337AE620AD07C1581C7C /* Info.plist */,
 				6F46E28C5030E56744250A3B /* KeychainStore.swift */,
@@ -172,11 +181,14 @@
 				0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */,
 				A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */,
 				33D91AF3EDBB51ECC1F494AC /* Models.swift */,
+				960ABFCD94F24444A4A05EEE /* PairingHostRules.swift */,
 				18728D4EF5C801CB2F70F8A0 /* PairingScannerView.swift */,
 				22D0F899CCED18AF644D3443 /* PrivacyInfo.xcprivacy */,
+				A3E45D7B2F9C4A61BE807123 /* RuntimeConfigurationCatalog.swift */,
 				EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */,
 				AFB87F32B46B087DBF769104 /* URLSchemeConfiguration.swift */,
 				BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */,
+				D145A1D08A484157A2F9F2B6 /* VoiceAgentPreviewFixtures.swift */,
 				03AFE8DCC8EB158A6410CC44 /* VoiceAgentViewModel.swift */,
 			);
 			path = VoiceAgentApp;
@@ -326,14 +338,18 @@
 				B747B93FEBD761493C3D4C69 /* ChatScaffoldViews.swift in Sources */,
 				B9014AC6C4B7150E13FA67BA /* ChatThreadStore.swift in Sources */,
 				8DAE313D0CFB3DB28FFAE81D /* ContentView.swift in Sources */,
+				7AB174406D0B427CBACD0A4B /* ContentViewSupportViews.swift in Sources */,
 				E0CEBC57FFB67BDCCAF370CA /* KeychainStore.swift in Sources */,
 				60CA8106724593E7295EC968 /* MOBaiLEShortcuts.swift in Sources */,
 				F93F690F4929529AA9138114 /* MediaAttachments.swift in Sources */,
 				5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */,
+				6C0C924B43AB40FE83C57D2B /* PairingHostRules.swift in Sources */,
 				31FA65E68D46BC9327B6EFE0 /* PairingScannerView.swift in Sources */,
+				5F2D7E91C3AB4D80A61E42F7 /* RuntimeConfigurationCatalog.swift in Sources */,
 				A1862D9871A32EF06B8E9B46 /* SpeechTranscriptionService.swift in Sources */,
 				02F1E8C0D81003A451563293 /* URLSchemeConfiguration.swift in Sources */,
 				059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */,
+				A4750A57487840AFA0F6D013 /* VoiceAgentPreviewFixtures.swift in Sources */,
 				BF652C85AFE113E7FB2D7E84 /* VoiceAgentViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -3,44 +3,35 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import shutil
-from typing import Callable
-from typing import Literal
 
 from app.agent_runtime import build_agent_prompt
 from app.agent_runtime import context_leak_markers
 from app.agent_runtime import evaluate_agent_guardrails
-from app.agent_runtime import load_runtime_context
 from app.models.schemas import AgentExecutorName
+from app.models.schemas import CodexReasoningEffort
 from app.models.schemas import ResponseProfile
 from app.models.schemas import RunExecutorName
 from app.models.schemas import RuntimeConfigResponse
 from app.models.schemas import RuntimeExecutorDescriptor
-from app.models.schemas import RuntimeSettingDescriptor
-
-AGENT_TITLES: dict[RunExecutorName, str] = {
-    "local": "Local fallback",
-    "codex": "Codex",
-    "claude": "Claude Code",
-}
+from app.phone_access_mode import PhoneAccessMode
+from app.runtime_executor_catalog import build_runtime_config_response
+from app.runtime_executor_catalog import build_runtime_executor_descriptors
+from app.runtime_environment_loader import available_agent_executors
+from app.runtime_environment_loader import CLAUDE_MODEL_OPTIONS
+from app.runtime_environment_loader import CODEX_MODEL_OPTIONS
+from app.runtime_environment_loader import CODEX_REASONING_EFFORT_OPTIONS
+from app.runtime_environment_loader import configured_default_executor
+from app.runtime_environment_loader import load_agent_runtime_environment_settings
+from app.runtime_environment_loader import load_profile_environment_settings
+from app.runtime_environment_loader import load_service_environment_settings
+from app.runtime_environment_loader import load_workspace_environment_settings
+from app.runtime_environment_loader import resolve_default_executor
+from app.runtime_environment_loader import stable_key
 
 AGENT_HOME_HINTS: dict[AgentExecutorName, str] = {
     "codex": "~/.codex/*",
     "claude": "~/.claude/*",
 }
-
-CODEX_MODEL_OPTIONS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.1")
-CLAUDE_MODEL_OPTIONS = ("claude-sonnet-4-5",)
-CODEX_REASONING_EFFORT_OPTIONS = ("minimal", "low", "medium", "high", "xhigh")
-PHONE_ACCESS_MODE_OPTIONS = ("tailscale", "wifi", "local")
-PhoneAccessMode = Literal["tailscale", "wifi", "local"]
-
-
-def _resolve_path_value(raw_value: str, *, base_dir: Path) -> Path:
-    path = Path(raw_value).expanduser()
-    if path.is_absolute():
-        return path.resolve()
-    return (base_dir / path).resolve()
 
 
 def load_env_defaults(env_path: Path) -> None:
@@ -55,66 +46,6 @@ def load_env_defaults(env_path: Path) -> None:
         if not key:
             continue
         os.environ.setdefault(key, value.strip().strip("'\""))
-
-
-def _binary_available(binary: str) -> bool:
-    trimmed = binary.strip()
-    if not trimmed:
-        return False
-    if "/" in trimmed or trimmed.startswith("."):
-        return Path(trimmed).expanduser().exists()
-    return shutil.which(trimmed) is not None
-
-
-def _stable_key(raw_value: str) -> str:
-    cleaned = "".join(char if char.isalnum() or char in "._-" else "_" for char in raw_value.strip())[:120]
-    return cleaned or "default"
-
-
-def _read_non_negative_int_env(name: str, default: int) -> int:
-    raw_value = os.getenv(name, str(default)).strip()
-    try:
-        parsed = int(raw_value)
-    except ValueError:
-        return default
-    return max(0, parsed)
-
-
-def _read_phone_access_mode_env() -> PhoneAccessMode:
-    raw_value = os.getenv("VOICE_AGENT_PHONE_ACCESS_MODE", "tailscale").strip().lower()
-    if raw_value not in PHONE_ACCESS_MODE_OPTIONS:
-        return "tailscale"
-    return raw_value  # type: ignore[return-value]
-
-
-def _runtime_option_values(
-    raw_value: str | None,
-    fallback_values: tuple[str, ...],
-    *,
-    normalize: Callable[[str], str] = lambda value: value.strip(),
-    allowed: Callable[[str], bool] | None = None,
-) -> list[str]:
-    options: list[str] = []
-    seen: set[str] = set()
-
-    def add(raw_item: str) -> None:
-        normalized = normalize(raw_item)
-        if not normalized:
-            return
-        if allowed is not None and not allowed(normalized):
-            return
-        key = normalized.casefold()
-        if key in seen:
-            return
-        seen.add(key)
-        options.append(normalized)
-
-    if raw_value:
-        for item in raw_value.split(","):
-            add(item)
-    for item in fallback_values:
-        add(item)
-    return options
 
 
 @dataclass(frozen=True)
@@ -173,262 +104,79 @@ class RuntimeEnvironment:
 
     @classmethod
     def from_env(cls, backend_root: Path) -> "RuntimeEnvironment":
-        host = os.getenv("VOICE_AGENT_HOST", "127.0.0.1").strip() or "127.0.0.1"
-        try:
-            port = int(os.getenv("VOICE_AGENT_PORT", "8000").strip() or "8000")
-        except ValueError:
-            port = 8000
-        public_server_url = os.getenv("VOICE_AGENT_PUBLIC_SERVER_URL", "").strip()
-        phone_access_mode = _read_phone_access_mode_env()
-        default_workdir = Path(
-            os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))
-        ).expanduser().resolve()
-        default_workdir.mkdir(parents=True, exist_ok=True)
-
-        security_mode = os.getenv("VOICE_AGENT_SECURITY_MODE", "safe").strip().lower()
-        if security_mode not in {"safe", "full-access"}:
-            security_mode = "safe"
-        full_access_mode = security_mode == "full-access"
-
-        workdir_root_raw = os.getenv("VOICE_AGENT_WORKDIR_ROOT", "").strip()
-        if workdir_root_raw:
-            workdir_root = Path(workdir_root_raw).expanduser().resolve()
-        else:
-            workdir_root = None if full_access_mode else default_workdir
-        if workdir_root is not None:
-            workdir_root.mkdir(parents=True, exist_ok=True)
-
-        allow_absolute_file_reads = os.getenv(
-            "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS",
-            "true" if full_access_mode else "false",
-        ).strip().lower() in {"1", "true", "yes", "on"}
-
-        file_roots_raw = os.getenv("VOICE_AGENT_FILE_ROOTS", "").strip()
-        explicit_file_roots = bool(file_roots_raw)
-        if explicit_file_roots:
-            file_roots = [
-                Path(item.strip()).expanduser().resolve()
-                for item in file_roots_raw.split(",")
-                if item.strip()
-            ]
-        else:
-            file_roots = [] if full_access_mode else [default_workdir]
-            if workdir_root is not None and workdir_root not in file_roots:
-                file_roots.append(workdir_root)
-
-        for root in file_roots:
-            root.mkdir(parents=True, exist_ok=True)
-
-        path_access_roots = list(file_roots)
-
-        codex_binary = os.getenv("VOICE_AGENT_CODEX_BINARY", "codex").strip() or "codex"
-        claude_binary = os.getenv("VOICE_AGENT_CLAUDE_BINARY", "claude").strip() or "claude"
-        codex_home = _resolve_path_value(
-            os.getenv(
-                "VOICE_AGENT_CODEX_HOME",
-                os.getenv("CODEX_HOME", str(Path.home() / ".codex")),
-            ).strip()
-            or str(Path.home() / ".codex"),
-            base_dir=backend_root,
-        )
-        codex_enable_web_search = os.getenv("VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH", "true").strip().lower() not in {
-            "0",
-            "false",
-            "no",
-            "off",
-        }
-        codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 0)
-        codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
-        codex_model_options = _runtime_option_values(
-            os.getenv("VOICE_AGENT_CODEX_MODEL_OPTIONS"),
-            CODEX_MODEL_OPTIONS,
-        )
-        codex_reasoning_effort_override = os.getenv("VOICE_AGENT_CODEX_REASONING_EFFORT", "").strip().lower()
-        if codex_reasoning_effort_override not in CODEX_REASONING_EFFORT_OPTIONS:
-            codex_reasoning_effort_override = ""
-        codex_reasoning_effort_options = tuple(
-            _runtime_option_values(
-                os.getenv("VOICE_AGENT_CODEX_REASONING_EFFORT_OPTIONS"),
-                CODEX_REASONING_EFFORT_OPTIONS,
-                normalize=lambda value: value.strip().lower(),
-                allowed=lambda value: value in CODEX_REASONING_EFFORT_OPTIONS,
-            )
-        )
-        claude_model_override = os.getenv("VOICE_AGENT_CLAUDE_MODEL", "").strip()
-        claude_model_options = _runtime_option_values(
-            os.getenv("VOICE_AGENT_CLAUDE_MODEL_OPTIONS"),
-            CLAUDE_MODEL_OPTIONS,
-        )
-        claude_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CLAUDE_TIMEOUT_SEC", codex_timeout_sec)
-        playwright_output_dir = _resolve_path_value(
-            os.getenv("VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR", "data/playwright").strip() or "data/playwright",
-            base_dir=backend_root,
-        )
-        playwright_user_data_dir = _resolve_path_value(
-            os.getenv("VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR", "data/playwright-profile").strip()
-            or "data/playwright-profile",
-            base_dir=backend_root,
-        )
-        playwright_output_dir.mkdir(parents=True, exist_ok=True)
-        playwright_user_data_dir.mkdir(parents=True, exist_ok=True)
-
-        use_agent_context = os.getenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true").strip().lower() not in {
-            "0",
-            "false",
-            "no",
-            "off",
-        }
-        runtime_context_file = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "../.mobaile/AGENT_CONTEXT.md").strip()
-        runtime_context = load_runtime_context(runtime_context_file, backend_root)
-        guardrails_mode = os.getenv("VOICE_AGENT_CODEX_GUARDRAILS", "warn").strip().lower()
-        dangerous_confirm_token = os.getenv(
-            "VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN", "[allow-dangerous]"
-        ).strip()
-
-        configured_default_executor = cls._configured_default_executor()
-        available_agents = cls._available_agent_executors(codex_binary, claude_binary)
-        default_executor = cls._resolve_default_executor(configured_default_executor, available_agents)
-
-        profile_state_root = Path(
-            os.getenv(
-                "VOICE_AGENT_PROFILE_STATE_ROOT",
-                os.getenv(
-                    "VOICE_AGENT_SESSION_STATE_ROOT",
-                    str(backend_root / "data" / "profiles"),
-                ),
-            )
-        ).resolve()
-        profile_state_root.mkdir(parents=True, exist_ok=True)
-
-        legacy_session_state_root = Path(
-            os.getenv(
-                "VOICE_AGENT_SESSION_STATE_ROOT",
-                str(backend_root / "data" / "sessions"),
-            )
-        ).resolve()
-
-        uploads_root = ((workdir_root or default_workdir) / ".mobaile_uploads").resolve()
-        uploads_root.mkdir(parents=True, exist_ok=True)
-        if uploads_root not in path_access_roots:
-            path_access_roots.append(uploads_root)
-        if uploads_root not in file_roots and (explicit_file_roots or not (full_access_mode and allow_absolute_file_reads)):
-            file_roots.append(uploads_root)
-
-        capabilities_report_path = Path(
-            os.getenv(
-                "VOICE_AGENT_CAPABILITIES_REPORT_PATH",
-                str(backend_root / "data" / "capabilities.json"),
-            )
-        ).resolve()
-        db_path = Path(
-            os.getenv(
-                "VOICE_AGENT_DB_PATH",
-                str(backend_root / "data" / "runs.db"),
-            )
-        )
-        pairing_file = Path(
-            os.getenv(
-                "VOICE_AGENT_PAIRING_FILE",
-                str(backend_root / "pairing.json"),
-            )
-        )
-
-        max_audio_mb = float(os.getenv("VOICE_AGENT_MAX_AUDIO_MB", "20"))
-        max_upload_mb = float(os.getenv("VOICE_AGENT_MAX_UPLOAD_MB", "25"))
+        workspace = load_workspace_environment_settings(backend_root)
+        agent_runtime = load_agent_runtime_environment_settings(backend_root)
+        profile = load_profile_environment_settings(backend_root)
+        service = load_service_environment_settings(backend_root)
 
         return cls(
             backend_root=backend_root,
-            host=host,
-            port=port,
-            public_server_url=public_server_url,
-            phone_access_mode=phone_access_mode,
-            default_workdir=default_workdir,
-            security_mode=security_mode,
-            full_access_mode=full_access_mode,
-            workdir_root=workdir_root,
-            allow_absolute_file_reads=allow_absolute_file_reads,
-            file_roots=tuple(file_roots),
-            path_access_roots=tuple(path_access_roots),
-            codex_binary=codex_binary,
-            claude_binary=claude_binary,
-            codex_home=codex_home,
-            codex_enable_web_search=codex_enable_web_search,
-            codex_model_override=codex_model_override,
-            codex_model_options=tuple(codex_model_options),
-            codex_reasoning_effort_override=codex_reasoning_effort_override,
-            codex_reasoning_effort_options=codex_reasoning_effort_options,
-            claude_model_override=claude_model_override,
-            claude_model_options=tuple(claude_model_options),
-            codex_timeout_sec=codex_timeout_sec,
-            claude_timeout_sec=claude_timeout_sec,
-            playwright_output_dir=playwright_output_dir,
-            playwright_user_data_dir=playwright_user_data_dir,
-            use_agent_context=use_agent_context,
-            runtime_context_file=runtime_context_file,
-            runtime_context=runtime_context,
-            guardrails_mode=guardrails_mode,
-            dangerous_confirm_token=dangerous_confirm_token,
-            configured_default_executor=configured_default_executor,
-            default_executor=default_executor,
-            profile_state_root=profile_state_root,
-            legacy_session_state_root=legacy_session_state_root,
-            profile_id=os.getenv("VOICE_AGENT_PROFILE_ID", "default-user").strip() or "default-user",
-            profile_agents_max_chars=int(
-                os.getenv(
-                    "VOICE_AGENT_PROFILE_AGENTS_MAX_CHARS",
-                    os.getenv("VOICE_AGENT_SESSION_AGENTS_MAX_CHARS", "3000"),
-                )
-            ),
-            profile_memory_max_chars=int(
-                os.getenv(
-                    "VOICE_AGENT_PROFILE_MEMORY_MAX_CHARS",
-                    os.getenv("VOICE_AGENT_SESSION_MEMORY_MAX_CHARS", "6000"),
-                )
-            ),
-            max_audio_mb=max_audio_mb,
-            max_audio_bytes=int(max_audio_mb * 1024 * 1024),
-            max_upload_mb=max_upload_mb,
-            max_upload_bytes=int(max_upload_mb * 1024 * 1024),
-            max_directory_entries=int(os.getenv("VOICE_AGENT_MAX_DIRECTORY_ENTRIES", "200")),
-            max_event_message_chars=int(os.getenv("VOICE_AGENT_MAX_EVENT_MESSAGE_CHARS", "16000")),
-            capabilities_report_path=capabilities_report_path,
-            api_token=os.getenv("VOICE_AGENT_API_TOKEN", ""),
-            db_path=db_path,
-            pairing_file=pairing_file,
-            pair_code_ttl_min=int(os.getenv("VOICE_AGENT_PAIR_CODE_TTL_MIN", "30")),
-            pair_attempt_limit_per_min=int(os.getenv("VOICE_AGENT_PAIR_ATTEMPT_LIMIT_PER_MIN", "20")),
-            uploads_root=uploads_root,
+            host=workspace.host,
+            port=workspace.port,
+            public_server_url=workspace.public_server_url,
+            phone_access_mode=workspace.phone_access_mode,
+            default_workdir=workspace.default_workdir,
+            security_mode=workspace.security_mode,
+            full_access_mode=workspace.full_access_mode,
+            workdir_root=workspace.workdir_root,
+            allow_absolute_file_reads=workspace.allow_absolute_file_reads,
+            file_roots=workspace.file_roots,
+            path_access_roots=workspace.path_access_roots,
+            codex_binary=agent_runtime.codex_binary,
+            claude_binary=agent_runtime.claude_binary,
+            codex_home=agent_runtime.codex_home,
+            codex_enable_web_search=agent_runtime.codex_enable_web_search,
+            codex_model_override=agent_runtime.codex_model_override,
+            codex_model_options=agent_runtime.codex_model_options,
+            codex_reasoning_effort_override=agent_runtime.codex_reasoning_effort_override,
+            codex_reasoning_effort_options=agent_runtime.codex_reasoning_effort_options,
+            claude_model_override=agent_runtime.claude_model_override,
+            claude_model_options=agent_runtime.claude_model_options,
+            codex_timeout_sec=agent_runtime.codex_timeout_sec,
+            claude_timeout_sec=agent_runtime.claude_timeout_sec,
+            playwright_output_dir=agent_runtime.playwright_output_dir,
+            playwright_user_data_dir=agent_runtime.playwright_user_data_dir,
+            use_agent_context=agent_runtime.use_agent_context,
+            runtime_context_file=agent_runtime.runtime_context_file,
+            runtime_context=agent_runtime.runtime_context,
+            guardrails_mode=agent_runtime.guardrails_mode,
+            dangerous_confirm_token=agent_runtime.dangerous_confirm_token,
+            configured_default_executor=agent_runtime.configured_default_executor,
+            default_executor=agent_runtime.default_executor,
+            profile_state_root=profile.profile_state_root,
+            legacy_session_state_root=profile.legacy_session_state_root,
+            profile_id=profile.profile_id,
+            profile_agents_max_chars=profile.profile_agents_max_chars,
+            profile_memory_max_chars=profile.profile_memory_max_chars,
+            max_audio_mb=service.max_audio_mb,
+            max_audio_bytes=service.max_audio_bytes,
+            max_upload_mb=service.max_upload_mb,
+            max_upload_bytes=service.max_upload_bytes,
+            max_directory_entries=service.max_directory_entries,
+            max_event_message_chars=service.max_event_message_chars,
+            capabilities_report_path=service.capabilities_report_path,
+            api_token=service.api_token,
+            db_path=service.db_path,
+            pairing_file=service.pairing_file,
+            pair_code_ttl_min=service.pair_code_ttl_min,
+            pair_attempt_limit_per_min=service.pair_attempt_limit_per_min,
+            uploads_root=workspace.uploads_root,
         )
 
     @staticmethod
     def _configured_default_executor() -> RunExecutorName:
-        configured = os.getenv("VOICE_AGENT_DEFAULT_EXECUTOR", "codex").strip().lower() or "codex"
-        if configured not in {"local", "codex", "claude"}:
-            configured = "codex"
-        return configured  # type: ignore[return-value]
+        return configured_default_executor()
 
     @staticmethod
     def _available_agent_executors(codex_binary: str, claude_binary: str) -> list[AgentExecutorName]:
-        executors: list[AgentExecutorName] = []
-        if _binary_available(codex_binary):
-            executors.append("codex")
-        if _binary_available(claude_binary):
-            executors.append("claude")
-        return executors
+        return available_agent_executors(codex_binary, claude_binary)
 
     @staticmethod
     def _resolve_default_executor(
         configured_default_executor: RunExecutorName,
         available_agents: list[AgentExecutorName],
     ) -> RunExecutorName:
-        if configured_default_executor == "local":
-            return "local"
-        if configured_default_executor in available_agents:
-            return configured_default_executor
-        for candidate in ("codex", "claude"):
-            if candidate in available_agents:
-                return candidate  # type: ignore[return-value]
-        return "local"
+        return resolve_default_executor(configured_default_executor, available_agents)
 
     def available_agent_executors(self) -> list[AgentExecutorName]:
         return self._available_agent_executors(self.codex_binary, self.claude_binary)
@@ -494,7 +242,7 @@ class RuntimeEnvironment:
         return self.default_workdir
 
     def upload_session_dir(self, session_id: str) -> Path:
-        return (self.uploads_root / _stable_key(session_id)).resolve()
+        return (self.uploads_root / stable_key(session_id)).resolve()
 
     def is_path_allowed(self, path: Path) -> bool:
         if self.full_access_mode and self.allow_absolute_file_reads and not self.file_roots:
@@ -502,62 +250,10 @@ class RuntimeEnvironment:
         return any(self._is_relative_to(path, root) for root in self.path_access_roots)
 
     def runtime_executor_descriptors(self) -> list[RuntimeExecutorDescriptor]:
-        available_agents = set(self.available_agent_executors())
-        descriptors = [
-            RuntimeExecutorDescriptor(
-                id="local",
-                title=AGENT_TITLES["local"],
-                kind="internal",
-                available=True,
-                default=self.default_executor == "local",
-                internal_only=True,
-            ),
-            RuntimeExecutorDescriptor(
-                id="codex",
-                title=AGENT_TITLES["codex"],
-                kind="agent",
-                available="codex" in available_agents,
-                default=self.default_executor == "codex",
-                model=self.codex_model_override or None,
-                settings=[
-                    RuntimeSettingDescriptor(
-                        id="model",
-                        title="Model",
-                        kind="enum",
-                        allow_custom=True,
-                        value=self.codex_model_override or None,
-                        options=list(self.codex_model_options),
-                    ),
-                    RuntimeSettingDescriptor(
-                        id="reasoning_effort",
-                        title="Reasoning Effort",
-                        kind="enum",
-                        allow_custom=False,
-                        value=self.codex_reasoning_effort_override or None,
-                        options=list(self.codex_reasoning_effort_options),
-                    ),
-                ],
-            ),
-            RuntimeExecutorDescriptor(
-                id="claude",
-                title=AGENT_TITLES["claude"],
-                kind="agent",
-                available="claude" in available_agents,
-                default=self.default_executor == "claude",
-                model=self.claude_model_override or None,
-                settings=[
-                    RuntimeSettingDescriptor(
-                        id="model",
-                        title="Model",
-                        kind="enum",
-                        allow_custom=True,
-                        value=self.claude_model_override or None,
-                        options=list(self.claude_model_options),
-                    ),
-                ],
-            ),
-        ]
-        return descriptors
+        return build_runtime_executor_descriptors(
+            self,
+            available_agents=set(self.available_agent_executors()),
+        )
 
     def runtime_config_response(
         self,
@@ -567,24 +263,14 @@ class RuntimeEnvironment:
         server_url: str | None = None,
         server_urls: list[str] | None = None,
     ) -> RuntimeConfigResponse:
-        return RuntimeConfigResponse(
-            security_mode=self.security_mode,  # type: ignore[arg-type]
-            default_executor=self.default_executor,
-            available_executors=self.available_agent_executors(),
-            executors=self.runtime_executor_descriptors(),
+        available_executors = self.available_agent_executors()
+        return build_runtime_config_response(
+            self,
+            available_executors=available_executors,
             transcribe_provider=transcribe_provider,
             transcribe_ready=transcribe_ready,
-            codex_model=self.codex_model_override or None,
-            codex_model_options=list(self.codex_model_options),
-            codex_reasoning_effort=self.codex_reasoning_effort_override or None,
-            codex_reasoning_effort_options=list(self.codex_reasoning_effort_options),
-            claude_model=self.claude_model_override or None,
-            claude_model_options=list(self.claude_model_options),
-            workdir_root=str(self.workdir_root) if self.workdir_root is not None else None,
-            allow_absolute_file_reads=self.allow_absolute_file_reads,
-            file_roots=[str(root) for root in self.file_roots],
             server_url=server_url,
-            server_urls=server_urls or [],
+            server_urls=server_urls,
         )
 
     @staticmethod

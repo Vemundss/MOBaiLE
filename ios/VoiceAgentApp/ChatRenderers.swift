@@ -14,65 +14,7 @@ struct MessageBubble: View {
     private let client = APIClient()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(segments) { segment in
-                switch segment.kind {
-                case .markdown:
-                    ExpandableMarkdownBlock(text: segment.content, isUser: isUser)
-                case let .code(language):
-                    CodeBlock(text: segment.content, language: language)
-                case let .status(text):
-                    AgentStatusCard(text: text)
-                case let .image(url):
-                    RemoteImageView(urlString: url, serverURL: serverURL, apiToken: apiToken)
-                case let .section(title, body):
-                    SectionCard(title: title, content: body, isUser: isUser)
-                case let .artifact(item):
-                    ArtifactCard(
-                        artifact: item,
-                        serverURL: serverURL,
-                        isOpening: openingArtifactID == item.id,
-                        onOpen: {
-                            Task {
-                                await openArtifact(item)
-                            }
-                        }
-                    )
-                case let .agenda(items):
-                    AgendaCard(items: items)
-                case let .emailDigest(items):
-                    EmailDigestCard(items: items)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .foregroundStyle(isUser ? Color.white : Color.primary)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(
-                    isUser
-                        ? AnyShapeStyle(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.17, green: 0.48, blue: 0.96),
-                                    Color(red: 0.12, green: 0.39, blue: 0.90)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        : AnyShapeStyle(Color(.secondarySystemBackground))
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(
-                    isUser ? Color.white.opacity(0.14) : Color(.separator).opacity(0.18),
-                    lineWidth: 1
-                )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        bubbleSurface
         .contextMenu {
             if !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
@@ -99,6 +41,10 @@ struct MessageBubble: View {
         message.role == "user"
     }
 
+    private var isLiveActivity: Bool {
+        message.presentation == .liveActivity
+    }
+
     private var segments: [MessageSegment] {
         let parsed = parseSegments(from: message.text, serverURL: serverURL, massageForDisplay: !isUser)
         let explicitAttachments = message.attachments.compactMap(messageSegment(for:))
@@ -107,6 +53,78 @@ struct MessageBubble: View {
             return explicitAttachments
         }
         return parsed + explicitAttachments
+    }
+
+    @ViewBuilder
+    private var bubbleSurface: some View {
+        if isLiveActivity {
+            LiveActivityCard(text: message.text)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(segments) { segment in
+                    switch segment.kind {
+                    case .markdown:
+                        ExpandableMarkdownBlock(text: segment.content, isUser: isUser)
+                    case let .code(language):
+                        CodeBlock(text: segment.content, language: language)
+                    case let .status(text):
+                        AgentStatusCard(text: text)
+                    case let .image(url):
+                        RemoteImageView(urlString: url, serverURL: serverURL, apiToken: apiToken)
+                    case let .section(title, body):
+                        SectionCard(title: title, content: body, isUser: isUser)
+                    case let .artifact(item):
+                        ArtifactCard(
+                            artifact: item,
+                            serverURL: serverURL,
+                            isOpening: openingArtifactID == item.id,
+                            onOpen: {
+                                Task {
+                                    await openArtifact(item)
+                                }
+                            }
+                        )
+                    case let .agenda(items):
+                        AgendaCard(items: items)
+                    case let .emailDigest(items):
+                        EmailDigestCard(items: items)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .foregroundStyle(isUser ? Color.white : Color.primary)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        isUser
+                            ? AnyShapeStyle(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.17, green: 0.48, blue: 0.96),
+                                        Color(red: 0.12, green: 0.39, blue: 0.90)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            : AnyShapeStyle(Color(.systemBackground))
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        isUser ? Color.white.opacity(0.14) : Color(.separator).opacity(0.18),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(
+                color: isUser ? Color.clear : Color.black.opacity(0.04),
+                radius: isUser ? 0 : 10,
+                y: isUser ? 0 : 3
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
     }
 
     private func openArtifact(_ artifact: ChatArtifact) async {
@@ -378,10 +396,10 @@ private struct SectionCard: View {
             }
         }
         .padding(10)
-        .background(isUser ? Color.white.opacity(0.08) : Color(.tertiarySystemBackground))
+        .background(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.08))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.16), lineWidth: 1)
+                .stroke(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.14), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -425,8 +443,66 @@ private struct AgentStatusCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(Color(.tertiarySystemBackground))
+        .background(Color.blue.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.blue.opacity(0.10), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct LiveActivityCard: View {
+    let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var animatePulse = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.18))
+                        .frame(width: 18, height: 18)
+                        .scaleEffect(reduceMotion ? 1 : (animatePulse ? 1.2 : 0.9))
+                        .opacity(reduceMotion ? 1 : (animatePulse ? 0.35 : 0.95))
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 8, height: 8)
+                }
+                Text("Live Activity")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.blue)
+                Spacer()
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.blue)
+            }
+
+            Text(text)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.blue.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.blue.opacity(0.14), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("conversation.liveActivity")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                animatePulse = true
+            }
+        }
     }
 }
 
@@ -479,7 +555,11 @@ private struct ArtifactCard: View {
             }
         }
         .padding(10)
-        .background(Color(.tertiarySystemBackground))
+        .background(Color(.secondarySystemBackground))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contextMenu {
             if let rawReference = artifact.path ?? artifact.url {
@@ -1445,6 +1525,9 @@ private func isContextLeakLine(_ line: String) -> Bool {
         "product intent:",
         "mobaile makes a user's computer available from their phone",
         "output style for phone ux:",
+        "phone ux feedback guidance:",
+        "emit short progress updates at meaningful milestones",
+        "finish with a compressed final result",
         "task-specific formatting:",
         "environment notes:",
         "do not repeat or summarize this runtime context",

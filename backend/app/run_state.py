@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from typing import Iterator
+from typing import Literal
 import uuid
 
 from app.chat_envelope import coerce_assistant_text_to_envelope
@@ -124,6 +125,28 @@ class RunState:
             ExecutionEvent(type="log.message", action_index=action_index, message=text),
         )
 
+    def append_activity_event(
+        self,
+        run_id: str,
+        *,
+        stage: str,
+        title: str,
+        display_message: str,
+        level: Literal["info", "warning", "error"] = "info",
+        event_type: Literal["activity.started", "activity.updated", "activity.completed"] = "activity.updated",
+    ) -> None:
+        self.append_event(
+            run_id,
+            ExecutionEvent(
+                type=event_type,
+                message=display_message,
+                stage=stage,
+                title=title,
+                display_message=display_message,
+                level=level,
+            ),
+        )
+
     def set_run_status(
         self,
         run_id: str,
@@ -193,10 +216,17 @@ class RunState:
         if run is None:
             return None
         counts: dict[str, int] = {}
+        activity_stage_counts: dict[str, int] = {}
+        latest_activity: str | None = None
         last_error: str | None = None
         has_stderr = False
         for event in run.events:
             counts[event.type] = counts.get(event.type, 0) + 1
+            if event.stage:
+                activity_stage_counts[event.stage] = activity_stage_counts.get(event.stage, 0) + 1
+                latest_activity = event.display_message or event.message
+            if (event.level or "").lower() == "error":
+                last_error = event.display_message or event.message
             if event.type == "action.stderr":
                 has_stderr = True
                 last_error = event.message
@@ -208,6 +238,8 @@ class RunState:
             summary=run.summary,
             event_count=len(run.events),
             event_type_counts=counts,
+            activity_stage_counts=activity_stage_counts,
+            latest_activity=latest_activity,
             has_stderr=has_stderr,
             last_error=last_error,
             created_at=run.created_at,

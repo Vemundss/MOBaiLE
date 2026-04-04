@@ -19,6 +19,17 @@ jobs:
         working-directory: backend
         run: uv sync
 
-      - name: Run pytest
+      - name: Run pytest with artifacts
         working-directory: backend
-        run: uv run pytest -q
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifacts/backend
+          uv run pytest -q --junitxml=../artifacts/backend/pytest-junit.xml | tee ../artifacts/backend/pytest.log
+
+      - name: Upload backend test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-artifacts
+          path: artifacts/backend
+          if-no-files-found: warn

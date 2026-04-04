@@ -27,9 +27,11 @@ def filter_codex_assistant_message(message: str, user_prompt: str, leak_markers:
         "openai codex v",
         "you are running through mobaile",
         "mobaile runtime context:",
+        "phone ux feedback guidance:",
         "runtime:",
         "product intent:",
         "output style for phone ux:",
+        "backend activity events are the source of truth for progress in the phone ui.",
         "task-specific formatting:",
         "environment notes:",
         "user request:",
@@ -59,9 +61,14 @@ def filter_codex_assistant_message(message: str, user_prompt: str, leak_markers:
         "secondary use cases include normal remote productivity tasks",
         "output style for phone ux:",
         "prefer short status + result summaries",
+        "backend activity events are the source of truth for progress in the phone ui",
+        "if you add a short progress note, keep it aligned with the current stage: planning, executing, blocked, or summarizing",
+        "keep that note concise and non-repetitive; let the final response carry the substance",
+        "do not dump raw logs or long command output unless the user asks",
         "environment notes:",
         "for created images, include markdown image syntax",
         "do not repeat or summarize this runtime context",
+        "planning, executing, blocked, or summarizing",
     )
     if any(marker in lower for marker in explicit_markers):
         return None

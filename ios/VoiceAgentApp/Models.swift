@@ -18,24 +18,42 @@ struct HumanUnblockRequest: Codable, Equatable {
     }
 }
 
+enum ConversationMessagePresentation: String, Codable {
+    case standard
+    case liveActivity
+}
+
 struct ConversationMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: String
     let text: String
     let attachments: [ChatArtifact]
+    let presentation: ConversationMessagePresentation
+    let sourceRunID: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case role
         case text
         case attachments
+        case presentation
+        case sourceRunID = "source_run_id"
     }
 
-    init(id: UUID = UUID(), role: String, text: String, attachments: [ChatArtifact] = []) {
+    init(
+        id: UUID = UUID(),
+        role: String,
+        text: String,
+        attachments: [ChatArtifact] = [],
+        presentation: ConversationMessagePresentation = .standard,
+        sourceRunID: String? = nil
+    ) {
         self.id = id
         self.role = role
         self.text = text
         self.attachments = attachments
+        self.presentation = presentation
+        self.sourceRunID = sourceRunID
     }
 
     init(from decoder: Decoder) throws {
@@ -44,6 +62,8 @@ struct ConversationMessage: Identifiable, Equatable, Codable {
         role = try container.decode(String.self, forKey: .role)
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         attachments = try container.decodeIfPresent([ChatArtifact].self, forKey: .attachments) ?? []
+        presentation = try container.decodeIfPresent(ConversationMessagePresentation.self, forKey: .presentation) ?? .standard
+        sourceRunID = try container.decodeIfPresent(String.self, forKey: .sourceRunID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -52,6 +72,8 @@ struct ConversationMessage: Identifiable, Equatable, Codable {
         try container.encode(role, forKey: .role)
         try container.encode(text, forKey: .text)
         try container.encode(attachments, forKey: .attachments)
+        try container.encode(presentation, forKey: .presentation)
+        try container.encodeIfPresent(sourceRunID, forKey: .sourceRunID)
     }
 }
 
@@ -208,7 +230,7 @@ extension ChatThread {
             return .completed
         }
 
-        if lower.contains("fail") || lower.contains("reject") {
+        if lower.contains("fail") || lower.contains("reject") || lower.contains("timed out") {
             return .failed
         }
 
@@ -338,6 +360,10 @@ struct ExecutionEvent: Decodable, Identifiable {
     let type: String
     let actionIndex: Int?
     let message: String
+    let stage: String?
+    let title: String?
+    let displayMessage: String?
+    let level: String?
     let eventID: String?
     let createdAt: String?
 
@@ -346,6 +372,10 @@ struct ExecutionEvent: Decodable, Identifiable {
         type: String,
         actionIndex: Int? = nil,
         message: String,
+        stage: String? = nil,
+        title: String? = nil,
+        displayMessage: String? = nil,
+        level: String? = nil,
         eventID: String? = nil,
         createdAt: String? = nil
     ) {
@@ -353,6 +383,10 @@ struct ExecutionEvent: Decodable, Identifiable {
         self.type = type
         self.actionIndex = actionIndex
         self.message = message
+        self.stage = stage
+        self.title = title
+        self.displayMessage = displayMessage
+        self.level = level
         self.eventID = eventID
         self.createdAt = createdAt
     }
@@ -362,6 +396,10 @@ struct ExecutionEvent: Decodable, Identifiable {
         case type
         case actionIndex = "action_index"
         case message
+        case stage
+        case title
+        case displayMessage = "display_message"
+        case level
         case eventID = "event_id"
         case createdAt = "created_at"
     }
@@ -423,6 +461,8 @@ struct RunDiagnostics: Decodable {
     let summary: String
     let eventCount: Int
     let eventTypeCounts: [String: Int]
+    let activityStageCounts: [String: Int]
+    let latestActivity: String?
     let hasStderr: Bool
     let lastError: String?
 
@@ -432,9 +472,79 @@ struct RunDiagnostics: Decodable {
         case summary
         case eventCount = "event_count"
         case eventTypeCounts = "event_type_counts"
+        case activityStageCounts = "activity_stage_counts"
+        case latestActivity = "latest_activity"
         case hasStderr = "has_stderr"
         case lastError = "last_error"
     }
+}
+
+extension RunDiagnostics {
+    static func derived(
+        runId: String,
+        status: String,
+        summary: String,
+        events: [ExecutionEvent]
+    ) -> RunDiagnostics {
+        var eventTypeCounts: [String: Int] = [:]
+        var activityStageCounts: [String: Int] = [:]
+        var latestActivity: String?
+        var hasStderr = false
+        var lastError: String?
+
+        for event in events {
+            eventTypeCounts[event.type, default: 0] += 1
+
+            if let stage = normalizedDiagnosticsText(event.stage), !stage.isEmpty {
+                activityStageCounts[stage, default: 0] += 1
+                latestActivity = normalizedDiagnosticsText(event.displayMessage) ?? normalizedDiagnosticsText(event.message)
+            }
+
+            if event.level?.lowercased() == "error" {
+                lastError = normalizedDiagnosticsText(event.displayMessage) ?? normalizedDiagnosticsText(event.message)
+            }
+
+            if event.type == "action.stderr" {
+                hasStderr = true
+                lastError = normalizedDiagnosticsText(event.message)
+            }
+
+            if event.type == "run.failed" {
+                lastError = normalizedDiagnosticsText(event.message)
+            }
+        }
+
+        return RunDiagnostics(
+            runId: normalizedDiagnosticsText(runId) ?? "",
+            status: normalizedDiagnosticsStatus(status),
+            summary: normalizedDiagnosticsText(summary) ?? "",
+            eventCount: events.count,
+            eventTypeCounts: eventTypeCounts,
+            activityStageCounts: activityStageCounts,
+            latestActivity: latestActivity,
+            hasStderr: hasStderr,
+            lastError: lastError
+        )
+    }
+}
+
+private func normalizedDiagnosticsText(_ text: String?) -> String? {
+    guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
+    return trimmed
+}
+
+private func normalizedDiagnosticsStatus(_ status: String) -> String {
+    let trimmed = status.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "unknown" }
+
+    let lower = trimmed.lowercased()
+    if lower.hasPrefix("run status:") {
+        let suffix = trimmed.dropFirst("Run status:".count)
+        return suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+    return lower
 }
 
 struct RuntimeSettingDescriptor: Decodable, Identifiable, Equatable {

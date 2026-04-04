@@ -32,12 +32,22 @@ jobs:
           fi
           echo "name=$SIM_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Run xcodebuild tests
+      - name: Run xcodebuild tests with artifacts
         working-directory: ios
         run: |
           set -euo pipefail
+          mkdir -p ../artifacts/ios
           xcodebuild \
             -project VoiceAgentApp.xcodeproj \
             -scheme VoiceAgentApp \
             -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
-            test
+            -resultBundlePath ../artifacts/ios/VoiceAgentApp.xcresult \
+            test | tee ../artifacts/ios/xcodebuild.log
+
+      - name: Upload iOS test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-artifacts
+          path: artifacts/ios
+          if-no-files-found: warn

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.models.schemas import ExecutionEvent
+from app.models.schemas import RunDiagnostics
 from app.models.schemas import RunRecord
 from app.run_state import RunState
 from app.storage import RunStore
@@ -54,6 +55,108 @@ def test_run_state_assigns_monotonic_event_sequences(tmp_path) -> None:
 
     assert loaded is not None
     assert [event.seq for event in loaded.events] == [0, 1]
+
+
+def test_run_state_appends_activity_events_with_typed_metadata(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    state = RunState(run_store, max_event_message_chars=16000)
+    state.store_run(
+        RunRecord(
+            run_id="run-activity",
+            session_id="session-1",
+            executor="local",
+            utterance_text="hello",
+            status="running",
+            summary="running",
+            events=[],
+        )
+    )
+
+    state.append_activity_event(
+        "run-activity",
+        stage="planning",
+        title="Planning",
+        display_message="Reviewing the request and planning the next steps.",
+    )
+
+    loaded = state.get_run("run-activity")
+
+    assert loaded is not None
+    event = loaded.events[-1]
+    assert event.type == "activity.updated"
+    assert event.stage == "planning"
+    assert event.title == "Planning"
+    assert event.display_message == "Reviewing the request and planning the next steps."
+    assert event.level == "info"
+    assert event.message == "Reviewing the request and planning the next steps."
+
+
+def test_run_state_diagnostics_include_activity_stage_counts(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    state = RunState(run_store, max_event_message_chars=16000)
+    state.store_run(
+        RunRecord(
+            run_id="run-diagnostics",
+            session_id="session-1",
+            executor="local",
+            utterance_text="hello",
+            status="running",
+            summary="running",
+            events=[],
+        )
+    )
+
+    state.append_activity_event(
+        "run-diagnostics",
+        stage="planning",
+        title="Planning",
+        display_message="Reviewing the request.",
+    )
+    state.append_event("run-diagnostics", ExecutionEvent(type="action.started", message="start"))
+    state.append_activity_event(
+        "run-diagnostics",
+        stage="executing",
+        title="Executing",
+        display_message="Running commands.",
+    )
+
+    diagnostics = state.diagnostics_for("run-diagnostics")
+
+    assert isinstance(diagnostics, RunDiagnostics)
+    assert diagnostics.activity_stage_counts == {"planning": 1, "executing": 1}
+    assert diagnostics.latest_activity == "Running commands."
+    assert diagnostics.event_count == 3
+
+
+def test_run_state_diagnostics_capture_error_activity_without_stderr(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    state = RunState(run_store, max_event_message_chars=16000)
+    state.store_run(
+        RunRecord(
+            run_id="run-error-diagnostics",
+            session_id="session-1",
+            executor="local",
+            utterance_text="hello",
+            status="failed",
+            summary="failed",
+            events=[],
+        )
+    )
+
+    state.append_activity_event(
+        "run-error-diagnostics",
+        stage="executing",
+        title="Executing",
+        display_message="Calendar query failed.",
+        level="error",
+    )
+
+    diagnostics = state.diagnostics_for("run-error-diagnostics")
+
+    assert isinstance(diagnostics, RunDiagnostics)
+    assert diagnostics.has_stderr is False
+    assert diagnostics.last_error == "Calendar query failed."
+    assert diagnostics.latest_activity == "Calendar query failed."
 
 
 def test_run_store_persists_session_context(tmp_path) -> None:

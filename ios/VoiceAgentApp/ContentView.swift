@@ -11,6 +11,7 @@ struct ContentView: View {
     private let quickStartURL = URL(string: "https://github.com/vemundss/MOBaiLE#set-it-up")!
     private let bootstrapInstallCommand = "curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash"
     private let checkoutInstallCommand = "bash ./scripts/install.sh"
+    @AppStorage(AppAppearancePreference.storageKey) private var appearancePreferenceRaw = AppAppearancePreference.system.rawValue
     @StateObject private var vm = VoiceAgentViewModel()
     @State private var showConnectionSettings = false
     @State private var showSetupGuide = false
@@ -54,10 +55,10 @@ struct ContentView: View {
     private var baseNavigationView: some View {
         NavigationStack {
             conversationView
-                .navigationTitle(activeNavigationTitle)
+                .navigationTitle(navigationBarTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             showConnectionSettings = true
                         } label: {
@@ -65,30 +66,6 @@ struct ContentView: View {
                         }
                         .foregroundStyle(settingsToolbarTint)
                         .accessibilityLabel("Settings")
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button {
-                            showThreads = true
-                        } label: {
-                            ThreadToolbarButtonLabel(threadCount: vm.sortedThreads.count)
-                        }
-                        .accessibilityLabel("Threads, \(threadCountLabel), current \(activeNavigationTitle)")
-
-                        Menu {
-                            Button {
-                                vm.startNewChat()
-                            } label: {
-                                Label("New Chat", systemImage: "square.and.pencil")
-                            }
-
-                            Button {
-                                showLogs = true
-                            } label: {
-                                Label("Run Logs", systemImage: "doc.text.magnifyingglass")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
                     }
                 }
         }
@@ -141,7 +118,13 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showLogs) {
-                LogsView(events: vm.events)
+                LogsView(
+                    events: vm.events,
+                    diagnostics: vm.currentRunDiagnostics
+                )
+                .task {
+                    await vm.refreshRunDiagnosticsIfPossible()
+                }
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
@@ -378,18 +361,7 @@ struct ContentView: View {
                         .id(message.id)
                     }
 
-                    if vm.needsConnectionRepair && !shouldShowRecordingNotice {
-                        InlineNoticeCard(
-                            title: vm.connectionRepairTitle,
-                            message: vm.connectionRepairMessage,
-                            tint: .orange,
-                            systemImage: "qrcode.viewfinder",
-                            actionTitle: "Scan Pairing QR",
-                            action: {
-                                showPairingScanner = true
-                            }
-                        )
-                    } else if !vm.errorText.isEmpty && !shouldShowRecordingNotice {
+                    if !vm.errorText.isEmpty && !shouldShowRecordingNotice {
                         InlineNoticeCard(
                             title: "Something went wrong",
                             message: vm.errorText,
@@ -509,30 +481,9 @@ struct ContentView: View {
                 }
 
                 Section {
-                    if vm.hasConfiguredConnection {
-                        connectionFields
-                    } else {
-                        DisclosureGroup("Already have a server URL and token?", isExpanded: $showManualConnectionFields) {
-                            VStack(spacing: 14) {
-                                connectionFields
-                            }
-                            .padding(.top, 8)
-                        }
-                    }
-                } header: {
-                    Text(vm.hasConfiguredConnection ? "Connection" : "Manual Connection")
-                } footer: {
-                    Text(
-                        vm.needsConnectionRepair
-                            ? "The saved server URL is still here. Scanning a fresh QR replaces the broken token without retyping everything."
-                            : vm.hasConfiguredConnection
-                                ? "Server URL and token are the only required setup."
-                            : "Most people should pair by QR instead of typing these fallback fields."
-                    )
-                }
-
-                Section {
                     settingsConnectionCard
+                } header: {
+                    Text(settingsConnectionTitle)
                 }
 
                 if canUseConnectedFeatures {
@@ -551,20 +502,6 @@ struct ContentView: View {
                         Text("Agent Runtime")
                     } footer: {
                         Text(agentRuntimeFooterText)
-                    }
-
-                    Section {
-                        Picker("Agent guidance", selection: $vm.agentGuidanceMode) {
-                            Text("Guided").tag("guided")
-                            Text("Minimal").tag("minimal")
-                        }
-                        .pickerStyle(.segmented)
-                    } header: {
-                        Text("Conversation Style")
-                    } footer: {
-                        Text(vm.agentGuidanceMode == "minimal"
-                            ? "Minimal keeps chat focused on final results."
-                            : "Guided adds short progress updates and clearer result context.")
                     }
 
                     Section {
@@ -640,6 +577,53 @@ struct ContentView: View {
                     }
                 }
 
+                Section {
+                    Picker("Appearance", selection: appearancePreferenceBinding) {
+                        ForEach(AppAppearancePreference.allCases) { preference in
+                            Text(preference.title).tag(preference)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("settings.appearance")
+
+                    Picker("Progress updates", selection: $vm.agentGuidanceMode) {
+                        Text("Guided").tag("guided")
+                        Text("Minimal").tag("minimal")
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Experience")
+                } footer: {
+                    Text(
+                        (vm.agentGuidanceMode == "minimal"
+                            ? "Minimal keeps chat focused on final results."
+                            : "Guided shows a live activity stream while the agent works, then compresses it into the final result.")
+                        + " System follows your iPhone appearance automatically unless you lock MOBaiLE to Light or Dark."
+                    )
+                }
+
+                Section {
+                    DisclosureGroup(
+                        vm.hasConfiguredConnection ? "Edit server URL and token" : "Already have a server URL and token?",
+                        isExpanded: $showManualConnectionFields
+                    ) {
+                        VStack(spacing: 14) {
+                            connectionFields
+                        }
+                        .padding(.top, 8)
+                    }
+                } header: {
+                    Text(vm.hasConfiguredConnection ? "Connection Details" : "Manual Connection")
+                } footer: {
+                    Text(
+                        vm.needsConnectionRepair
+                            ? "The saved server URL is still here. Scanning a fresh QR replaces the broken token without retyping everything."
+                            : vm.hasConfiguredConnection
+                                ? "Only change these when you want this phone to talk to a different backend."
+                                : "Most people should pair by QR instead of typing these fallback fields."
+                    )
+                }
+
                 Section("Support") {
                     if !vm.hasConfiguredConnection {
                         Link("Set It Up", destination: quickStartURL)
@@ -663,6 +647,7 @@ struct ContentView: View {
                 }
             }
         }
+        .preferredColorScheme(resolvedAppearancePreference.colorScheme)
     }
 
     private var setupGuideSheet: some View {
@@ -708,36 +693,39 @@ struct ContentView: View {
 
     private var settingsConnectionCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 12) {
-                Label(settingsConnectionTitle, systemImage: settingsConnectionSymbol)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(settingsConnectionTint)
-
-                Spacer(minLength: 0)
-
-                if vm.hasConfiguredConnection && !vm.needsConnectionRepair {
-                    Button {
-                        Task { await checkSettingsConnection() }
-                    } label: {
-                        if isCheckingSettingsConnection {
-                            ProgressView()
-                        } else {
-                            Text("Test")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isCheckingSettingsConnection)
-                }
+            if !settingsConnectionMessage.isEmpty {
+                Text(settingsConnectionMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text(settingsConnectionMessage)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if vm.hasConfiguredConnection && !settingsSummaryItems.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(settingsSummaryItems) { item in
+                        settingsSummaryRow(item)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) {
+                    if vm.hasConfiguredConnection && !vm.needsConnectionRepair {
+                        Button {
+                            Task { await checkSettingsConnection() }
+                        } label: {
+                            if isCheckingSettingsConnection {
+                                ProgressView()
+                            } else {
+                                Text("Test")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(isCheckingSettingsConnection)
+                    }
+
                     settingsPairingScannerButton()
 
                     if vm.needsConnectionRepair {
@@ -759,16 +747,12 @@ struct ContentView: View {
                     }
                 }
             }
-
-            if vm.hasConfiguredConnection && !settingsConnectionDetails.isEmpty {
-                settingsDetailsGrid(items: settingsConnectionDetails)
-            }
-
-            if showsSettingsRuntimeDetails && !settingsRuntimeDetails.isEmpty {
-                settingsDetailsGrid(items: settingsRuntimeDetails)
-            }
         }
         .padding(.vertical, 4)
+    }
+
+    private var settingsSummaryItems: [SettingsRuntimeDetailItem] {
+        settingsConnectionDetails + settingsRuntimeDetails
     }
 
     private var settingsConnectionDetails: [SettingsRuntimeDetailItem] {
@@ -815,34 +799,26 @@ struct ContentView: View {
         guard showsSettingsRuntimeDetails else { return [] }
         var items = [
             SettingsRuntimeDetailItem(icon: "lock.shield", label: "Mode", value: vm.backendSecurityMode.uppercased()),
-            SettingsRuntimeDetailItem(icon: "bolt.horizontal.circle", label: "Exec", value: runtimeExecutorLabel),
+            SettingsRuntimeDetailItem(icon: "sparkles", label: "Runtime", value: runtimeDescriptorSummary),
+            SettingsRuntimeDetailItem(icon: "folder.fill", label: "Workspace", value: runtimeDirectorySummary),
         ]
-        for setting in vm.selectedRuntimeSettings {
-            let value = vm.runtimeSettingDisplayValue(for: setting.id)
-            guard value != "Backend default" else { continue }
-            items.append(
-                SettingsRuntimeDetailItem(
-                    icon: vm.runtimeSettingIconName(for: setting.id),
-                    label: setting.title,
-                    value: value
-                )
-            )
-        }
         if !vm.backendWorkdirRoot.isEmpty {
             items.append(SettingsRuntimeDetailItem(icon: "externaldrive", label: "Root", value: shortPathLabel(vm.backendWorkdirRoot)))
         }
         return items
     }
 
-    private func settingsDetailsGrid(items: [SettingsRuntimeDetailItem]) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .top)],
-            alignment: .leading,
-            spacing: 8
-        ) {
-            ForEach(items) { item in
-                RuntimeContextChip(icon: item.icon, label: item.label, value: item.value)
-            }
+    private func settingsSummaryRow(_ item: SettingsRuntimeDetailItem) -> some View {
+        LabeledContent {
+            Text(item.value)
+                .font(.footnote.monospaced())
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        } label: {
+            Label(item.label, systemImage: item.icon)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -857,6 +833,13 @@ struct ContentView: View {
         default:
             return "settings.runtime.\(vm.effectiveExecutor).\(settingID)"
         }
+    }
+
+    private var appearancePreferenceBinding: Binding<AppAppearancePreference> {
+        Binding(
+            get: { AppAppearancePreference.resolve(from: appearancePreferenceRaw) },
+            set: { appearancePreferenceRaw = $0.rawValue }
+        )
     }
 
     private func runtimeSettingBinding(for settingID: String) -> Binding<String> {
@@ -916,44 +899,12 @@ struct ContentView: View {
                 return vm.connectionRepairMessage
             }
             return vm.hasConfiguredConnection
-                ? "MOBaiLE stores these values on the phone. Test the connection after editing them."
+                ? "Saved on this phone. Pair again if you want to replace this connection."
                 : "Use the installer and QR pairing for the fastest setup, or expand the manual fallback section if you already have connection details."
         case .checking:
             return "Checking the current backend session."
         case let .success(message), let .failure(message):
             return message
-        }
-    }
-
-    private var settingsConnectionTint: Color {
-        switch settingsConnectionState {
-        case .idle:
-            if vm.needsConnectionRepair {
-                return .orange
-            }
-            return vm.hasConfiguredConnection ? .primary : .orange
-        case .checking:
-            return .blue
-        case .success:
-            return .green
-        case .failure:
-            return vm.needsConnectionRepair ? .orange : .red
-        }
-    }
-
-    private var settingsConnectionSymbol: String {
-        switch settingsConnectionState {
-        case .idle:
-            if vm.needsConnectionRepair {
-                return "qrcode.viewfinder"
-            }
-            return vm.hasConfiguredConnection ? "server.rack" : "exclamationmark.triangle.fill"
-        case .checking:
-            return "arrow.triangle.2.circlepath"
-        case .success:
-            return "checkmark.circle.fill"
-        case .failure:
-            return vm.needsConnectionRepair ? "qrcode.viewfinder" : "xmark.octagon.fill"
         }
     }
 
@@ -989,15 +940,30 @@ struct ContentView: View {
 
             if let unblock = vm.pendingHumanUnblockRequest, !vm.isLoading {
                 InlineNoticeCard(
-                    title: "Human input needed",
+                    title: "Continue this run",
                     message: unblock.instructions,
                     tint: .orange,
                     systemImage: "hand.raised.fill",
-                    actionTitle: "Prepare Reply",
+                    actionTitle: "Use Suggested Reply",
                     action: {
                         vm.prepareHumanUnblockReply()
                         composerFocused = true
                     }
+                )
+            }
+
+            if let retryNotice = runRetryNotice {
+                InlineNoticeCard(
+                    title: retryNotice.title,
+                    message: retryNotice.message,
+                    tint: .red,
+                    systemImage: "arrow.clockwise.circle.fill",
+                    actionTitle: "Retry Last Prompt",
+                    action: {
+                        Task { await vm.retryLastPrompt() }
+                    },
+                    secondaryActionTitle: vm.events.isEmpty ? nil : "Open Run Logs",
+                    secondaryAction: vm.events.isEmpty ? nil : { showLogs = true }
                 )
             }
 
@@ -1101,7 +1067,7 @@ struct ContentView: View {
                     )
                 }
 
-                if !vm.runID.isEmpty && shouldShowComposerStatusSummary {
+                if !vm.runID.isEmpty && shouldShowComposerStatusSummary && !hasVisibleLiveActivityMessage {
                     Text("Run \(shortRunID(vm.runID))")
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
@@ -1152,6 +1118,8 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 14)
                     .padding(.top, 16)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .allowsHitTesting(false)
             }
         }
@@ -1283,79 +1251,60 @@ struct ContentView: View {
     }
 
     private var recordingComposerDetails: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 Circle()
                     .fill(Color.red)
                     .frame(width: 8, height: 8)
 
+                Text("Listening")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
                 if let startedAt = vm.recordingStartedAt {
                     TimelineView(.periodic(from: startedAt, by: 1)) { context in
                         Text(recordingDurationLabel(since: startedAt, now: context.date))
-                            .font(.headline.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.red.opacity(0.10))
+                            .clipShape(Capsule())
                     }
-                } else {
-                    Text("Recording")
-                        .font(.headline.weight(.semibold))
-                }
-
-                if vm.isVoiceModeActiveForCurrentThread {
-                    ComposerMetaPill(
-                        text: "Voice",
-                        systemImage: "waveform.circle.fill",
-                        tint: .blue
-                    )
                 }
             }
 
             Text(recordingSubtitle)
-                .font(.caption)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(1)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let typedNoteSummary = recordingTypedNoteSummaryText {
-                ComposerMetaPill(
-                    text: typedNoteSummary,
-                    systemImage: "text.bubble.fill",
-                    tint: .blue
-                )
-            }
-
-            if let preview = recordingDraftPreviewText {
-                Text(preview)
-                    .font(.caption2)
+            if let contextSummary = recordingContextSummaryText {
+                Text(contextSummary)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            if !vm.draftAttachments.isEmpty {
-                ComposerMetaPill(
-                    text: attachmentSummaryText,
-                    systemImage: "paperclip.circle.fill",
-                    tint: .accentColor
-                )
+                    .lineLimit(1)
             }
         }
     }
 
     private var recordingComposerActions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Button {
-                handleRecordingDiscardTap()
+                handleRecordingStopTap()
             } label: {
                 ComposerActionButtonLabel(
-                    systemImage: "xmark",
-                    tint: .secondary,
-                    fill: Color(.secondarySystemBackground),
-                    size: 40,
-                    iconSize: 13,
-                    weight: .semibold
+                    systemImage: "stop.fill",
+                    tint: .white,
+                    fill: .red,
+                    size: 42,
+                    iconSize: 12,
+                    weight: .bold
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Discard recording")
+            .accessibilityLabel(vm.isVoiceModeActiveForCurrentThread ? "Stop voice mode" : "Discard recording")
 
             Button {
                 handleRecordingButtonTap()
@@ -1363,14 +1312,14 @@ struct ContentView: View {
                 ComposerActionButtonLabel(
                     systemImage: "paperplane.fill",
                     tint: .white,
-                    fill: .blue,
-                    size: 44,
-                    iconSize: 14,
-                    weight: .semibold
+                    fill: .accentColor,
+                    size: 42,
+                    iconSize: 12,
+                    weight: .bold
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Stop recording and send")
+            .accessibilityLabel("Send voice prompt")
         }
     }
 
@@ -1391,8 +1340,40 @@ struct ContentView: View {
         return vm.statusText
     }
 
+    private var hasVisibleLiveActivityMessage: Bool {
+        vm.conversation.contains { $0.presentation == .liveActivity }
+    }
+
+    private func isProgressChromeStatus(_ rawText: String) -> Bool {
+        let lower = rawText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard !lower.isEmpty else { return false }
+
+        if lower.contains("input")
+            || lower.contains("blocked")
+            || lower.contains("fail")
+            || lower.contains("cancel")
+            || lower.contains("timed out")
+            || lower.contains("reconnect")
+            || lower.contains("setup")
+            || lower.contains("attention") {
+            return false
+        }
+
+        return lower.contains("think")
+            || lower.contains("plan")
+            || lower.contains("execut")
+            || lower.contains("summar")
+            || lower.contains("start")
+            || lower.contains("prepar")
+            || lower.contains("running")
+    }
+
     private var shouldShowComposerStatusSummary: Bool {
         guard !vm.isRecording else { return false }
+        guard runRetryNotice == nil else { return false }
 
         let lower = composerStatusSummaryText
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1401,6 +1382,10 @@ struct ContentView: View {
         guard !lower.isEmpty, lower != "idle" else { return false }
 
         if lower == "ready for prompts" || lower == "completed" {
+            return false
+        }
+
+        if hasVisibleLiveActivityMessage && isProgressChromeStatus(composerStatusSummaryText) {
             return false
         }
 
@@ -1426,6 +1411,46 @@ struct ContentView: View {
 
     private var shouldShowComposerSummaryRow: Bool {
         vm.isVoiceModeActiveForCurrentThread || shouldShowComposerStatusSummary
+    }
+
+    private var runRetryNotice: (title: String, message: String)? {
+        guard !vm.isLoading,
+              !vm.needsConnectionRepair,
+              !vm.runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              vm.pendingHumanUnblockRequest == nil,
+              vm.canRetryLastPrompt else {
+            return nil
+        }
+
+        let lower = vm.statusText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty else { return nil }
+
+        if lower.contains("upload failed") || lower.contains("failed to start recording") {
+            return nil
+        }
+
+        if lower.contains("timed out") {
+            return (
+                "Run timed out",
+                "Start the last prompt again from this thread. The previous execution timeline stays available in Run Logs."
+            )
+        }
+
+        if lower.contains("cancel") {
+            return (
+                "Run stopped early",
+                "Retry the last prompt from this thread, or inspect Run Logs before starting again."
+            )
+        }
+
+        if lower.contains("fail") || lower.contains("rejected") {
+            return (
+                "Run failed",
+                "Retry the last prompt from this thread, or inspect Run Logs before starting again."
+            )
+        }
+
+        return nil
     }
 
     private var composerStatusSummaryText: String {
@@ -1479,17 +1504,7 @@ struct ContentView: View {
 
     private var recordingTypedNoteSummaryText: String? {
         guard hasRecordingDraftText else { return nil }
-        return vm.draftAttachments.isEmpty ? "Typed note included" : "Typed note + files included"
-    }
-
-    private var recordingDraftPreviewText: String? {
-        let preview = vm.promptText
-            .split(whereSeparator: { $0.isWhitespace })
-            .map(String.init)
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !preview.isEmpty else { return nil }
-        return preview
+        return vm.draftAttachments.isEmpty ? "Typed note" : "Typed note + files"
     }
 
     private var composerHeight: CGFloat {
@@ -1512,9 +1527,9 @@ struct ContentView: View {
             return "Voice recording in progress"
         }
         if vm.draftAttachments.isEmpty {
-            return composerFocused ? "Ask MOBaiLE about this repo or type /" : "Ask MOBaiLE about this repo"
+            return composerFocused ? "Type a prompt or /" : "Type a prompt"
         }
-        return composerFocused ? "Add context for these files" : "Add context"
+        return composerFocused ? "Add a note or /" : "Add a note"
     }
 
     private var headerStatusText: String {
@@ -1538,6 +1553,10 @@ struct ContentView: View {
         return trimmed.isEmpty ? "MOBaiLE" : trimmed
     }
 
+    private var navigationBarTitle: String {
+        vm.conversation.isEmpty ? activeNavigationTitle : "MOBaiLE"
+    }
+
     private var activeThread: ChatThread? {
         guard let activeThreadID = vm.activeThreadID else { return nil }
         return vm.threads.first(where: { $0.id == activeThreadID })
@@ -1545,11 +1564,6 @@ struct ContentView: View {
 
     private var activeThreadPresentationStatus: ChatThreadPresentationStatus {
         activeThread?.presentationStatus ?? .ready
-    }
-
-    private var threadCountLabel: String {
-        let count = vm.sortedThreads.count
-        return "\(count) thread\(count == 1 ? "" : "s")"
     }
 
     private var connectionHostLabel: String {
@@ -1617,6 +1631,17 @@ struct ContentView: View {
         compactPathLabel(runtimeDirectoryLabel)
     }
 
+    private var runtimeDescriptorSummary: String {
+        var components = [runtimeExecutorLabel, vm.currentBackendModelLabel]
+        if let effort = runtimeEffortLabel {
+            components.append(effort)
+        }
+        return components
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "Backend default" }
+            .joined(separator: " · ")
+    }
+
     private var runtimeStatusText: String {
         let lower = bottomRunStatusText.lowercased()
 
@@ -1629,8 +1654,11 @@ struct ContentView: View {
         if lower.contains("input") || lower.contains("blocked") {
             return "Needs input"
         }
-        if lower.contains("fail") || lower.contains("timed out") {
-            return "Needs attention"
+        if lower.contains("timed out") {
+            return "Timed out"
+        }
+        if lower.contains("fail") {
+            return "Failed"
         }
         if lower.contains("cancel") {
             return "Cancelled"
@@ -1662,7 +1690,7 @@ struct ContentView: View {
         if lower.contains("input") {
             return "hand.raised.fill"
         }
-        if lower.contains("cancel") || lower.contains("attention") {
+        if lower.contains("cancel") || lower.contains("attention") || lower.contains("fail") || lower.contains("timed out") {
             return "exclamationmark.circle.fill"
         }
         if lower.contains("ready") {
@@ -1683,7 +1711,7 @@ struct ContentView: View {
         if lower.contains("input") || lower.contains("setup") || lower.contains("reconnect") {
             return .orange
         }
-        if lower.contains("cancel") || lower.contains("attention") {
+        if lower.contains("cancel") || lower.contains("attention") || lower.contains("fail") || lower.contains("timed out") {
             return .red
         }
         if lower.contains("ready") {
@@ -1700,7 +1728,10 @@ struct ContentView: View {
         if vm.isRecording {
             return false
         }
-        if vm.conversation.isEmpty && runtimeStatusText == "Ready" {
+        if runtimeStatusText == "Ready" {
+            return false
+        }
+        if hasVisibleLiveActivityMessage && isProgressChromeStatus(runtimeStatusText) {
             return false
         }
         return true
@@ -1737,129 +1768,118 @@ struct ContentView: View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: vm.needsConnectionRepair ? "qrcode.viewfinder" : "slider.horizontal.3")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(vm.needsConnectionRepair ? .orange : .accentColor)
                 .frame(width: 34, height: 34)
-                .background(Color.orange.opacity(0.12))
+                .background((vm.needsConnectionRepair ? Color.orange : Color.accentColor).opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(vm.needsConnectionRepair ? "Repair the connection to keep chatting" : "Finish setup to start a run")
+                Text(vm.needsConnectionRepair ? "Reconnect this phone" : "Finish setup to start a run")
                     .font(.subheadline.weight(.semibold))
                 Text(
                     vm.needsConnectionRepair
-                        ? "Open the latest pairing QR on your computer, then scan it again here. If you need a fresh QR first, run `mobaile pair` on the computer."
-                        : "Run one install command on your computer, keep the default answers, then scan the pairing QR. Manual connection fields are only the fallback."
+                        ? "Open the latest pairing QR on your computer, then scan it again here."
+                        : "Run one install command on your computer, then scan the pairing QR here."
                 )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
 
-            runtimeWorkspaceButton
+            Group {
+                if vm.needsConnectionRepair {
+                    Button("Scan QR Again") {
+                        showPairingScanner = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Setup Guide") {
+                        showSetupGuide = true
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
         }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(vm.needsConnectionRepair ? Color.orange.opacity(0.12) : Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    vm.needsConnectionRepair
+                        ? Color.orange.opacity(0.20)
+                        : Color(.separator).opacity(0.12),
+                    lineWidth: 1
+                )
+        )
     }
 
     private var compactRuntimeInfoBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    runtimeThreadButton
+        ViewThatFits(in: .horizontal) {
+            compactRuntimeInfoStrip(showDescriptor: true)
+            compactRuntimeInfoStrip(showDescriptor: false)
+        }
+    }
 
-                    Spacer(minLength: 0)
-
-                    if shouldShowRuntimeStatusBadge {
-                        RuntimeStatusBadge(
-                            text: runtimeStatusText,
-                            systemImage: runtimeStatusIcon,
-                            tint: runtimeStatusTint
-                        )
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    runtimeThreadButton
-
-                    if shouldShowRuntimeStatusBadge {
-                        RuntimeStatusBadge(
-                            text: runtimeStatusText,
-                            systemImage: runtimeStatusIcon,
-                            tint: runtimeStatusTint
-                        )
-                    }
-                }
+    private func compactRuntimeInfoStrip(showDescriptor: Bool) -> some View {
+        HStack(spacing: 8) {
+            runtimeThreadButton
+            runtimeWorkspaceButton
+            if showDescriptor {
+                runtimeDescriptorBadge
             }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    runtimeWorkspaceButton
-                    RuntimeStatusBadge(
-                        text: runtimeExecutorLabel,
-                        systemImage: "bolt.horizontal.circle.fill",
-                        tint: .secondary
-                    )
-                    if vm.isVoiceModeActiveForCurrentThread {
-                        RuntimeStatusBadge(
-                            text: vm.voiceModeStatusText,
-                            systemImage: "waveform.circle.fill",
-                            tint: .blue
-                        )
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    runtimeWorkspaceButton
-                    HStack(spacing: 8) {
-                        RuntimeStatusBadge(
-                            text: runtimeExecutorLabel,
-                            systemImage: "bolt.horizontal.circle.fill",
-                            tint: .secondary
-                        )
-                        if vm.isVoiceModeActiveForCurrentThread {
-                            RuntimeStatusBadge(
-                                text: vm.voiceModeStatusText,
-                                systemImage: "waveform.circle.fill",
-                                tint: .blue
-                            )
-                        }
-                    }
-                }
+            if shouldShowRuntimeStatusBadge {
+                RuntimeStatusBadge(
+                    text: runtimeStatusText,
+                    systemImage: runtimeStatusIcon,
+                    tint: runtimeStatusTint
+                )
+            }
+            if vm.isVoiceModeActiveForCurrentThread {
+                RuntimeStatusBadge(
+                    text: vm.voiceModeStatusText,
+                    systemImage: "waveform.circle.fill",
+                    tint: .blue
+                )
             }
         }
+        .padding(.vertical, 2)
+    }
+
+    private var runtimeDescriptorBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.caption.weight(.semibold))
+            Text(runtimeDescriptorSummary)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(Capsule())
     }
 
     private var runtimeThreadButton: some View {
         Button {
             showThreads = true
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "text.bubble.fill")
+            HStack(spacing: 8) {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.accentColor)
-                    .frame(width: 30, height: 30)
-                    .background(Color.accentColor.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(activeNavigationTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(threadCountLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if activeThreadPresentationStatus == .needsInput {
-                    Text(activeThreadPresentationStatus.label)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(Color.orange.opacity(0.12))
-                        .clipShape(Capsule())
-                }
+                Text(activeNavigationTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2.weight(.semibold))
@@ -1868,10 +1888,10 @@ struct ContentView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Switch threads")
+        .accessibilityLabel("Open chats")
     }
 
     private var runtimeWorkspaceButton: some View {
@@ -1891,9 +1911,9 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "folder.fill")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(.secondary)
                         Text(runtimeDirectorySummary)
-                            .font(.footnote.monospaced())
+                            .font(.caption.monospaced())
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -1901,8 +1921,8 @@ struct ContentView: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                     .background(Color(.secondarySystemBackground))
                     .clipShape(Capsule())
                 }
@@ -2252,17 +2272,31 @@ struct ContentView: View {
     }
 
     private var recordingSubtitle: String {
-        if vm.isVoiceModeActiveForCurrentThread && vm.usesAutoSendForCurrentTurn {
-            return "Send now, or pause for silence. The mic reopens after the reply."
-        }
         if vm.isVoiceModeActiveForCurrentThread {
-            return "Send now. The mic reopens after the reply."
+            return "Pause to send automatically. Voice mode resumes after the reply."
         }
         if vm.usesAutoSendForCurrentTurn {
-            return "Send now, or wait for silence to submit."
+            return "Pause to send automatically."
         }
-        return "Tap Send when you're ready."
+        return "Tap send when ready."
     }
+
+    private var recordingContextSummaryText: String? {
+        var parts: [String] = []
+
+        if vm.isVoiceModeActiveForCurrentThread {
+            parts.append("Voice mode")
+        }
+        if let recordingTypedNoteSummaryText {
+            parts.append(recordingTypedNoteSummaryText)
+        }
+        if !vm.draftAttachments.isEmpty {
+            parts.append(attachmentSummaryText)
+        }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
+
 
     private func recordingDurationLabel(since startedAt: Date, now: Date) -> String {
         let elapsed = max(0, Int(now.timeIntervalSince(startedAt)))
@@ -2296,6 +2330,17 @@ struct ContentView: View {
         Task { await vm.discardRecording() }
     }
 
+    private func handleRecordingStopTap() {
+        if vm.isVoiceModeActiveForCurrentThread {
+            Task {
+                await vm.discardRecording()
+                vm.endVoiceMode()
+            }
+            return
+        }
+        handleRecordingDiscardTap()
+    }
+
     private func handleVoiceModeButtonTap() {
         if vm.needsConnectionRepair && !vm.isVoiceModeActiveForCurrentThread {
             showPairingScanner = true
@@ -2317,6 +2362,10 @@ struct ContentView: View {
             vm.markMicrophonePrimerSeen()
         }
         Task { await vm.startVoiceModeIfNeeded() }
+    }
+
+    private var resolvedAppearancePreference: AppAppearancePreference {
+        AppAppearancePreference.resolve(from: appearancePreferenceRaw)
     }
 
     private func handleComposerSend() {
@@ -2425,639 +2474,6 @@ struct ContentView: View {
         }
     }
 
-}
-
-private struct ComposerSlashCommandMenu: View {
-    let state: ComposerSlashCommandState
-    let onSelect: (ComposerSlashCommand) -> Void
-
-    private var visibleCommands: [ComposerSlashCommand] {
-        Array(state.suggestions.prefix(6))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Label("Slash Commands", systemImage: "chevron.left.forwardslash.chevron.right")
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
-                Text(state.exactMatch == nil ? "Tap to insert" : "Tap to run")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if state.hasUnknownCommand {
-                Text("No slash command matches /\(state.query).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(visibleCommands) { command in
-                    Button {
-                        onSelect(command)
-                    } label: {
-                        ComposerSlashCommandRow(
-                            command: command,
-                            arguments: state.arguments,
-                            isReadyToRun: state.exactMatch == command
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
-        )
-    }
-}
-
-private struct ComposerMetaPill: View {
-    let text: String
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        Label(text, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(tint.opacity(0.12))
-            .clipShape(Capsule())
-    }
-}
-
-private struct ComposerActionButtonLabel: View {
-    let systemImage: String
-    let tint: Color
-    let fill: Color
-    let size: CGFloat
-    let iconSize: CGFloat
-    let weight: Font.Weight
-
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: iconSize, weight: weight))
-            .frame(width: size, height: size)
-            .foregroundStyle(tint)
-            .background(
-                Circle()
-                    .fill(fill)
-            )
-    }
-}
-
-private struct ComposerPrimaryActionConfiguration {
-    let systemImage: String
-    let tint: Color
-    let fill: Color
-    let size: CGFloat
-    let iconSize: CGFloat
-    let weight: Font.Weight
-    let accessibilityLabel: String
-    let isDisabled: Bool
-    let opacity: Double
-    let action: () -> Void
-}
-
-private struct ComposerTrayButtonLabel: View {
-    let systemImage: String
-    let tint: Color
-    let fill: Color
-
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(tint)
-            .frame(width: 36, height: 36)
-            .background(
-                Circle()
-                    .fill(fill)
-            )
-    }
-}
-
-private struct ThreadToolbarButtonLabel: View {
-    let threadCount: Int
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Image(systemName: "text.bubble")
-
-            if threadCount > 1 {
-                Text(threadCount > 9 ? "9+" : "\(threadCount)")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.accentColor)
-                    .clipShape(Capsule())
-                    .offset(x: 8, y: -6)
-            }
-        }
-    }
-}
-
-private struct RuntimeStatusBadge: View {
-    let text: String
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.caption.weight(.semibold))
-            Text(text)
-                .font(.caption.weight(.semibold))
-        }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(tint.opacity(0.12))
-        .clipShape(Capsule())
-    }
-}
-
-private struct SettingsRuntimeDetailItem: Identifiable {
-    let icon: String
-    let label: String
-    let value: String
-
-    var id: String { label }
-}
-
-private struct RuntimeContextChip: View {
-    let icon: String
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-private struct ComposerSlashCommandRow: View {
-    let command: ComposerSlashCommand
-    let arguments: String
-    let isReadyToRun: Bool
-
-    private var hintText: String {
-        if isReadyToRun {
-            if command.acceptsArguments && !arguments.isEmpty {
-                return "Run"
-            }
-            return "Use"
-        }
-        return "Insert"
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: command.symbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(command.usage)
-                        .font(.caption.monospaced().weight(.semibold))
-                        .foregroundStyle(.primary)
-                    if let group = command.group, !group.isEmpty {
-                        Text(group.uppercased())
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.10))
-                            .clipShape(Capsule())
-                    }
-                }
-                Text(command.description)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 0)
-
-            Text(hintText)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(isReadyToRun ? Color.accentColor : Color.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background((isReadyToRun ? Color.accentColor : Color.secondary).opacity(0.10))
-                .clipShape(Capsule())
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-private struct DraftAttachmentChip: View {
-    let attachment: DraftAttachment
-    let transferState: DraftAttachmentTransferState
-    let isBusy: Bool
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: iconName)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tintColor)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attachment.fileName)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                if showsDetailText {
-                    Text(detailText)
-                        .font(detailFont)
-                        .foregroundStyle(detailColor)
-                        .lineLimit(1)
-                }
-            }
-            if let progress = transferState.progressValue {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(tintColor)
-                    .frame(width: 44)
-            }
-            Button {
-                onRemove()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(attachment.fileName)")
-            .disabled(isBusy)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private var iconName: String {
-        switch attachment.kind {
-        case .image:
-            return "photo"
-        case .code:
-            return "chevron.left.forwardslash.chevron.right"
-        case .file:
-            return "doc"
-        }
-    }
-
-    private var tintColor: Color {
-        if case .failed = transferState {
-            return .red
-        }
-        if transferState.isUploading {
-            return .accentColor
-        }
-        switch attachment.kind {
-        case .image:
-            return .blue
-        case .code:
-            return .green
-        case .file:
-            return .secondary
-        }
-    }
-
-    private var detailText: String {
-        switch transferState {
-        case .idle:
-            return ""
-        case let .uploading(progress):
-            return "Uploading \(Int((min(1, max(0, progress)) * 100).rounded()))%"
-        case let .failed(message):
-            return message
-        }
-    }
-
-    private var showsDetailText: Bool {
-        switch transferState {
-        case .idle:
-            return false
-        case .uploading, .failed:
-            return true
-        }
-    }
-
-    private var detailFont: Font {
-        switch transferState {
-        case .idle:
-            return .caption2
-        case .uploading:
-            return .caption2.weight(.semibold)
-        case .failed:
-            return .caption2.weight(.medium)
-        }
-    }
-
-    private var detailColor: Color {
-        switch transferState {
-        case .idle:
-            return .secondary
-        case .uploading:
-            return tintColor
-        case .failed:
-            return .red
-        }
-    }
-
-    private var backgroundColor: Color {
-        switch transferState {
-        case .idle:
-            return Color(.secondarySystemBackground)
-        case .uploading:
-            return tintColor.opacity(0.12)
-        case .failed:
-            return Color.red.opacity(0.10)
-        }
-    }
-}
-
-private struct PairingConfirmationSheet: View {
-    let pending: VoiceAgentViewModel.PendingPairing
-    @Binding var trustHost: Bool
-    let onCancel: () -> Void
-    let onConfirm: () -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Server") {
-                    LabeledContent("Host", value: pending.serverHost.isEmpty ? pending.serverURL : pending.serverHost)
-                        .font(.footnote.monospaced())
-                    LabeledContent("URL", value: pending.serverURL)
-                        .font(.footnote.monospaced())
-                    LabeledContent("Security", value: pending.badgeText)
-                }
-
-                if let warning = pending.localNetworkWarning {
-                    Section("Network") {
-                        Label("Local network HTTP detected", systemImage: "wifi.exclamationmark")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.orange)
-                        Text(warning)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Session") {
-                    LabeledContent("Session ID", value: pending.sessionID ?? "default")
-                    LabeledContent(
-                        "Method",
-                        value: pending.pairCode != nil ? "One-time pair code" : "Legacy token (developer mode)"
-                    )
-                }
-
-                Section("Trust") {
-                    Toggle("Trust this server", isOn: $trustHost)
-                    Text("Trusted hosts auto-enable this toggle the next time you pair.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Confirm Pairing")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        onCancel()
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Pair") {
-                        onConfirm()
-                        dismiss()
-                    }
-                    .font(.subheadline.weight(.semibold))
-                }
-            }
-        }
-    }
-}
-
-private struct SetupGuideSheet: View {
-    let bootstrapInstallCommand: String
-    let checkoutInstallCommand: String
-    let quickStartURL: URL
-    let supportURL: URL
-    let onOpenScanner: () -> Void
-    let onManualSetup: () -> Void
-
-    @State private var copiedLabel: String?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Set it up", systemImage: "sparkles")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                        Text("Start on your computer. Pair once. Then the app is ready.")
-                            .font(.title3.weight(.semibold))
-                        Text("MOBaiLE does not run code on iPhone. It connects to a backend on your own Mac or Linux machine.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        SetupGuideStepSummaryRow(
-                            stepNumber: 1,
-                            title: "Run the installer on your computer",
-                            detail: "This is the easiest path. The installer asks three quick questions. For the normal setup, keep `Full Access`, `Anywhere with Tailscale`, and `Yes` for the background service."
-                        )
-                        SetupGuideCommandBlock(command: bootstrapInstallCommand)
-
-                        HStack(spacing: 10) {
-                            Button(copiedLabel == "bootstrap" ? "Copied" : "Copy Command") {
-                                UIPasteboard.general.string = bootstrapInstallCommand
-                                copiedLabel = "bootstrap"
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Spacer(minLength: 0)
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Already inside this repo?")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(checkoutInstallCommand)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        SetupGuideStepSummaryRow(
-                            stepNumber: 2,
-                            title: "Scan the pairing QR in MOBaiLE",
-                            detail: "After install, open `backend/pairing-qr.png` on the computer. In MOBaiLE, tap Scan Pairing QR and point the phone at the screen."
-                        )
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("What to do next")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text("1. Open `backend/pairing-qr.png` on the computer.")
-                            Text("2. Tap Scan Pairing QR in MOBaiLE.")
-                            Text("3. Point the phone at the screen and confirm the pairing.")
-                            Text("4. Later, run `mobaile status` on the computer. If your shell does not find it yet, run `~/.local/bin/mobaile status`.")
-                        }
-                        .font(.footnote)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                        Button {
-                            onOpenScanner()
-                        } label: {
-                            Label("Scan Pairing QR", systemImage: "qrcode.viewfinder")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Manual fallback", systemImage: "slider.horizontal.3")
-                            .font(.subheadline.weight(.semibold))
-                        Text("If QR pairing is not available, open Settings and paste the `server_url` from `backend/pairing.json` plus `VOICE_AGENT_API_TOKEN` from `backend/.env`.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Button("Enter URL and Token Manually") {
-                            onManualSetup()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color(.tertiarySystemBackground))
-                    )
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Link("Open Set It Up", destination: quickStartURL)
-                        Link("Open Support", destination: supportURL)
-                    }
-                    .font(.footnote.weight(.semibold))
-                }
-                .padding()
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Set It Up")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct SetupGuideStepSummaryRow: View {
-    let stepNumber: Int
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.12))
-                    .frame(width: 28, height: 28)
-                Text("\(stepNumber)")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color.accentColor)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(detail)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-private struct SetupGuideCommandBlock: View {
-    let command: String
-
-    var body: some View {
-        Text(command)
-            .font(.footnote.monospaced())
-            .foregroundStyle(.primary)
-            .textSelection(.enabled)
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(.separator).opacity(0.14), lineWidth: 1)
-        )
-    }
 }
 
 

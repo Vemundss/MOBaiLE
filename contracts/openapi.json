@@ -508,6 +508,17 @@
             ],
             "title": "Created At"
           },
+          "display_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Message"
+          },
           "event_id": {
             "anyOf": [
               {
@@ -518,6 +529,22 @@
               }
             ],
             "title": "Event Id"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "info",
+                  "warning",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
           },
           "message": {
             "title": "Message",
@@ -534,6 +561,28 @@
             ],
             "title": "Seq"
           },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
           "type": {
             "enum": [
               "chat.message",
@@ -543,6 +592,9 @@
               "action.stderr",
               "action.completed",
               "assistant.message",
+              "activity.started",
+              "activity.updated",
+              "activity.completed",
               "run.completed",
               "run.failed",
               "run.blocked",
@@ -695,6 +747,13 @@
       },
       "RunDiagnostics": {
         "properties": {
+          "activity_stage_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Activity Stage Counts",
+            "type": "object"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -731,6 +790,17 @@
               }
             ],
             "title": "Last Error"
+          },
+          "latest_activity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Activity"
           },
           "run_id": {
             "title": "Run Id",

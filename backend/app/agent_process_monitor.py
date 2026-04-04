@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+from queue import Empty
+from queue import Queue
+import subprocess
+import threading
+import time
+from typing import Callable
+
+from app.agent_run_finalizer import AgentRunOutcome
+from app.agent_stream_handler import AgentStreamHandler
+from app.codex_text import CodexAssistantExtractor
+from app.models.schemas import AgentExecutorName
+from app.run_state import RunState
+
+
+class AgentProcessMonitor:
+    def __init__(
+        self,
+        *,
+        run_state: RunState,
+        stream_handler: AgentStreamHandler,
+        timeout_resolver: Callable[[AgentExecutorName], int],
+        leak_marker_provider: Callable[[], list[str]],
+    ) -> None:
+        self.run_state = run_state
+        self.stream_handler = stream_handler
+        self.timeout_resolver = timeout_resolver
+        self.leak_marker_provider = leak_marker_provider
+
+    def monitor(
+        self,
+        proc: subprocess.Popen[str],
+        *,
+        run_id: str,
+        prompt: str,
+        session_id: str,
+        executor: AgentExecutorName,
+        client_thread_id: str | None,
+        resume_session_id: str | None,
+    ) -> AgentRunOutcome:
+        assert proc.stdout is not None
+        line_queue: Queue[str | None] = Queue()
+
+        def drain_stdout() -> None:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line_queue.put(line.rstrip("\r\n"))
+            line_queue.put(None)
+
+        reader = threading.Thread(target=drain_stdout, daemon=True)
+        reader.start()
+
+        linked_session_id = resume_session_id
+        cancelled = False
+        timed_out = False
+        blocked = False
+        timeout_sec = self.timeout_resolver(executor)
+        deadline = time.monotonic() + timeout_sec if timeout_sec > 0 else None
+        chat_extractor = self._chat_extractor(prompt=prompt, executor=executor)
+
+        while True:
+            try:
+                line = line_queue.get(timeout=0.2)
+            except Empty:
+                line = None
+
+            if line is not None:
+                blocked, linked_session_id = self.stream_handler.consume_message(
+                    line,
+                    run_id=run_id,
+                    session_id=session_id,
+                    executor=executor,
+                    client_thread_id=client_thread_id,
+                    linked_session_id=linked_session_id,
+                    chat_extractor=chat_extractor,
+                )
+                if blocked:
+                    break
+            else:
+                if proc.poll() is not None:
+                    break
+
+            if self.run_state.is_cancelled(run_id):
+                cancelled = True
+                break
+            run = self.run_state.get_run(run_id)
+            if run is not None and run.status == "blocked":
+                blocked = True
+                break
+            if deadline is not None and time.monotonic() > deadline:
+                timed_out = True
+                break
+
+        if self.stream_handler.flush_codex_messages(run_id, chat_extractor=chat_extractor):
+            blocked = True
+
+        if cancelled or timed_out or blocked:
+            self.stop_process(proc)
+        exit_code = proc.wait()
+        if not cancelled and self.run_state.is_cancelled(run_id):
+            cancelled = True
+        return AgentRunOutcome(
+            exit_code=exit_code,
+            cancelled=cancelled,
+            timed_out=timed_out,
+            blocked=blocked,
+        )
+
+    def _chat_extractor(self, *, prompt: str, executor: AgentExecutorName) -> CodexAssistantExtractor | None:
+        if executor != "codex":
+            return None
+        return CodexAssistantExtractor(prompt, self.leak_marker_provider())
+
+    @staticmethod
+    def stop_process(proc: subprocess.Popen[str]) -> None:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()

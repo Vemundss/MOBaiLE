@@ -108,6 +108,34 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testConnectionRepairStatePersistsAcrossViewModelReload() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        vm.serverURL = "http://vemunds-macbook-air.tail6a5903.ts.net:8000"
+        vm.apiToken = "stale-token"
+
+        _ = vm.registerConnectionRepairIfNeeded(
+            from: APIError.httpError(401, #"{"detail":"missing or invalid bearer token"}"#)
+        )
+
+        let reloaded = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+
+        XCTAssertTrue(reloaded.needsConnectionRepair)
+        XCTAssertEqual(reloaded.connectionRepairTitle, "Reconnect this phone")
+        XCTAssertTrue(reloaded.connectionRepairMessage.contains("vemunds-macbook-air.tail6a5903.ts.net"))
+    }
+
+    @MainActor
     func testApplyPairedClientCredentialsStoresRefreshTokenAndClearsRepairState() {
         let vm = VoiceAgentViewModel()
         vm.serverURL = "http://127.0.0.1:8000"
@@ -189,6 +217,18 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.events.first?.type, "action.started")
         XCTAssertEqual(decoded.pendingHumanUnblock?.instructions, "Complete the CAPTCHA, then reply from the phone.")
         XCTAssertEqual(decoded.pendingHumanUnblock?.suggestedReply, "I completed the unblock step.")
+    }
+
+    func testExecutionEventDecodingSupportsTypedActivityFields() throws {
+        let json = #"{"type":"activity.updated","message":"Running commands.","stage":"executing","title":"Executing","display_message":"Running commands.","level":"info"}"#
+
+        let decoded = try JSONDecoder().decode(ExecutionEvent.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.type, "activity.updated")
+        XCTAssertEqual(decoded.stage, "executing")
+        XCTAssertEqual(decoded.title, "Executing")
+        XCTAssertEqual(decoded.displayMessage, "Running commands.")
+        XCTAssertEqual(decoded.level, "info")
     }
 
     func testChatEnvelopeDecodingWithArtifacts() throws {
@@ -288,6 +328,25 @@ final class VoiceAgentModelTests: XCTestCase {
         let decoded = try JSONDecoder().decode(ConversationMessage.self, from: data)
         XCTAssertEqual(decoded.text, "hello")
         XCTAssertTrue(decoded.attachments.isEmpty)
+        XCTAssertEqual(decoded.presentation, .standard)
+        XCTAssertNil(decoded.sourceRunID)
+    }
+
+    func testConversationMessageDecodingSupportsLiveActivityPresentation() throws {
+        let json = """
+        {
+          "id":"2E2B216F-5A6F-4B2D-8FCA-0C109D5C4AC8",
+          "role":"assistant",
+          "text":"Checking the workspace…",
+          "presentation":"liveActivity",
+          "source_run_id":"run-123"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(ConversationMessage.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.presentation, .liveActivity)
+        XCTAssertEqual(decoded.sourceRunID, "run-123")
     }
 
     func testChatThreadDecodingDefaultsDraftStateToEmpty() throws {
@@ -367,6 +426,59 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(thread.presentationStatus, .draft)
     }
 
+    func testChatThreadPresentationStatusTreatsTimedOutRunAsFailed() {
+        let thread = ChatThread(
+            id: UUID(),
+            title: "Timed Out",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "run-123",
+            summaryText: "Run timed out after 30s",
+            transcriptText: "",
+            statusText: "Timed out",
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex"
+        )
+
+        XCTAssertEqual(thread.presentationStatus, .failed)
+    }
+
+    func testRunDiagnosticsDerivedCapturesActivityAndErrorSignals() {
+        let diagnostics = RunDiagnostics.derived(
+            runId: "run-123",
+            status: "Run status: failed",
+            summary: "Calendar query failed before the summary was ready.",
+            events: [
+                ExecutionEvent(
+                    seq: 0,
+                    type: "activity.started",
+                    message: "Reviewing the request.",
+                    stage: "planning",
+                    title: "Planning",
+                    displayMessage: "Reviewing the request.",
+                    level: "info"
+                ),
+                ExecutionEvent(
+                    seq: 1,
+                    type: "activity.updated",
+                    message: "Calendar query failed.",
+                    stage: "executing",
+                    title: "Executing",
+                    displayMessage: "Calendar query failed.",
+                    level: "error"
+                ),
+            ]
+        )
+
+        XCTAssertEqual(diagnostics.runId, "run-123")
+        XCTAssertEqual(diagnostics.status, "failed")
+        XCTAssertEqual(diagnostics.eventCount, 2)
+        XCTAssertEqual(diagnostics.activityStageCounts, ["planning": 1, "executing": 1])
+        XCTAssertEqual(diagnostics.latestActivity, "Calendar query failed.")
+        XCTAssertFalse(diagnostics.hasStderr)
+        XCTAssertEqual(diagnostics.lastError, "Calendar query failed.")
+    }
+
     func testSessionContextDecodingIncludesLatestRunState() throws {
         let json = """
         {
@@ -421,6 +533,207 @@ final class VoiceAgentModelTests: XCTestCase {
         let loaded = store.loadThreads()
         XCTAssertEqual(loaded.count, 1)
         XCTAssertEqual(loaded.first?.pendingHumanUnblock?.instructions, "Complete the CAPTCHA, then reply from the phone.")
+    }
+
+    func testChatThreadStorePersistsLiveActivityMessageMetadata() {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let dbURL = baseURL.appendingPathComponent("threads.sqlite3")
+        let store = ChatThreadStore(dbURL: dbURL)
+        let threadID = UUID()
+
+        store.upsertThread(
+            ChatThread(
+                id: threadID,
+                title: "Live Activity",
+                updatedAt: Date(),
+                conversation: [],
+                runID: "run-123",
+                summaryText: "",
+                transcriptText: "",
+                statusText: "Running...",
+                resolvedWorkingDirectory: "",
+                activeRunExecutor: "codex"
+            )
+        )
+        store.upsertMessage(
+            threadID: threadID,
+            message: ConversationMessage(
+                role: "assistant",
+                text: "Checking the repo…",
+                presentation: .liveActivity,
+                sourceRunID: "run-123"
+            ),
+            position: 0
+        )
+
+        let loaded = store.loadMessages(threadID: threadID)
+
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.presentation, .liveActivity)
+        XCTAssertEqual(loaded.first?.sourceRunID, "run-123")
+    }
+
+    @MainActor
+    func testGuidedProgressUpdatesCoalesceIntoSingleLiveActivityMessage() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        vm._test_bindObservedRun(runID: "run-live", threadID: threadID)
+
+        vm._test_ingestRunEvents(
+            [
+                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Checking the workspace…","sections":[],"agenda_items":[],"artifacts":[]}"#),
+                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Running the test suite…","sections":[],"agenda_items":[],"artifacts":[]}"#)
+            ],
+            runID: "run-live",
+            threadID: threadID
+        )
+
+        XCTAssertEqual(vm.conversation.count, 1)
+        XCTAssertEqual(vm.conversation.first?.presentation, .liveActivity)
+        XCTAssertEqual(vm.conversation.first?.text, "Running the test suite…")
+    }
+
+    @MainActor
+    func testFinalAssistantMessageCompressesPriorLiveActivity() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        vm._test_bindObservedRun(runID: "run-live", threadID: threadID)
+
+        vm._test_ingestRunEvents(
+            [
+                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Checking the workspace…","sections":[],"agenda_items":[],"artifacts":[]}"#),
+                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Done","sections":[{"title":"Result","body":"Implemented the fix and updated the tests."}],"agenda_items":[],"artifacts":[]}"#)
+            ],
+            runID: "run-live",
+            threadID: threadID
+        )
+
+        XCTAssertEqual(vm.conversation.count, 1)
+        XCTAssertEqual(vm.conversation.first?.presentation, .standard)
+        XCTAssertTrue(vm.conversation.first?.text.contains("Implemented the fix") == true)
+    }
+
+    @MainActor
+    func testReloadRestoresRunningThreadFromPersistedLiveActivity() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        let runID = "run-restore-\(UUID().uuidString)"
+
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Running...",
+            activeRunExecutor: "codex"
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: threadID)
+        vm._test_ingestRunEvents(
+            [
+                ExecutionEvent(
+                    type: "activity.updated",
+                    message: "Running backend checks.",
+                    stage: "executing",
+                    title: "Executing",
+                    displayMessage: "Running backend checks.",
+                    level: "info",
+                    eventID: "activity-1",
+                    createdAt: nil
+                )
+            ],
+            runID: runID,
+            threadID: threadID
+        )
+        vm._test_persistActiveThreadSnapshot()
+
+        let reloaded = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+
+        XCTAssertEqual(reloaded.activeThreadID, threadID)
+        XCTAssertEqual(reloaded.runID, runID)
+        XCTAssertTrue(reloaded.isLoading)
+        XCTAssertTrue(
+            reloaded.conversation.contains {
+                $0.presentation == .liveActivity
+                    && $0.sourceRunID == runID
+                    && $0.text.contains("Running backend checks.")
+            }
+        )
+        XCTAssertTrue(reloaded._test_hasObservedRunContext(runID: runID, threadID: threadID))
+    }
+
+    @MainActor
+    func testTypedActivityEventUpdatesLiveActivityCardWithoutAssistantBubble() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: "run-typed",
+            statusText: "Running...",
+            activeRunExecutor: "codex"
+        )
+        vm._test_bindObservedRun(runID: "run-typed", threadID: threadID)
+
+        vm._test_ingestRunEvents(
+            [
+                ExecutionEvent(
+                    type: "activity.updated",
+                    message: "Running commands.",
+                    stage: "executing",
+                    title: "Executing",
+                    displayMessage: "Running commands.",
+                    level: "info"
+                )
+            ],
+            runID: "run-typed",
+            threadID: threadID
+        )
+
+        let liveActivityMessages = vm.conversation.filter { $0.presentation == .liveActivity && $0.sourceRunID == "run-typed" }
+        let standardAssistantMessages = vm.conversation.filter {
+            $0.role == "assistant" && $0.presentation == .standard && $0.sourceRunID == "run-typed"
+        }
+
+        XCTAssertEqual(liveActivityMessages.count, 1)
+        XCTAssertEqual(liveActivityMessages.first?.text, "Running commands.")
+        XCTAssertTrue(standardAssistantMessages.isEmpty)
+        XCTAssertEqual(vm.events.count, 1)
+    }
+
+    @MainActor
+    func testActionStartedEventStillUsesLegacyLiveActivityFallback() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        vm._test_bindObservedRun(runID: "run-fallback", threadID: threadID)
+
+        vm._test_ingestRunEvents(
+            [
+                ExecutionEvent(
+                    type: "action.started",
+                    actionIndex: 0,
+                    message: "starting run_command"
+                )
+            ],
+            runID: "run-fallback",
+            threadID: threadID
+        )
+
+        XCTAssertEqual(vm.conversation.count, 1)
+        XCTAssertEqual(vm.conversation.first?.presentation, .liveActivity)
+        XCTAssertEqual(vm.conversation.first?.text, "Running commands…")
     }
 
     func testRuntimeConfigDecodingSupportsExecutorDiscovery() throws {
@@ -487,6 +800,119 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.claudeModelOptions ?? [], ["claude-sonnet-4-5"])
         XCTAssertEqual(decoded.serverURL, "https://relay.example.com")
         XCTAssertEqual(decoded.serverURLs ?? [], ["https://relay.example.com", "http://100.111.99.51:8000"])
+    }
+
+    func testRuntimeConfigurationCatalogBuildsLegacyFallbackDescriptors() {
+        let config = RuntimeConfig(
+            securityMode: "workspace-write",
+            defaultExecutor: "claude",
+            availableExecutors: ["codex", "claude"],
+            executors: nil,
+            transcribeProvider: nil,
+            transcribeReady: nil,
+            codexModel: "gpt-5.4",
+            codexModelOptions: nil,
+            codexReasoningEffort: "high",
+            codexReasoningEffortOptions: nil,
+            claudeModel: "claude-sonnet-4-5",
+            claudeModelOptions: nil,
+            workdirRoot: nil,
+            allowAbsoluteFileReads: nil,
+            fileRoots: nil,
+            serverURL: nil,
+            serverURLs: nil
+        )
+        let descriptors = RuntimeConfigurationCatalog.normalizedRuntimeExecutors(
+            nil,
+            config: config,
+            defaultExecutor: "claude",
+            inputs: RuntimeLegacySettingInputs(
+                codexModel: "gpt-5.4",
+                codexModelOptions: [],
+                codexReasoningEffort: "high",
+                codexReasoningEffortOptions: [],
+                claudeModel: "claude-sonnet-4-5",
+                claudeModelOptions: []
+            ),
+            defaults: RuntimeCatalogDefaults(
+                codexReasoningEffortOptions: ["minimal", "low", "medium", "high", "xhigh"],
+                codexModelOptions: ["gpt-5.4", "gpt-5.4-mini"],
+                claudeModelOptions: ["claude-sonnet-4-5"]
+            )
+        )
+
+        XCTAssertEqual(descriptors.map(\.id), ["codex", "claude", "local"])
+        XCTAssertEqual(descriptors.first(where: { $0.id == "claude" })?.isDefault, true)
+        XCTAssertEqual(descriptors.first(where: { $0.id == "codex" })?.settings?.map(\.id) ?? [], ["model", "reasoning_effort"])
+        XCTAssertEqual(descriptors.first(where: { $0.id == "local" })?.internalOnly, true)
+    }
+
+    func testRuntimeConfigurationCatalogFiltersUnsupportedExecutorsAndKeepsDefaultVisible() {
+        let descriptors = RuntimeConfigurationCatalog.normalizedRuntimeExecutors(
+            [
+                RuntimeExecutorDescriptor(
+                    id: "codex",
+                    title: "Codex",
+                    kind: "agent",
+                    available: true,
+                    isDefault: false,
+                    internalOnly: false,
+                    model: "gpt-5.4",
+                    settings: []
+                ),
+                RuntimeExecutorDescriptor(
+                    id: "remote-agent",
+                    title: "Remote",
+                    kind: "agent",
+                    available: true,
+                    isDefault: false,
+                    internalOnly: false,
+                    model: "ignored",
+                    settings: []
+                ),
+            ],
+            config: RuntimeConfig(
+                securityMode: "workspace-write",
+                defaultExecutor: "codex",
+                availableExecutors: ["codex", "remote-agent"],
+                executors: nil,
+                transcribeProvider: nil,
+                transcribeReady: nil,
+                codexModel: nil,
+                codexModelOptions: nil,
+                codexReasoningEffort: nil,
+                codexReasoningEffortOptions: nil,
+                claudeModel: nil,
+                claudeModelOptions: nil,
+                workdirRoot: nil,
+                allowAbsoluteFileReads: nil,
+                fileRoots: nil,
+                serverURL: nil,
+                serverURLs: nil
+            ),
+            defaultExecutor: "codex",
+            inputs: RuntimeLegacySettingInputs(
+                codexModel: "",
+                codexModelOptions: [],
+                codexReasoningEffort: "",
+                codexReasoningEffortOptions: [],
+                claudeModel: "",
+                claudeModelOptions: []
+            ),
+            defaults: RuntimeCatalogDefaults(
+                codexReasoningEffortOptions: ["medium", "high"],
+                codexModelOptions: ["gpt-5.4"],
+                claudeModelOptions: ["claude-sonnet-4-5"]
+            )
+        )
+        let available = RuntimeConfigurationCatalog.normalizedAvailableExecutors(
+            ["codex", "remote-agent", "codex"],
+            descriptors: descriptors,
+            defaultExecutor: "claude"
+        )
+
+        XCTAssertEqual(descriptors.map(\.id), ["codex", "local"])
+        XCTAssertEqual(available, ["codex", "claude"])
     }
 
     @MainActor
@@ -817,6 +1243,31 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testVoiceModeUsesMoreEagerSilenceProfileThanManualAutoSend() throws {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let threadID = vm.activeThreadID else {
+            XCTFail("Expected an active thread")
+            return
+        }
+
+        vm.autoSendAfterSilenceEnabled = true
+        vm.autoSendAfterSilenceSeconds = "1.8"
+        let manualConfig = try XCTUnwrap(vm._test_activeSilenceConfig())
+
+        vm._test_setVoiceModeEnabled(true, threadID: threadID)
+        let voiceModeConfig = try XCTUnwrap(vm._test_activeSilenceConfig())
+
+        XCTAssertEqual(Double(manualConfig.thresholdDB), -42, accuracy: 0.001)
+        XCTAssertEqual(manualConfig.requiredSilenceDuration, 1.8, accuracy: 0.001)
+        XCTAssertEqual(manualConfig.minimumRecordDuration, 0.7, accuracy: 0.001)
+
+        XCTAssertEqual(Double(voiceModeConfig.thresholdDB), -39, accuracy: 0.001)
+        XCTAssertEqual(voiceModeConfig.requiredSilenceDuration, 1.0, accuracy: 0.001)
+        XCTAssertEqual(voiceModeConfig.minimumRecordDuration, 0.6, accuracy: 0.001)
+    }
+
+    @MainActor
     func testSwitchingThreadsDisablesVoiceModeLoop() {
         let vm = VoiceAgentViewModel()
         vm.createNewThread()
@@ -956,5 +1407,43 @@ final class VoiceAgentModelTests: XCTestCase {
         vm.switchToThread(secondThreadID)
         XCTAssertEqual(vm.conversation.last?.text, "Second thread response")
         XCTAssertEqual(vm.events.last?.message, "Second thread response")
+    }
+
+    func testAppAppearancePreferenceResolvesKnownValuesAndFallsBackToSystem() {
+        XCTAssertEqual(AppAppearancePreference.resolve(from: nil), .system)
+        XCTAssertEqual(AppAppearancePreference.resolve(from: ""), .system)
+        XCTAssertEqual(AppAppearancePreference.resolve(from: "dark"), .dark)
+        XCTAssertEqual(AppAppearancePreference.resolve(from: "LIGHT"), .light)
+        XCTAssertEqual(AppAppearancePreference.resolve(from: "unknown"), .system)
+    }
+
+    func testAppAppearancePreferenceMapsToExpectedColorScheme() {
+        XCTAssertNil(AppAppearancePreference.system.colorScheme)
+        XCTAssertEqual(AppAppearancePreference.light.colorScheme, .light)
+        XCTAssertEqual(AppAppearancePreference.dark.colorScheme, .dark)
+    }
+}
+
+private extension VoiceAgentModelTests {
+    func makeIsolatedPersistenceHarness() -> (
+        store: ChatThreadStore,
+        defaults: UserDefaults,
+        draftDirectory: URL,
+        cleanup: () -> Void
+    ) {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ChatThreadStore(dbURL: baseURL.appendingPathComponent("threads.sqlite3"))
+        let draftDirectory = baseURL.appendingPathComponent("draft-attachments", isDirectory: true)
+        let suiteName = "VoiceAgentModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let cleanup = {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        return (store, defaults, draftDirectory, cleanup)
     }
 }

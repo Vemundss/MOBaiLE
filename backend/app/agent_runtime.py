@@ -54,8 +54,16 @@ def build_agent_prompt(
             "- Your stdout is streamed to a phone UI.\n"
             "- Do not repeat this runtime context unless the user asks."
         )
+        phone_feedback_block = ""
     else:
         context = runtime_context if use_context else ""
+        phone_feedback_block = (
+            "Phone UX feedback guidance:\n"
+            "- Backend activity events are the source of truth for progress in the phone UI.\n"
+            "- If you add a short progress note, keep it aligned with the current stage: planning, executing, blocked, or summarizing.\n"
+            "- Keep that note concise and non-repetitive; let the final response carry the substance.\n"
+            "- Do not dump raw logs or long command output unless the user asks.\n\n"
+        )
     session_block = ""
     if profile_agents.strip() or profile_memory.strip():
         session_block = (
@@ -92,6 +100,7 @@ def build_agent_prompt(
     return (
         "You are running through MOBaiLE.\n\n"
         f"{runtime_block}"
+        f"{phone_feedback_block}"
         f"{session_block}"
         f"{autonomy_block}"
         f"{hygiene_block}"
