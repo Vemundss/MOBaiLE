@@ -70,6 +70,30 @@ private enum PairingHostRules {
         }
         return false
     }
+
+    static func connectivityPriority(for serverURL: String) -> Int {
+        guard let parsed = URL(string: serverURL),
+              let host = parsed.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return -1
+        }
+        let scheme = parsed.scheme?.lowercased() ?? ""
+        if scheme == "https" && !isLocalOrPrivateHost(host) {
+            return 4
+        }
+        if host.hasSuffix(".ts.net") {
+            return 3
+        }
+        if isTailscaleHost(host) {
+            return 2
+        }
+        if isRFC1918LANHost(host) || host.hasSuffix(".local") {
+            return 1
+        }
+        if isLoopbackOrBonjourHost(host) {
+            return 0
+        }
+        return scheme == "https" ? 4 : -1
+    }
 }
 
 @MainActor
@@ -2431,10 +2455,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
-    private func promoteResolvedServerURL(_ resolvedURL: String) {
+    func promoteResolvedServerURL(_ resolvedURL: String) {
         let promoted = normalized(resolvedURL)
         guard !promoted.isEmpty else { return }
         if promoted == normalizedServerURL {
+            return
+        }
+        let currentPriority = PairingHostRules.connectivityPriority(for: normalizedServerURL)
+        let promotedPriority = PairingHostRules.connectivityPriority(for: promoted)
+        if promotedPriority < currentPriority {
             return
         }
         let currentCandidates = connectionCandidateServerURLs.isEmpty ? [normalizedServerURL] : connectionCandidateServerURLs
