@@ -23,6 +23,11 @@ enum ConversationMessagePresentation: String, Codable {
     case liveActivity
 }
 
+enum ConversationInputOrigin: String, Codable {
+    case text
+    case voice
+}
+
 struct ConversationMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: String
@@ -89,6 +94,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
     var pendingHumanUnblock: HumanUnblockRequest?
     var resolvedWorkingDirectory: String
     var activeRunExecutor: String
+    var lastSubmittedInputOrigin: ConversationInputOrigin
     var draftText: String
     var draftAttachments: [DraftAttachment]
 
@@ -104,6 +110,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         case pendingHumanUnblock
         case resolvedWorkingDirectory
         case activeRunExecutor
+        case lastSubmittedInputOrigin
         case draftText
         case draftAttachments
     }
@@ -120,6 +127,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         pendingHumanUnblock: HumanUnblockRequest? = nil,
         resolvedWorkingDirectory: String,
         activeRunExecutor: String,
+        lastSubmittedInputOrigin: ConversationInputOrigin = .text,
         draftText: String = "",
         draftAttachments: [DraftAttachment] = []
     ) {
@@ -134,6 +142,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         self.pendingHumanUnblock = pendingHumanUnblock
         self.resolvedWorkingDirectory = resolvedWorkingDirectory
         self.activeRunExecutor = activeRunExecutor
+        self.lastSubmittedInputOrigin = lastSubmittedInputOrigin
         self.draftText = draftText
         self.draftAttachments = draftAttachments
     }
@@ -151,6 +160,10 @@ struct ChatThread: Identifiable, Equatable, Codable {
         pendingHumanUnblock = try container.decodeIfPresent(HumanUnblockRequest.self, forKey: .pendingHumanUnblock)
         resolvedWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .resolvedWorkingDirectory) ?? ""
         activeRunExecutor = try container.decodeIfPresent(String.self, forKey: .activeRunExecutor) ?? "codex"
+        lastSubmittedInputOrigin = try container.decodeIfPresent(
+            ConversationInputOrigin.self,
+            forKey: .lastSubmittedInputOrigin
+        ) ?? .text
         draftText = try container.decodeIfPresent(String.self, forKey: .draftText) ?? ""
         draftAttachments = try container.decodeIfPresent([DraftAttachment].self, forKey: .draftAttachments) ?? []
     }
@@ -168,6 +181,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         try container.encodeIfPresent(pendingHumanUnblock, forKey: .pendingHumanUnblock)
         try container.encode(resolvedWorkingDirectory, forKey: .resolvedWorkingDirectory)
         try container.encode(activeRunExecutor, forKey: .activeRunExecutor)
+        try container.encode(lastSubmittedInputOrigin, forKey: .lastSubmittedInputOrigin)
         try container.encode(draftText, forKey: .draftText)
         try container.encode(draftAttachments, forKey: .draftAttachments)
     }

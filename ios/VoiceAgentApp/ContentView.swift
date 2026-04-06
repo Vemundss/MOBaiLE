@@ -508,6 +508,7 @@ struct ContentView: View {
                         Toggle("AirPods Click To Record", isOn: $vm.airPodsClickToRecordEnabled)
                         Toggle("Haptic Cues", isOn: $vm.hapticCuesEnabled)
                         Toggle("Audio Cues", isOn: $vm.audioCuesEnabled)
+                        Toggle("Speak Replies", isOn: $vm.speakRepliesEnabled)
                         Toggle("Auto-send After Silence", isOn: $vm.autoSendAfterSilenceEnabled)
                         if vm.autoSendAfterSilenceEnabled {
                             TextField("Silence seconds", text: $vm.autoSendAfterSilenceSeconds)
@@ -518,8 +519,8 @@ struct ContentView: View {
                     } footer: {
                         Text(
                             vm.autoSendAfterSilenceEnabled
-                                ? "AirPods click uses headset controls. Auto-send submits after the selected silence window. Voice mode always auto-sends and reopens the mic after each reply."
-                                : "AirPods click uses headset controls to start recording and stop+send. Voice mode keeps the conversation going by reopening the mic after each reply."
+                                ? "AirPods click uses headset controls. Audio cues cover start and sent confirmations, while failures stay haptic-only. Speak Replies reads cleaned assistant responses for voice turns, keeping long code-heavy details on screen. Auto-send submits after the selected silence window, and voice mode reopens the mic after each reply."
+                                : "AirPods click uses headset controls to start recording and stop+send. Audio cues cover start and sent confirmations, while failures stay haptic-only. Speak Replies reads cleaned assistant responses for voice turns, keeping long code-heavy details on screen. Voice mode keeps the conversation going by reopening the mic after each reply."
                         )
                     }
 

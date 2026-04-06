@@ -38,4 +38,28 @@ enum PairingHostRules {
         }
         return false
     }
+
+    static func connectivityPriority(for serverURL: String) -> Int {
+        guard let parsed = URL(string: serverURL),
+              let host = parsed.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return -1
+        }
+        let scheme = parsed.scheme?.lowercased() ?? ""
+        if scheme == "https" && !isLocalOrPrivateHost(host) {
+            return 4
+        }
+        if host.hasSuffix(".ts.net") {
+            return 3
+        }
+        if isTailscaleHost(host) {
+            return 2
+        }
+        if isRFC1918LANHost(host) || host.hasSuffix(".local") {
+            return 1
+        }
+        if isLoopbackOrBonjourHost(host) {
+            return 0
+        }
+        return scheme == "https" ? 4 : -1
+    }
 }

@@ -316,6 +316,51 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertNil(pending.localNetworkWarning)
     }
 
+    @MainActor
+    func testPromoteResolvedServerURLDoesNotDemoteTailscaleToLanFallback() {
+        let vm = VoiceAgentViewModel()
+
+        vm.applyPairedClientCredentials(
+            PairExchangeResponse(
+                apiToken: "fresh-token",
+                refreshToken: "refresh-token",
+                sessionId: "iphone-app",
+                securityMode: "full-access",
+                serverURL: "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                serverURLs: [
+                    "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                    "http://100.111.99.51:8000",
+                    "http://192.168.86.122:8000",
+                ]
+            ),
+            fallbackPrimaryServerURL: "http://vemunds-macbook-air.tail6a5903.ts.net:8000"
+        )
+
+        vm.promoteResolvedServerURL("http://192.168.86.122:8000")
+
+        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            "http://100.111.99.51:8000",
+            "http://192.168.86.122:8000",
+        ])
+    }
+
+    @MainActor
+    func testPromoteResolvedServerURLCanUpgradeLanToTailscale() {
+        let vm = VoiceAgentViewModel()
+        vm.serverURL = "http://192.168.86.122:8000"
+        vm.persistSettings()
+
+        vm.promoteResolvedServerURL("http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+
+        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            "http://192.168.86.122:8000",
+        ])
+    }
+
     func testConversationMessageDecodingDefaultsAttachmentsToEmpty() throws {
         let json = """
         {
@@ -1340,6 +1385,158 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertEqual(vm.conversation.last?.text, "Bound to the origin thread")
         XCTAssertEqual(vm.events.last?.message, "Bound to the origin thread")
+    }
+
+    @MainActor
+    func testResolvedSpokenReplyTextUsesFinalAssistantMessageForVoiceRun() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let threadID = vm.activeThreadID else {
+            XCTFail("Expected an active thread")
+            return
+        }
+
+        let runID = "voice-run-\(UUID().uuidString)"
+        vm.speakRepliesEnabled = true
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Running...",
+            activeRunExecutor: "codex",
+            lastSubmittedInputOrigin: .voice
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: threadID)
+        vm._test_ingestRunEvents(
+            [
+                ExecutionEvent(
+                    type: "assistant.message",
+                    actionIndex: nil,
+                    message: "Here is the detailed answer.",
+                    eventID: "evt-\(UUID().uuidString)",
+                    createdAt: nil
+                )
+            ],
+            runID: runID,
+            threadID: threadID
+        )
+
+        XCTAssertEqual(
+            vm._test_resolvedSpokenReplyText(
+                runID: runID,
+                threadID: threadID,
+                summary: "Short summary",
+                status: "completed"
+            ),
+            "Here is the detailed answer."
+        )
+    }
+
+    @MainActor
+    func testResolvedSpokenReplyTextFallsBackToSummaryForVoiceRunWithoutAssistantBubble() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let threadID = vm.activeThreadID else {
+            XCTFail("Expected an active thread")
+            return
+        }
+
+        let runID = "voice-summary-\(UUID().uuidString)"
+        vm.speakRepliesEnabled = true
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Running...",
+            activeRunExecutor: "codex",
+            lastSubmittedInputOrigin: .voice
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: threadID)
+
+        XCTAssertEqual(
+            vm._test_resolvedSpokenReplyText(
+                runID: runID,
+                threadID: threadID,
+                summary: "Fallback spoken summary",
+                status: "completed"
+            ),
+            "Fallback spoken summary"
+        )
+    }
+
+    @MainActor
+    func testResolvedSpokenReplyTextStaysSilentForTypedRuns() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let threadID = vm.activeThreadID else {
+            XCTFail("Expected an active thread")
+            return
+        }
+
+        let runID = "typed-run-\(UUID().uuidString)"
+        vm.speakRepliesEnabled = true
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Running...",
+            activeRunExecutor: "codex",
+            lastSubmittedInputOrigin: .text
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: threadID)
+        vm._test_ingestRunEvents(
+            [
+                ExecutionEvent(
+                    type: "assistant.message",
+                    actionIndex: nil,
+                    message: "Typed reply should stay silent.",
+                    eventID: "evt-\(UUID().uuidString)",
+                    createdAt: nil
+                )
+            ],
+            runID: runID,
+            threadID: threadID
+        )
+
+        XCTAssertNil(
+            vm._test_resolvedSpokenReplyText(
+                runID: runID,
+                threadID: threadID,
+                summary: "Typed summary",
+                status: "completed"
+            )
+        )
+    }
+
+    @MainActor
+    func testSpokenTextForPlaybackCleansMarkdownAndCodeNoise() {
+        let vm = VoiceAgentViewModel()
+
+        let spoken = vm._test_spokenTextForPlayback(
+            """
+            ## Result
+            I updated [the docs](https://example.com/docs) and verified the fix.
+
+            ```swift
+            print("hello")
+            ```
+            """
+        )
+
+        XCTAssertEqual(spoken, "Result I updated the docs and verified the fix. Code omitted.")
+    }
+
+    @MainActor
+    func testSpokenTextForPlaybackTruncatesLongRepliesAtNaturalBoundary() {
+        let vm = VoiceAgentViewModel()
+
+        let spoken = vm._test_spokenTextForPlayback(
+            """
+            First sentence explains the result clearly. Second sentence adds a bit more context for the voice summary. Third sentence still matters for someone listening hands-free. Fourth sentence should stay on screen instead of being read in full.
+            """
+        )
+
+        XCTAssertEqual(
+            spoken,
+            "First sentence explains the result clearly. Second sentence adds a bit more context for the voice summary. Third sentence still matters for someone listening hands-free. There's more on screen."
+        )
     }
 
     @MainActor

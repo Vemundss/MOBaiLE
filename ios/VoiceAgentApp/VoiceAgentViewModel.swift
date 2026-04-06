@@ -62,6 +62,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         var events: [ExecutionEvent] = []
         var liveActivityMessageID: UUID?
         var hasReceivedFinalAssistantMessage = false
+        var finalAssistantReplyText: String?
+        var shouldSpeakReply = false
     }
 
     @Published var serverURL: String = ""
@@ -129,6 +131,13 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var hideDotFoldersInBrowser: Bool = true
     @Published var hapticCuesEnabled: Bool = true
     @Published var audioCuesEnabled: Bool = true
+    @Published var speakRepliesEnabled: Bool = true {
+        didSet {
+            if !speakRepliesEnabled, speaker.isSpeaking {
+                speaker.stopSpeaking(at: .immediate)
+            }
+        }
+    }
     @Published var autoSendAfterSilenceEnabled: Bool = false
     @Published var autoSendAfterSilenceSeconds: String = "1.2"
 
@@ -247,6 +256,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         static let hideDotFoldersInBrowser = "mobaile.hide_dot_folders"
         static let hapticCuesEnabled = "mobaile.haptic_cues_enabled"
         static let audioCuesEnabled = "mobaile.audio_cues_enabled"
+        static let speakRepliesEnabled = "mobaile.speak_replies_enabled"
         static let autoSendAfterSilenceEnabled = "mobaile.auto_send_after_silence_enabled"
         static let autoSendAfterSilenceSeconds = "mobaile.auto_send_after_silence_seconds"
         static let microphonePrimerSeen = "mobaile.microphone_primer_seen"
@@ -284,6 +294,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             attributes: nil
         )
         speaker.delegate = self
+        speaker.usesApplicationAudioSession = false
         client.onResolvedServerURL = { [weak self] resolvedURL in
             Task { @MainActor in
                 self?.promoteResolvedServerURL(resolvedURL)
@@ -592,6 +603,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     updateThreadMetadata(
                         threadID: originThreadID,
                         transcriptText: localTranscription.text,
+                        lastSubmittedInputOrigin: .voice,
                         persist: false
                     )
                 } else {
@@ -610,6 +622,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         threadID: originThreadID,
                         statusText: "Starting run...",
                         activeRunExecutor: effectiveExecutor,
+                        lastSubmittedInputOrigin: .voice,
                         persist: false
                     )
                 } else {
@@ -622,7 +635,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 )
                 startedRunID = response.runId
                 if let originThreadID {
-                    ensureObservedRunContext(runID: response.runId, threadID: originThreadID)
+                    ensureObservedRunContext(runID: response.runId, threadID: originThreadID, inputOrigin: .voice)
                     updateThreadMetadata(
                         threadID: originThreadID,
                         runID: response.runId,
@@ -652,6 +665,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         threadID: originThreadID,
                         statusText: "Uploading audio to backend...",
                         activeRunExecutor: effectiveExecutor,
+                        lastSubmittedInputOrigin: .voice,
                         persist: false
                     )
                 } else {
@@ -678,13 +692,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 )
                 startedRunID = response.runId
                 if let originThreadID {
-                    ensureObservedRunContext(runID: response.runId, threadID: originThreadID)
+                    ensureObservedRunContext(runID: response.runId, threadID: originThreadID, inputOrigin: .voice)
                     updateThreadMetadata(
                         threadID: originThreadID,
                         runID: response.runId,
                         transcriptText: response.transcriptText,
                         statusText: "Audio run started (\(response.runId))",
                         activeRunExecutor: effectiveExecutor,
+                        lastSubmittedInputOrigin: .voice,
                         persist: false
                     )
                     primeLiveActivityIfNeeded(
@@ -1809,6 +1824,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     threadID: originThreadID,
                     statusText: "Starting run...",
                     activeRunExecutor: effectiveExecutor,
+                    lastSubmittedInputOrigin: .text,
                     persist: false
                 )
             } else {
@@ -1832,7 +1848,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 attachments: explicitAttachments
             )
             if let originThreadID {
-                ensureObservedRunContext(runID: response.runId, threadID: originThreadID)
+                ensureObservedRunContext(runID: response.runId, threadID: originThreadID, inputOrigin: .text)
                 updateThreadMetadata(
                     threadID: originThreadID,
                     runID: response.runId,
@@ -2120,9 +2136,6 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.error)
         }
-        if audioCuesEnabled {
-            AudioServicesPlaySystemSound(1073)
-        }
     }
 
     private func refreshClientConnectionCandidates() {
@@ -2171,10 +2184,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
-    private func promoteResolvedServerURL(_ resolvedURL: String) {
+    func promoteResolvedServerURL(_ resolvedURL: String) {
         let promoted = normalized(resolvedURL)
         guard !promoted.isEmpty else { return }
         if promoted == normalizedServerURL {
+            return
+        }
+        let currentPriority = PairingHostRules.connectivityPriority(for: normalizedServerURL)
+        let promotedPriority = PairingHostRules.connectivityPriority(for: promoted)
+        if promotedPriority < currentPriority {
             return
         }
         let currentCandidates = connectionCandidateServerURLs.isEmpty ? [normalizedServerURL] : connectionCandidateServerURLs
@@ -2234,6 +2252,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         defaults.set(hideDotFoldersInBrowser, forKey: DefaultsKey.hideDotFoldersInBrowser)
         defaults.set(hapticCuesEnabled, forKey: DefaultsKey.hapticCuesEnabled)
         defaults.set(audioCuesEnabled, forKey: DefaultsKey.audioCuesEnabled)
+        defaults.set(speakRepliesEnabled, forKey: DefaultsKey.speakRepliesEnabled)
         defaults.set(autoSendAfterSilenceEnabled, forKey: DefaultsKey.autoSendAfterSilenceEnabled)
         defaults.set(autoSendAfterSilenceSeconds, forKey: DefaultsKey.autoSendAfterSilenceSeconds)
         refreshClientConnectionCandidates()
@@ -2560,6 +2579,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             statusText: "Idle",
             resolvedWorkingDirectory: resolvedWorkingDirectory,
             activeRunExecutor: effectiveExecutor,
+            lastSubmittedInputOrigin: .text,
             draftText: "",
             draftAttachments: []
         )
@@ -2726,16 +2746,23 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func speak(_ text: String) {
-        let spoken = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !spoken.isEmpty else { return }
+        guard speakRepliesEnabled else { return }
+        guard let spoken = spokenTextForPlayback(from: text) else { return }
+        if speaker.isSpeaking {
+            speaker.stopSpeaking(at: .immediate)
+        }
         let utterance = AVSpeechUtterance(string: spoken)
-        utterance.rate = 0.5
+        utterance.prefersAssistiveTechnologySettings = true
+        utterance.preUtteranceDelay = 0.02
+        utterance.postUtteranceDelay = 0.08
         speaker.speak(utterance)
     }
 
     private func scheduleVoiceModeResumeAfterCurrentReply(threadID: UUID, replyText: String) {
         guard voiceModeEnabled, voiceModeThreadID == threadID else {
-            speak(replyText)
+            if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                speak(replyText)
+            }
             return
         }
         shouldResumeVoiceModeAfterSpeech = true
@@ -3466,6 +3493,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         } else {
             compressLiveActivityIfNeeded(runID: run.runId, threadID: threadID)
         }
+        let spokenReply = resolvedSpokenReplyText(for: run, threadID: threadID)
         let shouldContinueVoiceMode = voiceModeEnabled && voiceModeThreadID == threadID
         if shouldContinueVoiceMode, run.status != "completed" {
             deactivateVoiceMode(stopSpeaking: false)
@@ -3492,9 +3520,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 runEndedAt = Date()
             }
             if shouldContinueVoiceMode && run.status == "completed" {
-                scheduleVoiceModeResumeAfterCurrentReply(threadID: threadID, replyText: run.summary)
-            } else {
-                speak(run.summary)
+                scheduleVoiceModeResumeAfterCurrentReply(threadID: threadID, replyText: spokenReply ?? "")
+            } else if let spokenReply {
+                speak(spokenReply)
             }
         }
 
@@ -3539,6 +3567,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             if let text = conversationText(for: event, threadID: threadID) {
                 if event.type == "chat.message" || event.type == "assistant.message" {
                     context.hasReceivedFinalAssistantMessage = true
+                    context.finalAssistantReplyText = text
                     observedRunContexts[runID] = context
                 }
                 compressLiveActivityIfNeeded(runID: runID, threadID: threadID)
@@ -3704,6 +3733,155 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             threads[idx].title = suggestThreadTitle(for: normalized)
         }
         persistThreadSnapshot(threadID: targetThreadID)
+    }
+
+    private func resolvedSpokenReplyText(for run: RunRecord, threadID: UUID) -> String? {
+        let normalizedStatus = run.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard (normalizedStatus == "completed" || normalizedStatus == "blocked"),
+              speakRepliesEnabled,
+              activeThreadID == threadID else {
+            return nil
+        }
+        let threadWantsVoiceReply = thread(for: threadID)?.lastSubmittedInputOrigin == .voice
+        let context = observedRunContext(for: threadID, runID: run.runId)
+        guard context?.shouldSpeakReply == true || threadWantsVoiceReply else {
+            return nil
+        }
+        if let assistantReply = context?.finalAssistantReplyText,
+           let spokenAssistantReply = spokenTextForPlayback(from: assistantReply) {
+            return spokenAssistantReply
+        }
+        if normalizedStatus == "blocked",
+           let instructions = run.pendingHumanUnblock?.instructions,
+           let spokenInstructions = spokenTextForPlayback(from: instructions) {
+            return spokenInstructions
+        }
+        return spokenTextForPlayback(from: run.summary)
+    }
+
+    private func spokenTextForPlayback(from rawText: String) -> String? {
+        if let envelope = parseEnvelope(rawText) {
+            return spokenTextForPlayback(from: envelope)
+        }
+        return finalizeSpeechText(cleansedSpeechMarkup(rawText))
+    }
+
+    private func spokenTextForPlayback(from envelope: ChatEnvelope) -> String? {
+        var segments: [String] = []
+
+        let summary = cleansedSpeechMarkup(envelope.summary)
+        if !summary.isEmpty {
+            segments.append(summary)
+        }
+
+        for section in envelope.sections {
+            let body = cleansedSpeechMarkup(section.body)
+            guard !body.isEmpty else { continue }
+            let title = cleansedSpeechMarkup(section.title)
+            let normalizedTitle = title.lowercased()
+            let spokenSection: String
+            if title.isEmpty || normalizedTitle == "result" || normalizedTitle == "summary" || normalizedTitle == "status" {
+                spokenSection = body
+            } else {
+                spokenSection = "\(title). \(body)"
+            }
+            if !segments.contains(spokenSection) {
+                segments.append(spokenSection)
+            }
+            if segments.count >= 2 || segments.joined(separator: " ").count >= 260 {
+                break
+            }
+        }
+
+        if segments.isEmpty {
+            if !envelope.agendaItems.isEmpty {
+                segments.append("I have follow-up items on screen.")
+            } else if !envelope.artifacts.isEmpty {
+                segments.append("I sent files or artifacts. Check the screen for details.")
+            }
+        }
+
+        return finalizeSpeechText(segments.joined(separator: " "))
+    }
+
+    private func cleansedSpeechMarkup(_ rawText: String) -> String {
+        let normalized = rawText
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let hadCodeFence = normalized.contains("```")
+
+        var text = normalized.replacingOccurrences(
+            of: "```[\\s\\S]*?```",
+            with: " Code omitted. ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "!\\[[^\\]]*\\]\\([^\\)]*\\)",
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "\\[([^\\]]+)\\]\\([^\\)]+\\)",
+            with: "$1",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "`([^`]+)`",
+            with: "$1",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "(?m)^\\s{0,3}#{1,6}\\s*",
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "(?m)^\\s*[-*•]\\s+",
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "(?m)^\\s*\\d+\\.\\s+",
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: "(?m)^\\s*>\\s*",
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(of: "[*_~]", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.isEmpty, hadCodeFence {
+            return "I sent code. Check the screen for details."
+        }
+        return trimmed
+    }
+
+    private func finalizeSpeechText(_ rawText: String) -> String? {
+        let cleaned = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+
+        let sentenceEndings = cleaned.indices.filter { ".!?".contains(cleaned[$0]) }
+        if sentenceEndings.count > 3 {
+            let thirdEnding = sentenceEndings[2]
+            let truncated = cleaned[...thirdEnding].trimmingCharacters(in: .whitespacesAndNewlines)
+            if truncated.count >= 120 {
+                return "\(truncated) There's more on screen."
+            }
+        }
+
+        let maxCharacters = 320
+        guard cleaned.count > maxCharacters else { return cleaned }
+        let cutIndex = cleaned.index(cleaned.startIndex, offsetBy: maxCharacters)
+        let prefix = String(cleaned[..<cutIndex])
+        let boundary = prefix.lastIndex(where: { ".!? ".contains($0) }) ?? prefix.index(before: prefix.endIndex)
+        let truncated = String(prefix[...boundary]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !truncated.isEmpty else { return cleaned }
+        let suffix = truncated.last.map { ".!?".contains($0) } == true ? " There's more on screen." : ". There's more on screen."
+        return truncated + suffix
     }
 
     private func normalizeAssistantText(_ text: String) -> String {
@@ -4070,6 +4248,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         } else {
             audioCuesEnabled = defaults.bool(forKey: DefaultsKey.audioCuesEnabled)
         }
+        if defaults.object(forKey: DefaultsKey.speakRepliesEnabled) == nil {
+            speakRepliesEnabled = true
+        } else {
+            speakRepliesEnabled = defaults.bool(forKey: DefaultsKey.speakRepliesEnabled)
+        }
         if defaults.object(forKey: DefaultsKey.autoSendAfterSilenceEnabled) == nil {
             autoSendAfterSilenceEnabled = false
         } else {
@@ -4297,6 +4480,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         threads.firstIndex(where: { $0.id == threadID })
     }
 
+    private func thread(for threadID: UUID) -> ChatThread? {
+        guard let idx = threadIndex(for: threadID) else { return nil }
+        return threads[idx]
+    }
+
     private func cachedConversation(for threadID: UUID) -> [ConversationMessage] {
         if activeThreadID == threadID {
             return conversation
@@ -4336,6 +4524,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         statusText: String? = nil,
         resolvedWorkingDirectory: String? = nil,
         activeRunExecutor: String? = nil,
+        lastSubmittedInputOrigin: ConversationInputOrigin? = nil,
         persist: Bool = true
     ) {
         guard let idx = threadIndex(for: threadID) else { return }
@@ -4356,6 +4545,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
         if let activeRunExecutor {
             threads[idx].activeRunExecutor = activeRunExecutor
+        }
+        if let lastSubmittedInputOrigin {
+            threads[idx].lastSubmittedInputOrigin = lastSubmittedInputOrigin
         }
         if activeThreadID == threadID {
             if let runID {
@@ -4452,16 +4644,33 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func ensureObservedRunContext(runID: String, threadID: UUID) {
-        if observedRunContexts[runID]?.threadID == threadID {
+        let inputOrigin = thread(for: threadID)?.lastSubmittedInputOrigin ?? .text
+        if var existing = observedRunContexts[runID], existing.threadID == threadID {
+            existing.shouldSpeakReply = inputOrigin == .voice
+            observedRunContexts[runID] = existing
             return
         }
         var context = ObservedRunContext(runID: runID, threadID: threadID)
+        context.shouldSpeakReply = inputOrigin == .voice
         if let liveMessage = cachedConversation(for: threadID).last(where: {
             $0.presentation == .liveActivity && $0.sourceRunID == runID
         }) {
             context.liveActivityMessageID = liveMessage.id
         }
         observedRunContexts[runID] = context
+    }
+
+    private func ensureObservedRunContext(
+        runID: String,
+        threadID: UUID,
+        inputOrigin: ConversationInputOrigin
+    ) {
+        updateThreadMetadata(
+            threadID: threadID,
+            lastSubmittedInputOrigin: inputOrigin,
+            persist: false
+        )
+        ensureObservedRunContext(runID: runID, threadID: threadID)
     }
 
     private func performThreadStateRestore(_ updates: () -> Void) {
@@ -4668,13 +4877,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         threadID: UUID,
         runID: String? = nil,
         statusText: String? = nil,
-        activeRunExecutor: String? = nil
+        activeRunExecutor: String? = nil,
+        lastSubmittedInputOrigin: ConversationInputOrigin? = nil
     ) {
         updateThreadMetadata(
             threadID: threadID,
             runID: runID,
             statusText: statusText,
-            activeRunExecutor: activeRunExecutor
+            activeRunExecutor: activeRunExecutor,
+            lastSubmittedInputOrigin: lastSubmittedInputOrigin
         )
     }
 
@@ -4684,6 +4895,29 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_composeVoiceUtteranceText(draftText: String, transcriptText: String) -> String {
         composeVoiceUtteranceText(draftText: draftText, transcriptText: transcriptText)
+    }
+
+    func _test_resolvedSpokenReplyText(runID: String, threadID: UUID, summary: String, status: String) -> String? {
+        resolvedSpokenReplyText(
+            for: RunRecord(
+                runId: runID,
+                sessionId: "test-session",
+                executor: nil,
+                utteranceText: "",
+                workingDirectory: nil,
+                status: status,
+                pendingHumanUnblock: nil,
+                summary: summary,
+                events: [],
+                createdAt: nil,
+                updatedAt: nil
+            ),
+            threadID: threadID
+        )
+    }
+
+    func _test_spokenTextForPlayback(_ rawText: String) -> String? {
+        spokenTextForPlayback(from: rawText)
     }
 
     func _test_setVoiceModeEnabled(_ enabled: Bool, threadID: UUID?) {
