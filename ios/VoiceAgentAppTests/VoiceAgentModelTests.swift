@@ -139,6 +139,51 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertFalse(vm.needsConnectionRepair)
     }
 
+    @MainActor
+    func testPromoteResolvedServerURLDoesNotDemoteTailscaleToLanFallback() {
+        let vm = VoiceAgentViewModel()
+
+        vm.applyPairedClientCredentials(
+            PairExchangeResponse(
+                apiToken: "fresh-token",
+                refreshToken: "refresh-token",
+                sessionId: "iphone-app",
+                securityMode: "full-access",
+                serverURL: "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                serverURLs: [
+                    "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                    "http://100.111.99.51:8000",
+                    "http://192.168.86.122:8000",
+                ]
+            ),
+            fallbackPrimaryServerURL: "http://vemunds-macbook-air.tail6a5903.ts.net:8000"
+        )
+
+        vm.promoteResolvedServerURL("http://192.168.86.122:8000")
+
+        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            "http://100.111.99.51:8000",
+            "http://192.168.86.122:8000",
+        ])
+    }
+
+    @MainActor
+    func testPromoteResolvedServerURLCanUpgradeLanToTailscale() {
+        let vm = VoiceAgentViewModel()
+        vm.serverURL = "http://192.168.86.122:8000"
+        vm.persistSettings()
+
+        vm.promoteResolvedServerURL("http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+
+        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            "http://192.168.86.122:8000",
+        ])
+    }
+
     func testPairingQRCodeImageDecoderDecodesGeneratedQRCode() throws {
         let payload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123"
         let filter = CIFilter.qrCodeGenerator()
