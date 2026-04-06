@@ -32,6 +32,10 @@ targets:
         NSCameraUsageDescription: MOBaiLE uses the camera to scan the pairing QR shown on your computer.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            ts.net:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
         ITSAppUsesNonExemptEncryption: false
         MOBaiLEURLScheme: $(MOBAILE_URL_SCHEME)
         CFBundleURLTypes:
