@@ -3,15 +3,14 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import time
 import threading
+import time
 from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.models.schemas import AgendaItem
-from app.models.schemas import RunRecord
+from app.models.schemas import AgendaItem, RunRecord
 
 
 def make_client(
@@ -39,8 +38,8 @@ def make_client(
 def test_runtime_agent_prompt_injects_context(monkeypatch, tmp_path: Path):
     context_file = tmp_path / "ctx.md"
     context_file.write_text("You are in test context.", encoding="utf-8")
-    monkeypatch.setenv("VOICE_AGENT_CODEX_USE_CONTEXT", "true")
-    monkeypatch.setenv("VOICE_AGENT_CODEX_CONTEXT_FILE", str(context_file))
+    monkeypatch.setenv("VOICE_AGENT_USE_RUNTIME_CONTEXT", "true")
+    monkeypatch.setenv("VOICE_AGENT_RUNTIME_CONTEXT_FILE", str(context_file))
     module = importlib.import_module("app.main")
     module = importlib.reload(module)
     built = module.ENV.build_runtime_agent_prompt("create hello script", executor="codex")
@@ -1594,9 +1593,6 @@ def test_capabilities_endpoint_returns_report(monkeypatch, tmp_path: Path):
     assert "codex_web_search" in capability_ids
     assert "codex_mcp_playwright" in capability_ids
     assert "codex_mcp_peekaboo" in capability_ids
-    assert "codex_skill_playwright" in capability_ids
-    assert "codex_skill_peekaboo" in capability_ids
-    assert "codex_skill_remote_operator" in capability_ids
     assert "playwright_persistence" in capability_ids
     assert "peekaboo_permissions" in capability_ids
     assert "calendar_adapter" in capability_ids

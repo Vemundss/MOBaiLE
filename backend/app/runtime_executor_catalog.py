@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.models.schemas import RuntimeConfigResponse
-from app.models.schemas import RuntimeExecutorDescriptor
-from app.models.schemas import RuntimeSettingDescriptor
+from app.models.schemas import (
+    RuntimeConfigResponse,
+    RuntimeExecutorDescriptor,
+    RuntimeSettingDescriptor,
+)
 
 if TYPE_CHECKING:
     from app.models.schemas import AgentExecutorName

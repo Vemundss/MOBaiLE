@@ -8,10 +8,13 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.calendar_service import CalendarService
 from app.capabilities import collect_capabilities
-from app.chat_attachments import merge_voice_utterance
-from app.chat_attachments import parse_audio_attachments
-from app.codex_text import CodexAssistantExtractor
-from app.codex_text import filter_codex_assistant_message
+from app.chat_attachments import merge_voice_utterance, parse_audio_attachments
+from app.codex_text import (
+    CodexAssistantExtractor as _CodexAssistantExtractor,
+)
+from app.codex_text import (
+    filter_codex_assistant_message as _filter_codex_assistant_message,
+)
 from app.execution_service import ExecutionService
 from app.models.schemas import (
     AudioRunResponse,
@@ -40,14 +43,16 @@ from app.pairing_service import PairingService
 from app.pairing_url import refresh_pairing_server_url
 from app.profile_store import ProfileStore
 from app.run_state import RunState
-from app.runtime_environment import load_env_defaults
-from app.runtime_environment import RuntimeEnvironment
+from app.runtime_environment import RuntimeEnvironment, load_env_defaults
 from app.runtime_session_service import RuntimeSessionService
 from app.storage import RunStore
 from app.transcription import Transcriber, TranscriptionError
 from app.utterance_service import UtteranceService
 from app.workspace_service import WorkspaceService
 
+# Keep these names available from app.main for existing tests and module consumers.
+CodexAssistantExtractor = _CodexAssistantExtractor
+filter_codex_assistant_message = _filter_codex_assistant_message
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 load_env_defaults(BACKEND_ROOT / ".env")

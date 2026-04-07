@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-
 PhoneAccessMode = Literal["tailscale", "wifi", "local"]
 PHONE_ACCESS_MODE_OPTIONS = ("tailscale", "wifi", "local")
 

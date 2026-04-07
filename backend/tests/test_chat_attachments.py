@@ -5,12 +5,14 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from app.chat_attachments import artifact_type_for_upload
-from app.chat_attachments import display_utterance_text
-from app.chat_attachments import merge_voice_utterance
-from app.chat_attachments import parse_audio_attachments
-from app.chat_attachments import render_utterance_for_executor
-from app.chat_attachments import sanitize_upload_name
+from app.chat_attachments import (
+    artifact_type_for_upload,
+    display_utterance_text,
+    merge_voice_utterance,
+    parse_audio_attachments,
+    render_utterance_for_executor,
+    sanitize_upload_name,
+)
 from app.models.schemas import ChatArtifact
 
 

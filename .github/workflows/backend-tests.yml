@@ -19,6 +19,10 @@ jobs:
         working-directory: backend
         run: uv sync
 
+      - name: Run Ruff
+        working-directory: backend
+        run: uvx ruff check app tests
+
       - name: Run pytest with artifacts
         working-directory: backend
         run: |

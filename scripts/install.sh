@@ -23,7 +23,7 @@ fail() {
 }
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: bash ./scripts/install.sh [options]
 
 Options:
@@ -40,13 +40,13 @@ EOF
 
 require_cmd() {
   local cmd="$1"
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
+  if ! command -v "${cmd}" > /dev/null 2>&1; then
     fail "Missing command: ${cmd}"
   fi
 }
 
 checkout_required_files() {
-  cat <<'EOF'
+  cat << 'EOF'
 scripts/install.sh
 scripts/install_backend.sh
 scripts/pairing_qr.sh
@@ -105,21 +105,21 @@ checkout_looks_valid() {
 
 validate_mode() {
   case "${MODE}" in
-    full-access|safe) ;;
+    full-access | safe) ;;
     *) fail "Invalid --mode '${MODE}'. Expected full-access or safe." ;;
   esac
 }
 
 validate_phone_access() {
   case "${PHONE_ACCESS_MODE}" in
-    tailscale|wifi|local) ;;
+    tailscale | wifi | local) ;;
     *) fail "Invalid --phone-access '${PHONE_ACCESS_MODE}'. Expected tailscale, wifi, or local." ;;
   esac
 }
 
 validate_background_service() {
   case "${BACKGROUND_SERVICE}" in
-    yes|no) ;;
+    yes | no) ;;
     *) fail "Invalid --background-service '${BACKGROUND_SERVICE}'. Expected yes or no." ;;
   esac
 }
@@ -129,7 +129,7 @@ validate_public_server_url() {
     return
   fi
   case "${PUBLIC_SERVER_URL}" in
-    http://*|https://*) ;;
+    http://* | https://*) ;;
     *) fail "Invalid --public-url '${PUBLIC_SERVER_URL}'. Expected http://... or https://..." ;;
   esac
 }
@@ -194,7 +194,7 @@ print_status_follow_up() {
   local step_number="${1:-2}"
   echo "  ${step_number}. Run \`mobaile status\` any time to check the connection."
   if ! path_has_user_local_bin; then
-    echo '     If your shell does not find it yet, run `~/.local/bin/mobaile status`.'
+    echo "     If your shell does not find it yet, run \`~/.local/bin/mobaile status\`."
   fi
 }
 
@@ -543,13 +543,13 @@ open_qr_if_possible() {
 
   case "$(uname -s)" in
     Darwin)
-      if command -v open >/dev/null 2>&1; then
-        open "${qr_path}" >/dev/null 2>&1 || true
+      if command -v open > /dev/null 2>&1; then
+        open "${qr_path}" > /dev/null 2>&1 || true
       fi
       ;;
     Linux)
-      if command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "${qr_path}" >/dev/null 2>&1 || true
+      if command -v xdg-open > /dev/null 2>&1; then
+        xdg-open "${qr_path}" > /dev/null 2>&1 || true
       fi
       ;;
   esac
@@ -598,7 +598,7 @@ run_install() {
 
   step "Preparing pairing QR"
   if [[ "${BACKGROUND_SERVICE}" == "yes" ]] && [[ -n "${service_script}" ]]; then
-    MOBAILE_SKIP_OPEN=1 bash "${CHECKOUT}/scripts/mobaile" pair >/dev/null
+    MOBAILE_SKIP_OPEN=1 bash "${CHECKOUT}/scripts/mobaile" pair > /dev/null
   else
     bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
   fi
@@ -637,7 +637,7 @@ main() {
         PUBLIC_SERVER_URL="${2%/}"
         shift 2
         ;;
-      -h|--help)
+      -h | --help)
         usage
         exit 0
         ;;

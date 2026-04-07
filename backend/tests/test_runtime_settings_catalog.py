@@ -3,8 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from app.models.schemas import RuntimeExecutorDescriptor
-from app.models.schemas import RuntimeSettingDescriptor
+from app.models.schemas import RuntimeExecutorDescriptor, RuntimeSettingDescriptor
 from app.runtime_settings_catalog import RuntimeSettingsCatalog
 
 

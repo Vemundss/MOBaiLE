@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 
 def test_install_backend_script_persists_phone_access_and_pairing_urls(tmp_path: Path):
@@ -167,7 +167,9 @@ def test_install_backend_script_updates_existing_env_file(tmp_path: Path):
     assert "VOICE_AGENT_HOST=127.0.0.1" in env_contents
     assert "VOICE_AGENT_PHONE_ACCESS_MODE=local" in env_contents
     assert "VOICE_AGENT_SECURITY_MODE=safe" in env_contents
-    assert "VOICE_AGENT_CODEX_CONTEXT_FILE=../.mobaile/AGENT_CONTEXT.md" in env_contents
+    assert "VOICE_AGENT_USE_RUNTIME_CONTEXT=true" in env_contents
+    assert "VOICE_AGENT_RUNTIME_CONTEXT_FILE=../.mobaile/runtime/RUNTIME_CONTEXT.md" in env_contents
+    assert "VOICE_AGENT_CODEX_CONTEXT_FILE=" not in env_contents
 
 
 def test_install_backend_script_brief_mode_skips_verbose_summary(tmp_path: Path):

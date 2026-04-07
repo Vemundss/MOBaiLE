@@ -19,7 +19,7 @@ step() {
 }
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: bash ./scripts/bootstrap_server.sh [--repo-url <url>] [--dir <path>] [--branch <name>] [--mode safe|full-access] [--with-autonomy-stack|--skip-autonomy-stack]
 
 Bootstraps MOBaiLE backend on a server/host machine:
@@ -45,21 +45,21 @@ while [[ $# -gt 0 ]]; do
       BRANCH="$2"
       shift 2
       ;;
-      --mode)
-        MODE="$2"
-        shift 2
-        ;;
-      --with-autonomy-stack)
-        AUTONOMY_STACK="true"
-        shift
-        ;;
-      --skip-autonomy-stack)
-        AUTONOMY_STACK="false"
-        shift
-        ;;
-      -h|--help)
-        usage
-        exit 0
+    --mode)
+      MODE="$2"
+      shift 2
+      ;;
+    --with-autonomy-stack)
+      AUTONOMY_STACK="true"
+      shift
+      ;;
+    --skip-autonomy-stack)
+      AUTONOMY_STACK="false"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -71,20 +71,20 @@ done
 
 require_cmd() {
   local cmd="$1"
-  if ! command -v "$cmd" >/dev/null 2>&1; then
+  if ! command -v "$cmd" > /dev/null 2>&1; then
     echo "Missing command: ${cmd}" >&2
     exit 1
   fi
 }
 
 ensure_uv() {
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     return
   fi
   echo "uv not found. Installing uv..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="${HOME}/.local/bin:${PATH}"
-  if ! command -v uv >/dev/null 2>&1; then
+  if ! command -v uv > /dev/null 2>&1; then
     echo "uv install completed but uv is still not on PATH." >&2
     echo "Open a new shell and run again, or add ~/.local/bin to PATH." >&2
     exit 1
@@ -139,7 +139,7 @@ main() {
   step "Configuring background service"
   if [[ "$(uname -s)" == "Darwin" ]]; then
     bash ./scripts/service_macos.sh install
-  elif [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+  elif [[ "$(uname -s)" == "Linux" ]] && command -v systemctl > /dev/null 2>&1; then
     if ! bash ./scripts/service_linux.sh install; then
       echo
       echo "Linux service install did not complete. Start backend manually:"

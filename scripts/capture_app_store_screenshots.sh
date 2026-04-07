@@ -25,12 +25,12 @@ SCENARIOS=(
 )
 
 run_renderer() {
-  if python3 -c 'import PIL' >/dev/null 2>&1; then
+  if python3 -c 'import PIL' > /dev/null 2>&1; then
     python3 "${RENDERER}" --input-dir "${RAW_OUTPUT_DIR}" --output-dir "${OUTPUT_DIR}"
     return
   fi
 
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     uv run --with pillow python3 "${RENDERER}" --input-dir "${RAW_OUTPUT_DIR}" --output-dir "${OUTPUT_DIR}"
     return
   fi
@@ -46,7 +46,7 @@ xcodebuild \
   -destination "${BUILD_DESTINATION}" \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
   CODE_SIGNING_ALLOWED=NO \
-  build >/tmp/mobaile-app-store-screens-build.log
+  build > /tmp/mobaile-app-store-screens-build.log
 
 APP_PATH="$(find "${DERIVED_DATA_PATH}/Build/Products" -path '*iphonesimulator/VoiceAgentApp.app' -print -quit)"
 if [[ -z "${APP_PATH}" ]]; then
@@ -67,43 +67,43 @@ find "${RAW_OUTPUT_DIR}" -maxdepth 1 -type f -name '*.png' -delete
 
 for device in "${DEVICES[@]}"; do
   echo "Preparing simulator: ${device}"
-  xcrun simctl boot "${device}" >/dev/null 2>&1 || true
+  xcrun simctl boot "${device}" > /dev/null 2>&1 || true
   xcrun simctl bootstatus "${device}" -b
-  xcrun simctl ui "${device}" appearance light >/dev/null
-  xcrun simctl status_bar "${device}" clear >/dev/null 2>&1 || true
+  xcrun simctl ui "${device}" appearance light > /dev/null
+  xcrun simctl status_bar "${device}" clear > /dev/null 2>&1 || true
   xcrun simctl status_bar "${device}" override \
     --time "9:41" \
     --dataNetwork wifi \
     --wifiBars 3 \
     --batteryState charged \
-    --batteryLevel 100 >/dev/null
-  xcrun simctl uninstall "${device}" "${BUNDLE_ID}" >/dev/null 2>&1 || true
+    --batteryLevel 100 > /dev/null
+  xcrun simctl uninstall "${device}" "${BUNDLE_ID}" > /dev/null 2>&1 || true
   xcrun simctl install "${device}" "${APP_PATH}"
 
   for config in "${SCENARIOS[@]}"; do
-    IFS="|" read -r scenario presentation filename_base <<<"${config}"
+    IFS="|" read -r scenario presentation filename_base <<< "${config}"
     output_name="${filename_base}-$(echo "${device}" | tr '[:upper:]' '[:lower:]' | tr ' .' '---').png"
     output_path="${RAW_OUTPUT_DIR}/${output_name}"
 
     echo "Capturing ${output_name}"
-    xcrun simctl terminate "${device}" "${BUNDLE_ID}" >/dev/null 2>&1 || true
+    xcrun simctl terminate "${device}" "${BUNDLE_ID}" > /dev/null 2>&1 || true
 
     if [[ "${presentation}" == "main" ]]; then
       env \
         SIMCTL_CHILD_MOBAILE_PREVIEW_SCENARIO="${scenario}" \
-        xcrun simctl launch "${device}" "${BUNDLE_ID}" >/dev/null
+        xcrun simctl launch "${device}" "${BUNDLE_ID}" > /dev/null
     else
       env \
         SIMCTL_CHILD_MOBAILE_PREVIEW_SCENARIO="${scenario}" \
         SIMCTL_CHILD_MOBAILE_PREVIEW_PRESENTATION="${presentation}" \
-        xcrun simctl launch "${device}" "${BUNDLE_ID}" >/dev/null
+        xcrun simctl launch "${device}" "${BUNDLE_ID}" > /dev/null
     fi
 
     sleep 6
-    xcrun simctl io "${device}" screenshot "${output_path}" >/dev/null
+    xcrun simctl io "${device}" screenshot "${output_path}" > /dev/null
   done
 
-  xcrun simctl status_bar "${device}" clear >/dev/null 2>&1 || true
+  xcrun simctl status_bar "${device}" clear > /dev/null 2>&1 || true
 done
 
 run_renderer

@@ -14,7 +14,7 @@ PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 DOMAIN="gui/$(id -u)"
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: bash ./scripts/service_macos.sh <command>
 
 Commands:
@@ -38,12 +38,12 @@ require_macos() {
 }
 
 ensure_uv_available() {
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     return 0
   fi
 
   export PATH="${HOME}/.local/bin:${PATH}"
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     return 0
   fi
 
@@ -60,7 +60,7 @@ merge_runtime_pairing_state() {
     return
   fi
 
-  python3 - "${source_pairing}" "${runtime_pairing}" <<'PY'
+  python3 - "${source_pairing}" "${runtime_pairing}" << 'PY'
 from __future__ import annotations
 
 import json
@@ -106,7 +106,7 @@ PY
 sync_runtime() {
   ensure_uv_available
   mkdir -p "${RUNTIME_DIR}"
-  if command -v rsync >/dev/null 2>&1; then
+  if command -v rsync > /dev/null 2>&1; then
     rsync -a --delete \
       --exclude ".venv" \
       --exclude "__pycache__" \
@@ -141,7 +141,7 @@ sync_runtime() {
 
 write_plist() {
   mkdir -p "${HOME}/Library/LaunchAgents" "${LOG_DIR}"
-  cat > "${PLIST_PATH}" <<EOF
+  cat > "${PLIST_PATH}" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -198,7 +198,7 @@ run_warmup_if_enabled() {
 }
 
 bootout_if_loaded() {
-  launchctl bootout "${DOMAIN}" "${PLIST_PATH}" >/dev/null 2>&1 || true
+  launchctl bootout "${DOMAIN}" "${PLIST_PATH}" > /dev/null 2>&1 || true
 }
 
 install_service() {
@@ -238,7 +238,7 @@ stop_service() {
 }
 
 status_service() {
-  if launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1; then
+  if launchctl print "${DOMAIN}/${LABEL}" > /dev/null 2>&1; then
     launchctl print "${DOMAIN}/${LABEL}" | sed -n '1,80p'
   else
     echo "${LABEL} is not loaded"
@@ -257,14 +257,23 @@ main() {
   case "${cmd}" in
     install) install_service ;;
     uninstall) uninstall_service ;;
-    sync) sync_runtime; echo "Synced runtime to ${RUNTIME_DIR}" ;;
+    sync)
+      sync_runtime
+      echo "Synced runtime to ${RUNTIME_DIR}"
+      ;;
     start) start_service ;;
     stop) stop_service ;;
-    restart) stop_service; start_service ;;
+    restart)
+      stop_service
+      start_service
+      ;;
     status) status_service ;;
     logs) logs_service ;;
     warmup) "${WARMUP_SCRIPT}" ;;
-    *) usage; exit 1 ;;
+    *)
+      usage
+      exit 1
+      ;;
   esac
 }
 

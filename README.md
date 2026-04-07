@@ -291,38 +291,11 @@ bash ./scripts/pairing_qr.sh
 - Scripts reference: [`scripts/README.md`](scripts/README.md)
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Documentation policy: [`docs/POLICY.md`](docs/POLICY.md)
+- Public pages and App Store URLs: [`docs/PUBLIC_PAGES.md`](docs/PUBLIC_PAGES.md)
 - App Store copy: [`docs/APP_STORE_COPY.md`](docs/APP_STORE_COPY.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security policy: [`SECURITY.md`](SECURITY.md)
 - Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
-
-## Publishing And Privacy
-
-Apple requires a public privacy-policy URL for App Store submissions.
-
-Repo source of truth:
-
-- `docs/index.html`
-- `docs/privacy-policy.html`
-- `docs/support.html`
-
-GitHub Pages deploy workflow:
-
-- `.github/workflows/deploy-privacy-policy.yml`
-
-Expected public URLs after Pages is enabled:
-
-- Site: `https://vemundss.github.io/MOBaiLE/`
-- Privacy policy: `https://vemundss.github.io/MOBaiLE/privacy-policy.html`
-- Support: `https://vemundss.github.io/MOBaiLE/support.html`
-
-Activation steps:
-
-1. Push `main` to GitHub.
-2. In GitHub repository settings, enable Pages and select `GitHub Actions` as the source.
-3. Wait for the `Deploy Public Pages` workflow to complete.
-4. Use the GitHub Pages URLs in App Store Connect and inside the app once they are live.
-5. If you rename the repo or move it to another owner, update the URLs accordingly.
 
 ## License
 

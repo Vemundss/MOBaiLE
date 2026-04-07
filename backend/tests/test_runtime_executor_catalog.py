@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.runtime_executor_catalog import build_runtime_config_response
-from app.runtime_executor_catalog import build_runtime_executor_descriptors
+from app.runtime_executor_catalog import (
+    build_runtime_config_response,
+    build_runtime_executor_descriptors,
+)
 
 
 def _fake_env() -> SimpleNamespace:

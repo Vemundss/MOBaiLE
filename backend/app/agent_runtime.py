@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 from typing import Literal
 
-
 ResponseProfile = Literal["guided", "minimal"]
 
 
@@ -15,9 +14,13 @@ def load_runtime_context(context_file: str, backend_root: Path) -> str:
         candidates.append(raw_path)
     else:
         candidates.append((backend_root / raw_path).resolve())
-        # Compatibility fallback for older installs that still point at backend/AGENT_CONTEXT.md.
+        runtime_root = (backend_root.parent / ".mobaile" / "runtime").resolve()
+        if raw_path.name == "RUNTIME_CONTEXT.md":
+            candidates.append((runtime_root / "RUNTIME_CONTEXT.md").resolve())
+        # Compatibility fallbacks for older installs that still point at AGENT_CONTEXT.md.
         if raw_path.name == "AGENT_CONTEXT.md":
             candidates.append((backend_root.parent / ".mobaile" / "AGENT_CONTEXT.md").resolve())
+            candidates.append((runtime_root / "RUNTIME_CONTEXT.md").resolve())
     for path in candidates:
         if path.exists() and path.is_file():
             return path.read_text(encoding="utf-8").strip()

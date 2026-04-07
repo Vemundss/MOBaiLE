@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.runtime_environment_loader import load_agent_runtime_environment_settings
-from app.runtime_environment_loader import load_service_environment_settings
-from app.runtime_environment_loader import load_workspace_environment_settings
+from app.runtime_environment_loader import (
+    load_agent_runtime_environment_settings,
+    load_service_environment_settings,
+    load_workspace_environment_settings,
+)
 
 
 def test_load_workspace_environment_settings_defaults_to_safe_upload_root(monkeypatch, tmp_path: Path) -> None:
@@ -32,7 +34,7 @@ def test_load_agent_runtime_environment_settings_filters_options_and_resolves_ex
 ) -> None:
     fake_codex = tmp_path / "codex"
     fake_codex.write_text("", encoding="utf-8")
-    context_file = tmp_path / "AGENT_CONTEXT.md"
+    context_file = tmp_path / "RUNTIME_CONTEXT.md"
     context_file.write_text("runtime context", encoding="utf-8")
 
     monkeypatch.setenv("VOICE_AGENT_CODEX_BINARY", str(fake_codex))
@@ -43,7 +45,7 @@ def test_load_agent_runtime_environment_settings_filters_options_and_resolves_ex
     monkeypatch.setenv("VOICE_AGENT_CODEX_REASONING_EFFORT_OPTIONS", "high,medium,turbo,high")
     monkeypatch.setenv("VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR", "playwright-output")
     monkeypatch.setenv("VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR", "playwright-profile")
-    monkeypatch.setenv("VOICE_AGENT_CODEX_CONTEXT_FILE", str(context_file))
+    monkeypatch.setenv("VOICE_AGENT_RUNTIME_CONTEXT_FILE", str(context_file))
 
     settings = load_agent_runtime_environment_settings(tmp_path)
 

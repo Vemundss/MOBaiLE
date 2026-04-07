@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from app.pairing_url_policy import dedupe_server_urls
-from app.pairing_url_policy import is_public_server_url
-from app.pairing_url_policy import normalize_server_url
-from app.pairing_url_policy import server_url_matches_mode
+from app.pairing_url_policy import (
+    dedupe_server_urls,
+    is_public_server_url,
+    normalize_server_url,
+    server_url_matches_mode,
+)
 
 
 def test_normalize_server_url_adds_https_and_trims_paths() -> None:

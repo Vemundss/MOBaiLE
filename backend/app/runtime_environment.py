@@ -1,32 +1,37 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
-from app.agent_runtime import build_agent_prompt
-from app.agent_runtime import context_leak_markers
-from app.agent_runtime import evaluate_agent_guardrails
-from app.models.schemas import AgentExecutorName
-from app.models.schemas import CodexReasoningEffort
-from app.models.schemas import ResponseProfile
-from app.models.schemas import RunExecutorName
-from app.models.schemas import RuntimeConfigResponse
-from app.models.schemas import RuntimeExecutorDescriptor
+from app.agent_runtime import (
+    build_agent_prompt,
+    context_leak_markers,
+    evaluate_agent_guardrails,
+)
+from app.models.schemas import (
+    AgentExecutorName,
+    CodexReasoningEffort,
+    ResponseProfile,
+    RunExecutorName,
+    RuntimeConfigResponse,
+    RuntimeExecutorDescriptor,
+)
 from app.phone_access_mode import PhoneAccessMode
-from app.runtime_executor_catalog import build_runtime_config_response
-from app.runtime_executor_catalog import build_runtime_executor_descriptors
-from app.runtime_environment_loader import available_agent_executors
-from app.runtime_environment_loader import CLAUDE_MODEL_OPTIONS
-from app.runtime_environment_loader import CODEX_MODEL_OPTIONS
-from app.runtime_environment_loader import CODEX_REASONING_EFFORT_OPTIONS
-from app.runtime_environment_loader import configured_default_executor
-from app.runtime_environment_loader import load_agent_runtime_environment_settings
-from app.runtime_environment_loader import load_profile_environment_settings
-from app.runtime_environment_loader import load_service_environment_settings
-from app.runtime_environment_loader import load_workspace_environment_settings
-from app.runtime_environment_loader import resolve_default_executor
-from app.runtime_environment_loader import stable_key
+from app.runtime_environment_loader import (
+    available_agent_executors,
+    configured_default_executor,
+    load_agent_runtime_environment_settings,
+    load_profile_environment_settings,
+    load_service_environment_settings,
+    load_workspace_environment_settings,
+    resolve_default_executor,
+    stable_key,
+)
+from app.runtime_executor_catalog import (
+    build_runtime_config_response,
+    build_runtime_executor_descriptors,
+)
 
 AGENT_HOME_HINTS: dict[AgentExecutorName, str] = {
     "codex": "~/.codex/*",

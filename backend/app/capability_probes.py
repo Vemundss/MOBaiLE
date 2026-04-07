@@ -209,28 +209,6 @@ def probe_codex_mcp_server(codex_binary: str, codex_home: Path, server_name: str
         details=details,
     )
 
-
-def probe_codex_skill(codex_home: Path, skill_name: str) -> CapabilityProbe:
-    skill_path = codex_home / "skills" / skill_name / "SKILL.md"
-    if skill_path.exists():
-        return CapabilityProbe(
-            id=f"codex_skill_{skill_name.replace('-', '_')}",
-            title=f"Codex skill: {skill_name}",
-            status="ready",
-            code="ok",
-            message=f"Codex skill '{skill_name}' is installed.",
-            details={"path": str(skill_path)},
-        )
-    return CapabilityProbe(
-        id=f"codex_skill_{skill_name.replace('-', '_')}",
-        title=f"Codex skill: {skill_name}",
-        status="blocked",
-        code="missing_skill",
-        message=f"Codex skill '{skill_name}' is not installed.",
-        details={"path": str(skill_path)},
-    )
-
-
 def probe_playwright_persistence(*, output_dir: Path, user_data_dir: Path) -> CapabilityProbe:
     details = {
         "output_dir": str(output_dir),

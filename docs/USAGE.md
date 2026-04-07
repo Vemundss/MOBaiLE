@@ -210,15 +210,15 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_SECURITY_MODE=safe|full-access` controls security defaults.
 - `VOICE_AGENT_DEFAULT_EXECUTOR=codex|claude|local` selects the app/backend default executor.
   - if the selected agent CLI is unavailable, backend falls back to another available agent executor and finally to the internal `local` fallback
-- `VOICE_AGENT_CODEX_HOME=~/.codex` selects the Codex home used for auth, MCP config, and skills.
+- `VOICE_AGENT_CODEX_HOME=~/.codex` selects the Codex home used for auth and MCP config.
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (recommended only for private trusted hosts).
 - `VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=true` enables Codex live web search for backend-launched runs.
 - `VOICE_AGENT_CODEX_GUARDRAILS=warn` adds prompt-level destructive-op detection (`off|warn|enforce`).
 - `VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]` explicit token to bypass guardrail warnings.
 - `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
 - `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
-- `VOICE_AGENT_CODEX_USE_CONTEXT=true` prepends MOBaiLE context to Codex prompts.
-- `VOICE_AGENT_CODEX_CONTEXT_FILE=../.mobaile/AGENT_CONTEXT.md` points to the repo-local hidden agent context file.
+- `VOICE_AGENT_USE_RUNTIME_CONTEXT=true` prepends MOBaiLE runtime context to backend-launched agent prompts.
+- `VOICE_AGENT_RUNTIME_CONTEXT_FILE=../.mobaile/runtime/RUNTIME_CONTEXT.md` points to the repo-local runtime context file.
 - `VOICE_AGENT_CLAUDE_BINARY=claude` selects the Claude Code CLI binary.
 - `VOICE_AGENT_CLAUDE_MODEL=<model-id>` optionally forces a Claude model.
 - `VOICE_AGENT_CLAUDE_TIMEOUT_SEC=900` sets max runtime per Claude run before backend fails it.
@@ -237,7 +237,7 @@ Notes:
 - Context injection affects agent runs launched via MOBaiLE backend only.
 - Direct terminal usage (`codex ...` / `claude ...`) is unchanged unless you configure that separately.
 - Runtime config advertises agent executors (`codex`, `claude`) for normal UX; `local` is kept for internal smoke/dev flows.
-- `/v1/capabilities` now reports autonomy readiness for Codex MCP, managed skills, Peekaboo permissions, and Playwright persistence paths.
+- `/v1/capabilities` now reports autonomy readiness for Codex MCP, Peekaboo permissions, and Playwright persistence paths.
 - `GET /v1/config` now includes a generic `executors[]` descriptor list so clients can render executor availability/default/model data without provider-specific fields.
 - Per-run request controls:
   - `response_mode=concise` is the current supported mobile chat mode.

@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import mimetypes
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 
-from app.chat_attachments import artifact_type_for_upload
-from app.chat_attachments import sanitize_upload_name
-from app.models.schemas import ChatArtifact
-from app.models.schemas import DirectoryCreateResponse
-from app.models.schemas import DirectoryEntry
-from app.models.schemas import DirectoryListingResponse
-from app.models.schemas import UploadResponse
+from app.chat_attachments import artifact_type_for_upload, sanitize_upload_name
+from app.models.schemas import (
+    ChatArtifact,
+    DirectoryCreateResponse,
+    DirectoryEntry,
+    DirectoryListingResponse,
+    UploadResponse,
+)
 from app.runtime_environment import RuntimeEnvironment
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
 import os
-from subprocess import CompletedProcess
 import subprocess
+from datetime import datetime
+from subprocess import CompletedProcess
 
 from app.models.schemas import AgendaItem
 

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import json
 
-from app.models.schemas import SessionContextResponse
-from app.models.schemas import SessionRuntimeSettingValue
+from app.models.schemas import SessionContextResponse, SessionRuntimeSettingValue
 from app.runtime_environment import RuntimeEnvironment
-from app.runtime_settings_catalog import RuntimeSettingKey
-from app.runtime_settings_catalog import RuntimeSettingsCatalog
+from app.runtime_settings_catalog import RuntimeSettingKey, RuntimeSettingsCatalog
 
 
 class SessionRuntimeState:

@@ -4,7 +4,6 @@ import shlex
 
 from app.models.schemas import ActionPlan
 
-
 ALLOWED_BINARIES = {"python3", "python", "ls", "cat"}
 FORBIDDEN_TOKENS = {"rm", "sudo", "chmod", "chown", "mkfs", "dd"}
 

@@ -12,23 +12,25 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 fi
 
 gen_token() {
-  if command -v openssl >/dev/null 2>&1; then
+  if command -v openssl > /dev/null 2>&1; then
     openssl rand -hex 24
     return
   fi
-  python3 - <<'PY'
+  python3 - << 'PY'
 import secrets
 print(secrets.token_hex(24))
 PY
 }
 
 NEW_TOKEN="$(gen_token)"
-NEW_PAIR_CODE="$(python3 - <<'PY'
+NEW_PAIR_CODE="$(
+  python3 - << 'PY'
 import secrets
 print(secrets.token_urlsafe(10))
 PY
 )"
-PAIR_EXPIRES_AT="$(python3 - <<'PY'
+PAIR_EXPIRES_AT="$(
+  python3 - << 'PY'
 from datetime import datetime, timedelta, timezone
 print((datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat().replace("+00:00", "Z"))
 PY
@@ -49,7 +51,7 @@ fi
 mv "${TMP_ENV}" "${ENV_FILE}"
 
 if [[ -f "${PAIRING_FILE}" ]]; then
-  python3 - "${PAIRING_FILE}" "${NEW_PAIR_CODE}" "${PAIR_EXPIRES_AT}" <<'PY'
+  python3 - "${PAIRING_FILE}" "${NEW_PAIR_CODE}" "${PAIR_EXPIRES_AT}" << 'PY'
 import json
 import pathlib
 import sys

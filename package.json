@@ -4,6 +4,9 @@
   "version": "1.1.0",
   "description": "MOBaiLE onboarding and utility command wrappers",
   "scripts": {
+    "backend:lint": "cd backend && uvx ruff check app tests",
+    "shell:lint": "bash ./scripts/shell_checks.sh lint",
+    "shell:format": "bash ./scripts/shell_checks.sh format",
     "setup:server": "bash ./scripts/bootstrap_server.sh --mode safe",
     "setup:server:full": "bash ./scripts/bootstrap_server.sh --mode full-access",
     "setup:server:auto": "bash ./scripts/bootstrap_server.sh --mode full-access --with-autonomy-stack",

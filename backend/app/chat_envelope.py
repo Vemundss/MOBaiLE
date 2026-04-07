@@ -4,14 +4,15 @@ import json
 import mimetypes
 import re
 import uuid
-from datetime import datetime
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
-from app.models.schemas import ChatArtifact
-from app.models.schemas import ChatEnvelope
-from app.models.schemas import ChatSection
-from app.models.schemas import HumanUnblockRequest
+from app.models.schemas import (
+    ChatArtifact,
+    ChatEnvelope,
+    ChatSection,
+    HumanUnblockRequest,
+)
 
 
 def parse_chat_envelope_payload(raw_text: str) -> dict[str, object] | None:

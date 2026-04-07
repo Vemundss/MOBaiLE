@@ -40,7 +40,7 @@ read_env_value() {
 
 check_cmd() {
   local cmd="$1"
-  if command -v "${cmd}" >/dev/null 2>&1; then
+  if command -v "${cmd}" > /dev/null 2>&1; then
     ok "found command: ${cmd}"
     return 0
   fi
@@ -57,23 +57,23 @@ main() {
 
   local has_codex=0
   local has_claude=0
-  if command -v codex >/dev/null 2>&1; then
+  if command -v codex > /dev/null 2>&1; then
     ok "found command: codex"
     has_codex=1
   fi
-  if command -v claude >/dev/null 2>&1; then
+  if command -v claude > /dev/null 2>&1; then
     ok "found command: claude"
     has_claude=1
   fi
   if [[ "${has_codex}" -eq 0 && "${has_claude}" -eq 0 ]]; then
     warn "no Codex/Claude CLI found (only the internal local smoke/dev fallback will be available)"
   fi
-  if command -v claude >/dev/null 2>&1; then
+  if command -v claude > /dev/null 2>&1; then
     ok "found command: claude"
   else
     warn "claude not found (executor=claude will fail until installed/logged in)"
   fi
-  if command -v npx >/dev/null 2>&1; then
+  if command -v npx > /dev/null 2>&1; then
     ok "found command: npx"
   else
     warn "npx not found (Peekaboo/Playwright MCP servers will not launch until Node.js/npm is installed)"
@@ -107,48 +107,32 @@ main() {
       warn "VOICE_AGENT_SECURITY_MODE not set (defaults to full-access)"
     fi
     local codex_home
-    codex_home="$(read_env_value "VOICE_AGENT_CODEX_HOME" "~/.codex")"
+    codex_home="$(read_env_value "VOICE_AGENT_CODEX_HOME" "${HOME}/.codex")"
     ok "VOICE_AGENT_CODEX_HOME=${codex_home}"
   else
     warn "backend .env missing. Run scripts/install_backend.sh"
   fi
 
   local codex_home
-  codex_home="$(read_env_value "VOICE_AGENT_CODEX_HOME" "~/.codex")"
-  codex_home="${codex_home/#\~/${HOME}}"
+  codex_home="$(read_env_value "VOICE_AGENT_CODEX_HOME" "${HOME}/.codex")"
   if [[ "${has_codex}" -eq 1 ]]; then
-    if CODEX_HOME="${codex_home}" codex mcp get playwright --json >/dev/null 2>&1; then
+    if CODEX_HOME="${codex_home}" codex mcp get playwright --json > /dev/null 2>&1; then
       ok "Codex MCP configured: playwright"
     else
       warn "Codex MCP missing: playwright (run python3 ./scripts/provision_codex_autonomy.py)"
     fi
-    if CODEX_HOME="${codex_home}" codex mcp get peekaboo --json >/dev/null 2>&1; then
+    if CODEX_HOME="${codex_home}" codex mcp get peekaboo --json > /dev/null 2>&1; then
       ok "Codex MCP configured: peekaboo"
     else
       warn "Codex MCP missing: peekaboo (run python3 ./scripts/provision_codex_autonomy.py)"
     fi
-    if [[ -f "${codex_home}/skills/playwright/SKILL.md" ]]; then
-      ok "Codex skill installed: playwright"
-    else
-      warn "Codex skill missing: playwright"
-    fi
-    if [[ -f "${codex_home}/skills/peekaboo/SKILL.md" ]]; then
-      ok "Codex skill installed: peekaboo"
-    else
-      warn "Codex skill missing: peekaboo"
-    fi
-    if [[ -f "${codex_home}/skills/remote-operator/SKILL.md" ]]; then
-      ok "Codex skill installed: remote-operator"
-    else
-      warn "Codex skill missing: remote-operator"
-    fi
   fi
 
-  if [[ "$(uname -s)" == "Darwin" ]] && command -v npx >/dev/null 2>&1; then
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v npx > /dev/null 2>&1; then
     local permissions_json
-    permissions_json="$(npx -y @steipete/peekaboo permissions --json 2>/dev/null || true)"
+    permissions_json="$(npx -y @steipete/peekaboo permissions --json 2> /dev/null || true)"
     if [[ -n "${permissions_json}" ]]; then
-      if PERMISSIONS_JSON="${permissions_json}" python3 - <<'PY'
+      if PERMISSIONS_JSON="${permissions_json}" python3 - << 'PY'; then
 import json
 import os
 import sys
@@ -160,7 +144,6 @@ if missing:
     print(", ".join(missing))
     sys.exit(1)
 PY
-      then
         ok "Peekaboo reports required macOS permissions are granted"
       else
         warn "Peekaboo is missing required macOS permissions"
@@ -170,7 +153,7 @@ PY
     fi
   fi
 
-  if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+  if curl -fsS http://127.0.0.1:8000/health > /dev/null 2>&1; then
     ok "backend health endpoint reachable at http://127.0.0.1:8000/health"
     local auth_code
     auth_code="$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8000/v1/utterances || true)"

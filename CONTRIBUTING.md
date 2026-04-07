@@ -4,7 +4,7 @@ Thanks for contributing.
 
 ## Before You Start
 
-- Read the top-level [README](/Users/vemundss/Library/Mobile%20Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE/README.md) for the product overview and setup paths.
+- Read the top-level [README](README.md) for the product overview and setup paths.
 - Use the smallest safe change that solves the problem.
 - Keep generated files, local pairing artifacts, logs, and secrets out of commits.
 

@@ -13,7 +13,7 @@ SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 UNIT_PATH="${SYSTEMD_USER_DIR}/${UNIT_NAME}"
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: bash ./scripts/service_linux.sh <command>
 
 Commands:
@@ -37,12 +37,12 @@ require_linux() {
 }
 
 require_systemd_user() {
-  if ! command -v systemctl >/dev/null 2>&1; then
+  if ! command -v systemctl > /dev/null 2>&1; then
     echo "systemctl is not available. Start backend manually from backend/run_backend.sh." >&2
     exit 1
   fi
-  if ! systemctl --user show-environment >/dev/null 2>&1; then
-    cat >&2 <<EOF
+  if ! systemctl --user show-environment > /dev/null 2>&1; then
+    cat >&2 << EOF
 systemd user instance is not reachable.
 Try logging into a graphical/session shell first, or enable linger:
   sudo loginctl enable-linger $(id -un)
@@ -53,12 +53,12 @@ EOF
 }
 
 ensure_uv_available() {
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     return 0
   fi
 
   export PATH="${HOME}/.local/bin:${PATH}"
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     return 0
   fi
 
@@ -75,7 +75,7 @@ merge_runtime_pairing_state() {
     return
   fi
 
-  python3 - "${source_pairing}" "${runtime_pairing}" <<'PY'
+  python3 - "${source_pairing}" "${runtime_pairing}" << 'PY'
 from __future__ import annotations
 
 import json
@@ -121,7 +121,7 @@ PY
 sync_runtime() {
   ensure_uv_available
   mkdir -p "${RUNTIME_DIR}"
-  if command -v rsync >/dev/null 2>&1; then
+  if command -v rsync > /dev/null 2>&1; then
     rsync -a --delete \
       --exclude ".venv" \
       --exclude "__pycache__" \
@@ -156,7 +156,7 @@ sync_runtime() {
 
 write_unit() {
   mkdir -p "${SYSTEMD_USER_DIR}"
-  cat > "${UNIT_PATH}" <<EOF
+  cat > "${UNIT_PATH}" << EOF
 [Unit]
 Description=MOBaiLE backend
 After=network-online.target
@@ -212,14 +212,14 @@ install_service() {
   sync_runtime
   write_unit
   reload_systemd
-  systemctl --user enable "${UNIT_NAME}" >/dev/null
-  systemctl --user restart "${UNIT_NAME}" >/dev/null
+  systemctl --user enable "${UNIT_NAME}" > /dev/null
+  systemctl --user restart "${UNIT_NAME}" > /dev/null
   run_warmup_if_enabled
   echo "Background service installed and running."
 }
 
 uninstall_service() {
-  systemctl --user disable --now "${UNIT_NAME}" >/dev/null 2>&1 || true
+  systemctl --user disable --now "${UNIT_NAME}" > /dev/null 2>&1 || true
   rm -f "${UNIT_PATH}"
   reload_systemd
   echo "Background service removed."
@@ -233,7 +233,7 @@ start_service() {
   sync_runtime
   write_unit
   reload_systemd
-  systemctl --user restart "${UNIT_NAME}" >/dev/null
+  systemctl --user restart "${UNIT_NAME}" > /dev/null
   run_warmup_if_enabled
   echo "Background service started."
 }

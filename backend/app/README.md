@@ -19,7 +19,8 @@ This package contains the FastAPI control plane that the iPhone app talks to.
 - `pairing_service.py`: pairing-file persistence, paired-phone credential issuance/refresh, and pairing rate limiting.
 - `pairing_state.py`: pairing-file reads/writes, server URL list shaping, and paired-client credential record persistence.
 - `phone_access_mode.py`: shared phone access mode type/options normalization.
-- `runtime_session_service.py`: session-context persistence, runtime-setting validation, and slash-command behavior.
+- `runtime_session_service.py`: slash-command catalog/execution and runtime-setting UX.
+- `session_context_service.py`: session-context reads, patch application, normalization, and persistence.
 - `runtime_settings_catalog.py`: runtime-setting metadata, slash-command generation, and per-executor setting validation.
 - `runtime_executor_catalog.py`: runtime executor descriptors and `/v1/config` projection for available executors and model settings.
 - `session_runtime_state.py`: session runtime-setting hydration, legacy override handling, and response serialization.
@@ -40,6 +41,6 @@ This package contains the FastAPI control plane that the iPhone app talks to.
 
 ## Safe Refactor Boundaries
 
-- Request validation/serialization changes usually stay in `main.py`, `calendar_service.py`, `runtime_session_service.py`, `runtime_settings_catalog.py`, `runtime_executor_catalog.py`, `session_runtime_state.py`, `utterance_service.py`, `pairing_service.py`, `pairing_state.py`, `pairing_url.py`, `pairing_url_policy.py`, `phone_access_mode.py`, `workspace_service.py`, `chat_attachments.py`, `capabilities.py`, and `models/schemas.py`.
+- Request validation/serialization changes usually stay in `main.py`, `calendar_service.py`, `runtime_session_service.py`, `session_context_service.py`, `runtime_settings_catalog.py`, `runtime_executor_catalog.py`, `session_runtime_state.py`, `utterance_service.py`, `pairing_service.py`, `pairing_state.py`, `pairing_url.py`, `pairing_url_policy.py`, `phone_access_mode.py`, `workspace_service.py`, `chat_attachments.py`, `capabilities.py`, and `models/schemas.py`.
 - Storage changes belong in `storage/run_store.py` with tests in `backend/tests/test_run_state.py` or `backend/tests/test_api.py`.
 - Executor/runtime behavior changes usually involve `agent_run_service.py`, `agent_stream_handler.py`, `agent_process_monitor.py`, `agent_run_finalizer.py`, `execution_service.py`, `runtime_environment.py`, `runtime_environment_loader.py`, `capability_probes.py`, and the executor modules together.

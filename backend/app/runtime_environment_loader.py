@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import shutil
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from app.agent_runtime import load_runtime_context
-from app.models.schemas import AgentExecutorName
-from app.models.schemas import CodexReasoningEffort
-from app.models.schemas import RunExecutorName
-from app.phone_access_mode import PhoneAccessMode
-from app.phone_access_mode import normalize_phone_access_mode
+from app.models.schemas import AgentExecutorName, CodexReasoningEffort, RunExecutorName
+from app.phone_access_mode import PhoneAccessMode, normalize_phone_access_mode
 
 CODEX_MODEL_OPTIONS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.1")
 CLAUDE_MODEL_OPTIONS = ("claude-sonnet-4-5",)
@@ -260,8 +257,15 @@ def load_agent_runtime_environment_settings(backend_root: Path) -> AgentRuntimeE
     playwright_output_dir.mkdir(parents=True, exist_ok=True)
     playwright_user_data_dir.mkdir(parents=True, exist_ok=True)
 
-    use_agent_context = _read_enabled_env("VOICE_AGENT_CODEX_USE_CONTEXT", default=True)
-    runtime_context_file = os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "../.mobaile/AGENT_CONTEXT.md").strip()
+    use_agent_context = _read_enabled_env(
+        "VOICE_AGENT_USE_RUNTIME_CONTEXT",
+        default=_read_enabled_env("VOICE_AGENT_CODEX_USE_CONTEXT", default=True),
+    )
+    runtime_context_file = (
+        os.getenv("VOICE_AGENT_RUNTIME_CONTEXT_FILE", "").strip()
+        or os.getenv("VOICE_AGENT_CODEX_CONTEXT_FILE", "").strip()
+        or "../.mobaile/runtime/RUNTIME_CONTEXT.md"
+    )
     runtime_context = load_runtime_context(runtime_context_file, backend_root)
     guardrails_mode = os.getenv("VOICE_AGENT_CODEX_GUARDRAILS", "warn").strip().lower()
     dangerous_confirm_token = os.getenv(

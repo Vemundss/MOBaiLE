@@ -16,15 +16,14 @@ Folder-local `README.md` files should stay short and only explain local ownershi
 
 ## Agent Files
 
-Repo-owned agent assets live under the hidden `.mobaile/` folder.
+This repo separates repo-development agent guidance from product runtime agent assets.
 
-Use `.mobaile/` for:
+Use:
 
-- checked-in runtime agent context
-- managed skill definitions
-- other app-owned agent assets that are not normal contributor docs
+- top-level `AGENTS.md` for agents working on the MOBaiLE repository itself
+- `.mobaile/runtime/` for checked-in runtime context injected into backend-launched agents
 
-Do not use visible top-level Markdown for agent-only instructions.
+Do not use visible top-level Markdown other than `AGENTS.md` for agent-only instructions.
 
 Do not use `.codex/` for repo-owned assets unless they are truly Codex-specific and intended to mirror Codex home layout. In this repo, the assets are MOBaiLE-owned and can be consumed by multiple agent backends, so `.mobaile/` is the correct home.
 

@@ -13,7 +13,6 @@ import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = REPO_ROOT / "backend"
-SKILLS_SOURCE_DIR = REPO_ROOT / ".mobaile" / "skills"
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 DEFAULT_PLAYWRIGHT_OUTPUT_DIR = BACKEND_DIR / "data" / "playwright"
 DEFAULT_PLAYWRIGHT_USER_DATA_DIR = BACKEND_DIR / "data" / "playwright-profile"
@@ -21,7 +20,7 @@ DEFAULT_PLAYWRIGHT_USER_DATA_DIR = BACKEND_DIR / "data" / "playwright-profile"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Provision Codex MCP servers and skills for autonomous MOBaiLE runs."
+        description="Provision Codex MCP servers for autonomous MOBaiLE runs."
     )
     parser.add_argument(
         "--mode",
@@ -47,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force-skills",
         action="store_true",
-        help="Overwrite existing skill directories for MOBaiLE-managed skills.",
+        help="Deprecated no-op. MOBaiLE no longer provisions repo-managed Codex skills.",
     )
     parser.add_argument(
         "--force-mcp",
@@ -110,24 +109,6 @@ def _codex_exists() -> bool:
 
 def _npx_exists() -> bool:
     return shutil.which("npx") is not None
-
-
-def install_skills(*, codex_home: Path, force: bool) -> None:
-    skills_dest_root = codex_home / "skills"
-    skills_dest_root.mkdir(parents=True, exist_ok=True)
-
-    for source_dir in sorted(SKILLS_SOURCE_DIR.iterdir()):
-        if not source_dir.is_dir():
-            continue
-        dest_dir = skills_dest_root / source_dir.name
-        if dest_dir.exists():
-            if force:
-                shutil.rmtree(dest_dir)
-            else:
-                warn(f"keeping existing skill '{source_dir.name}' at {dest_dir}")
-                continue
-        shutil.copytree(source_dir, dest_dir)
-        ok(f"installed skill '{source_dir.name}' -> {dest_dir}")
 
 
 def get_mcp_config(*, codex_home: Path, name: str) -> dict[str, object] | None:
@@ -303,10 +284,11 @@ def main() -> int:
     info(f"Playwright user-data dir: {playwright_user_data_dir}")
 
     if not _codex_exists():
-        warn("codex is not installed; skipping MCP and skill provisioning")
+        warn("codex is not installed; skipping MCP provisioning")
         return 0
 
-    install_skills(codex_home=codex_home, force=args.force_skills)
+    if args.force_skills:
+        warn("--force-skills is deprecated; repo-managed Codex skills were removed")
 
     ensure_mcp_server(
         codex_home=codex_home,

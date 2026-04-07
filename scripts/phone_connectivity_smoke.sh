@@ -12,7 +12,7 @@ EXECUTOR="${VOICE_AGENT_SMOKE_EXECUTOR:-local}"
 
 require_cmd() {
   local cmd="$1"
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
+  if ! command -v "${cmd}" > /dev/null 2>&1; then
     echo "Missing required command: ${cmd}" >&2
     exit 1
   fi
@@ -28,7 +28,8 @@ load_pairing() {
     exit 1
   fi
   if [[ -z "${SERVER_URL}" ]]; then
-    SERVER_URL="$(PAIRING_FILE_PATH="${PAIRING_FILE}" python3 - <<'PY'
+    SERVER_URL="$(
+      PAIRING_FILE_PATH="${PAIRING_FILE}" python3 - << 'PY'
 import json
 import os
 from pathlib import Path
@@ -36,7 +37,7 @@ p = Path(os.environ["PAIRING_FILE_PATH"])
 d = json.loads(p.read_text(encoding='utf-8'))
 print(d.get('server_url', ''))
 PY
-)"
+    )"
   fi
   if [[ -z "${TOKEN}" && -f "${ENV_FILE}" ]]; then
     TOKEN="$(awk -F= '/^VOICE_AGENT_API_TOKEN=/{print $2; exit}' "${ENV_FILE}")"
@@ -106,8 +107,8 @@ main() {
   final_status="$(wait_for_terminal_status "${run_id}")"
   echo "final status: ${final_status}"
 
-  curl -sS -H "Authorization: Bearer ${TOKEN}" "${SERVER_URL}/v1/runs/${run_id}" \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print("summary:", d.get("summary","")); print("events:", len(d.get("events", [])))'
+  curl -sS -H "Authorization: Bearer ${TOKEN}" "${SERVER_URL}/v1/runs/${run_id}" |
+    python3 -c 'import json,sys; d=json.load(sys.stdin); print("summary:", d.get("summary","")); print("events:", len(d.get("events", [])))'
 }
 
 main "$@"

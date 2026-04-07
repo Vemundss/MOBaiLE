@@ -45,7 +45,7 @@ Implemented:
 - Codex MCP registration for `peekaboo`
 - readiness probe for required macOS permissions
 
-### 4. Skills / operating heuristics
+### 4. Runtime prompt guidance
 
 Needed:
 
@@ -54,10 +54,7 @@ Needed:
 
 Implemented:
 
-- repo-managed Codex skills:
-  - `playwright`
-  - `peekaboo`
-  - `remote-operator`
+- repo-owned runtime context injected by the backend from `.mobaile/runtime/RUNTIME_CONTEXT.md`
 
 ### 5. Readiness checks
 
@@ -69,7 +66,6 @@ Implemented:
 
 - `/v1/capabilities` now reports:
   - Codex MCP config for Playwright and Peekaboo
-  - installed Codex skills
   - Playwright persistence paths
   - Peekaboo permission status
   - Codex web-search status
@@ -105,7 +101,7 @@ Managed install:
 bash ./scripts/bootstrap_server.sh --mode full-access --with-autonomy-stack
 ```
 
-Refresh Codex MCP + skills:
+Refresh Codex MCP config:
 
 ```bash
 python3 ./scripts/provision_codex_autonomy.py --mode full-access
@@ -115,7 +111,6 @@ python3 ./scripts/provision_codex_autonomy.py --mode full-access
 
 This direction borrows the same core ideas used by OpenClaw:
 
-- bundled skills instead of prompt-only hints
 - explicit MCP/browser automation surfaces
 - persistent browser state for authenticated sessions
 - readiness checks for permission-sensitive desktop control

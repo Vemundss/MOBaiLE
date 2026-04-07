@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from app.agent_run_service import AgentRunService
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from app.agent_run_service import AgentRunService
 from app.executors.local_executor import LocalExecutor
-from app.models.schemas import ActionPlan
-from app.models.schemas import AgentExecutorName
-from app.models.schemas import AgendaItem
-from app.models.schemas import ChatSection
-from app.models.schemas import ExecutionEvent
-from app.models.schemas import ResponseProfile
+from app.models.schemas import (
+    ActionPlan,
+    AgendaItem,
+    AgentExecutorName,
+    ChatSection,
+    ExecutionEvent,
+    ResponseProfile,
+)
 from app.profile_store import ProfileStore
 from app.run_state import RunState
 from app.runtime_environment import RuntimeEnvironment

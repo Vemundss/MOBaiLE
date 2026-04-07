@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.capability_probes import classify_apple_event_failure
-from app.capability_probes import probe_binary
-from app.capability_probes import probe_calendar_adapter
-from app.capability_probes import probe_transcriber
+from app.capability_probes import (
+    classify_apple_event_failure,
+    probe_binary,
+    probe_calendar_adapter,
+    probe_transcriber,
+)
 
 
 def test_probe_binary_returns_resolved_path_for_existing_file(tmp_path: Path) -> None:

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from app.models.schemas import ExecutionEvent
-from app.models.schemas import RunDiagnostics
-from app.models.schemas import RunRecord
+from app.models.schemas import ExecutionEvent, RunDiagnostics, RunRecord
 from app.run_state import RunState
 from app.storage import RunStore
 

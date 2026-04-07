@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.agent_runtime import build_agent_prompt
-from app.agent_runtime import load_runtime_context
+from app.agent_runtime import build_agent_prompt, load_runtime_context
 from app.runtime_environment import RuntimeEnvironment
 
 
@@ -53,11 +52,11 @@ def test_runtime_environment_reads_phone_access_mode(monkeypatch, tmp_path: Path
 
 
 def test_load_runtime_context_falls_back_to_hidden_mobaile_dir(tmp_path: Path):
-    hidden = tmp_path / ".mobaile" / "AGENT_CONTEXT.md"
+    hidden = tmp_path / ".mobaile" / "runtime" / "RUNTIME_CONTEXT.md"
     hidden.parent.mkdir(parents=True, exist_ok=True)
     hidden.write_text("hidden runtime context", encoding="utf-8")
 
-    loaded = load_runtime_context("AGENT_CONTEXT.md", tmp_path / "backend")
+    loaded = load_runtime_context("RUNTIME_CONTEXT.md", tmp_path / "backend")
 
     assert loaded == "hidden runtime context"
 

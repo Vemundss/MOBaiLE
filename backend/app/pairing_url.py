@@ -10,17 +10,27 @@ try:
     from app.pairing_url_policy import dedupe_server_urls as _dedupe_server_urls
     from app.pairing_url_policy import is_ipv4 as _is_ipv4
     from app.pairing_url_policy import is_loopback_host as _is_loopback_host
-    from app.pairing_url_policy import is_loopback_only_server_urls as _is_loopback_only_server_urls
-    from app.pairing_url_policy import is_network_exposed_host as _is_network_exposed_host
-    from app.pairing_url_policy import is_private_non_loopback_ipv4 as _is_private_non_loopback_ipv4
+    from app.pairing_url_policy import (
+        is_loopback_only_server_urls as _is_loopback_only_server_urls,
+    )
+    from app.pairing_url_policy import (
+        is_network_exposed_host as _is_network_exposed_host,
+    )
+    from app.pairing_url_policy import (
+        is_private_non_loopback_ipv4 as _is_private_non_loopback_ipv4,
+    )
     from app.pairing_url_policy import is_public_server_url as _is_public_server_url
     from app.pairing_url_policy import is_routable_local_ipv4 as _is_routable_local_ipv4
     from app.pairing_url_policy import is_tailscale_ipv4 as _is_tailscale_ipv4
     from app.pairing_url_policy import loopback_server_url as _loopback_server_url
     from app.pairing_url_policy import normalize_server_url as _normalize_server_url
-    from app.pairing_url_policy import server_url_matches_mode as _server_url_matches_mode
+    from app.pairing_url_policy import (
+        server_url_matches_mode as _server_url_matches_mode,
+    )
     from app.phone_access_mode import PhoneAccessMode
-    from app.phone_access_mode import normalize_phone_access_mode as _normalize_phone_access_mode
+    from app.phone_access_mode import (
+        normalize_phone_access_mode as _normalize_phone_access_mode,
+    )
 except ModuleNotFoundError:
     import ipaddress
     from urllib.parse import urlparse

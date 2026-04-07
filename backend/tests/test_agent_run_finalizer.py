@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.agent_run_finalizer import AgentRunFinalizer
-from app.agent_run_finalizer import AgentRunOutcome
+from app.agent_run_finalizer import AgentRunFinalizer, AgentRunOutcome
 from app.models.schemas import RunRecord
 from app.run_state import RunState
 from app.storage import RunStore

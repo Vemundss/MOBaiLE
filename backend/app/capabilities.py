@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import platform
-from datetime import datetime
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from app.capability_probes import probe_binary
-from app.capability_probes import probe_calendar_adapter
-from app.capability_probes import probe_codex_mcp_server
-from app.capability_probes import probe_codex_search
-from app.capability_probes import probe_codex_skill
-from app.capability_probes import probe_peekaboo_permissions
-from app.capability_probes import probe_playwright_persistence
-from app.capability_probes import probe_transcriber
+from app.capability_probes import (
+    probe_binary,
+    probe_calendar_adapter,
+    probe_codex_mcp_server,
+    probe_codex_search,
+    probe_peekaboo_permissions,
+    probe_playwright_persistence,
+    probe_transcriber,
+)
 from app.models.schemas import AgendaItem, CapabilitiesResponse, CapabilityProbe
 
 
@@ -42,9 +42,6 @@ def collect_capabilities(
     capabilities.append(probe_codex_search(codex_enable_web_search))
     capabilities.append(probe_codex_mcp_server(codex_binary, codex_home, "playwright"))
     capabilities.append(probe_codex_mcp_server(codex_binary, codex_home, "peekaboo"))
-    capabilities.append(probe_codex_skill(codex_home, "playwright"))
-    capabilities.append(probe_codex_skill(codex_home, "peekaboo"))
-    capabilities.append(probe_codex_skill(codex_home, "remote-operator"))
     capabilities.append(
         probe_playwright_persistence(
             output_dir=playwright_output_dir,

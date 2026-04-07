@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-import threading
 
 LEGACY_SESSION_PROFILE_COMPAT_REMOVE_AFTER = "2026-07-01"
 

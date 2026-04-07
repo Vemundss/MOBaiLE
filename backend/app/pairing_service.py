@@ -4,14 +4,15 @@ import hashlib
 import secrets
 import threading
 import time
-from datetime import datetime
-from datetime import timezone
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from app.models.schemas import PairExchangeRequest
-from app.models.schemas import PairExchangeResponse
-from app.models.schemas import PairRefreshRequest
+from app.models.schemas import (
+    PairExchangeRequest,
+    PairExchangeResponse,
+    PairRefreshRequest,
+)
 from app.pairing_state import PairingState
 from app.runtime_environment import RuntimeEnvironment
 

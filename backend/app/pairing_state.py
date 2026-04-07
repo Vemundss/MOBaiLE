@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
-
 
 HashToken = Callable[[str], str]
 

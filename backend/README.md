@@ -22,7 +22,7 @@ This document is backend-scoped. The canonical human setup and operations flow l
 - Config: `backend/.env`
 - Safe template: `backend/.env.example`
 - Pairing payload: `backend/pairing.json` for `server_url`, `session_id`, and `pair_code` only
-- Repo-local agent assets: `../.mobaile/`
+- Repo-local runtime assets: `../.mobaile/runtime/`
 - Persistent profiles:
   - `backend/data/profiles/<profile_id>/AGENTS.md`
   - `backend/data/profiles/<profile_id>/MEMORY.md`

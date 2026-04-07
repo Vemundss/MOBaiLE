@@ -1,26 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import threading
 import uuid
-from typing import Callable
-from typing import Protocol
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Protocol
 
 from fastapi import HTTPException
 
 from app.agent_runtime import is_calendar_request
-from app.chat_attachments import display_utterance_text
-from app.chat_attachments import render_utterance_for_executor
-from app.models.schemas import ActionPlan
-from app.models.schemas import AgentExecutorName
-from app.models.schemas import ExecutionEvent
-from app.models.schemas import ResponseProfile
-from app.models.schemas import RunExecutorName
-from app.models.schemas import RunRecord
-from app.models.schemas import SessionContextResponse
-from app.models.schemas import UtteranceRequest
-from app.models.schemas import UtteranceResponse
+from app.chat_attachments import display_utterance_text, render_utterance_for_executor
+from app.models.schemas import (
+    ActionPlan,
+    AgentExecutorName,
+    ExecutionEvent,
+    ResponseProfile,
+    RunExecutorName,
+    RunRecord,
+    SessionContextResponse,
+    UtteranceRequest,
+    UtteranceResponse,
+)
 from app.orchestrator.planner import plan_from_utterance
 from app.policy.validator import validate_plan
 from app.run_state import RunState

@@ -4,7 +4,12 @@ import json
 import sqlite3
 from pathlib import Path
 
-from app.models.schemas import ActionPlan, ExecutionEvent, HumanUnblockRequest, RunRecord
+from app.models.schemas import (
+    ActionPlan,
+    ExecutionEvent,
+    HumanUnblockRequest,
+    RunRecord,
+)
 
 LEGACY_CODEX_THREAD_MAP_COMPAT_REMOVE_AFTER = "2026-07-01"
 RUN_COLUMNS = """

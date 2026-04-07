@@ -4,11 +4,9 @@ from functools import cached_property
 
 from fastapi import HTTPException
 
-from app.models.schemas import RuntimeSettingDescriptor
-from app.models.schemas import SlashCommandDescriptor
-from app.runtime_environment import CODEX_REASONING_EFFORT_OPTIONS
+from app.models.schemas import RuntimeSettingDescriptor, SlashCommandDescriptor
 from app.runtime_environment import RuntimeEnvironment
-
+from app.runtime_environment_loader import CODEX_REASONING_EFFORT_OPTIONS
 
 RuntimeSettingKey = tuple[str, str]
 

@@ -21,21 +21,21 @@ step() {
 
 require_cmd() {
   local cmd="$1"
-  if ! command -v "$cmd" >/dev/null 2>&1; then
+  if ! command -v "$cmd" > /dev/null 2>&1; then
     echo "Missing required command: ${cmd}" >&2
     exit 1
   fi
 }
 
 ensure_uv() {
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     return
   fi
   echo "uv not found. Installing uv..."
   require_cmd curl
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="${HOME}/.local/bin:${PATH}"
-  if ! command -v uv >/dev/null 2>&1; then
+  if ! command -v uv > /dev/null 2>&1; then
     echo "uv install completed but uv is still not on PATH." >&2
     echo "Open a new shell and run again, or add ~/.local/bin to PATH." >&2
     exit 1
@@ -43,25 +43,25 @@ ensure_uv() {
 }
 
 gen_token() {
-  if command -v openssl >/dev/null 2>&1; then
+  if command -v openssl > /dev/null 2>&1; then
     openssl rand -hex 24
     return
   fi
-  python3 - <<'PY'
+  python3 - << 'PY'
 import secrets
 print(secrets.token_hex(24))
 PY
 }
 
 gen_pair_code() {
-  python3 - <<'PY'
+  python3 - << 'PY'
 import secrets
 print(secrets.token_urlsafe(10))
 PY
 }
 
 pair_code_expiry() {
-  PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - <<'PY'
+  PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - << 'PY'
 from datetime import datetime, timedelta, timezone
 import os
 ttl = int(os.environ["PAIR_TTL_MIN"])
@@ -95,13 +95,13 @@ write_pairing_details() {
   (
     cd "${BACKEND_DIR}"
     PAIRING_FILE="${PAIRING_FILE}" \
-    PAIR_CODE="${PAIR_CODE}" \
-    PAIR_CODE_EXPIRES_AT="${PAIR_CODE_EXPIRES_AT}" \
-    BIND_HOST="${bind_host}" \
-    BIND_PORT="8000" \
-    PUBLIC_SERVER_URL="${PUBLIC_SERVER_URL%/}" \
-    PHONE_ACCESS_MODE="${PHONE_ACCESS_MODE}" \
-    uv run python - <<'PY'
+      PAIR_CODE="${PAIR_CODE}" \
+      PAIR_CODE_EXPIRES_AT="${PAIR_CODE_EXPIRES_AT}" \
+      BIND_HOST="${bind_host}" \
+      BIND_PORT="8000" \
+      PUBLIC_SERVER_URL="${PUBLIC_SERVER_URL%/}" \
+      PHONE_ACCESS_MODE="${PHONE_ACCESS_MODE}" \
+      uv run python - << 'PY'
 import json
 import os
 from pathlib import Path
@@ -130,7 +130,7 @@ PY
 read_pairing_value() {
   local key="$1"
 
-  PAIRING_FILE="${PAIRING_FILE}" PAIRING_KEY="${key}" python3 - <<'PY'
+  PAIRING_FILE="${PAIRING_FILE}" PAIRING_KEY="${key}" python3 - << 'PY'
 import json
 import os
 from pathlib import Path
@@ -149,9 +149,10 @@ write_env_file() {
   local host_value="127.0.0.1"
   local public_url_value="${PUBLIC_SERVER_URL%/}"
   local phone_access_value="${PHONE_ACCESS_MODE}"
-  local codex_home_value="~/.codex"
+  local codex_home_value="${HOME}/.codex"
   local codex_search_value="true"
-  local context_file_value="../.mobaile/AGENT_CONTEXT.md"
+  local use_runtime_context_value="true"
+  local context_file_value="../.mobaile/runtime/RUNTIME_CONTEXT.md"
   local playwright_output_value="data/playwright"
   local playwright_profile_value="data/playwright-profile"
   if [[ "${PHONE_ACCESS_MODE}" != "local" ]]; then
@@ -176,6 +177,7 @@ write_env_file() {
       -v phone_access="${phone_access_value}" \
       -v codex_home="${codex_home_value}" \
       -v codex_search="${codex_search_value}" \
+      -v use_runtime_context="${use_runtime_context_value}" \
       -v context_file="${context_file_value}" \
       -v playwright_output="${playwright_output_value}" \
       -v playwright_profile="${playwright_profile_value}" \
@@ -189,6 +191,7 @@ write_env_file() {
         seen_phone_access=0
         seen_codex_home=0
         seen_codex_search=0
+        seen_use_runtime_context=0
         seen_context_file=0
         seen_playwright_output=0
         seen_playwright_profile=0
@@ -235,11 +238,27 @@ write_env_file() {
         print
         next
       }
+      /^VOICE_AGENT_USE_RUNTIME_CONTEXT=/ {
+        seen_use_runtime_context=1
+        print
+        next
+      }
+      /^VOICE_AGENT_CODEX_USE_CONTEXT=/ {
+        seen_use_runtime_context=1
+        print "VOICE_AGENT_USE_RUNTIME_CONTEXT=" use_runtime_context
+        next
+      }
+      /^VOICE_AGENT_RUNTIME_CONTEXT_FILE=/ {
+        seen_context_file=1
+        print
+        next
+      }
       /^VOICE_AGENT_CODEX_CONTEXT_FILE=/ {
         seen_context_file=1
-        if ($0 == "VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md") {
-          print "VOICE_AGENT_CODEX_CONTEXT_FILE=" context_file
+        if ($0 == "VOICE_AGENT_CODEX_CONTEXT_FILE=AGENT_CONTEXT.md" || $0 == "VOICE_AGENT_CODEX_CONTEXT_FILE=../.mobaile/AGENT_CONTEXT.md") {
+          print "VOICE_AGENT_RUNTIME_CONTEXT_FILE=" context_file
         } else {
+          sub(/^VOICE_AGENT_CODEX_CONTEXT_FILE=/, "VOICE_AGENT_RUNTIME_CONTEXT_FILE=")
           print
         }
         next
@@ -264,7 +283,8 @@ write_env_file() {
         if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
         if (!seen_codex_home) print "VOICE_AGENT_CODEX_HOME=" codex_home
         if (!seen_codex_search) print "VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=" codex_search
-        if (!seen_context_file) print "VOICE_AGENT_CODEX_CONTEXT_FILE=" context_file
+        if (!seen_use_runtime_context) print "VOICE_AGENT_USE_RUNTIME_CONTEXT=" use_runtime_context
+        if (!seen_context_file) print "VOICE_AGENT_RUNTIME_CONTEXT_FILE=" context_file
         if (!seen_playwright_output) print "VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=" playwright_output
         if (!seen_playwright_profile) print "VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=" playwright_profile
       }
@@ -273,7 +293,7 @@ write_env_file() {
     mv "${tmp_env}" "${ENV_FILE}"
     return
   fi
-  cat > "${ENV_FILE}" <<EOF
+  cat > "${ENV_FILE}" << EOF
 # Generated by scripts/install_backend.sh
 VOICE_AGENT_API_TOKEN=${token}
 VOICE_AGENT_HOST=${host_value}
@@ -282,11 +302,11 @@ VOICE_AGENT_SECURITY_MODE=${SECURITY_MODE}
 VOICE_AGENT_PHONE_ACCESS_MODE=${phone_access_value}
 EOF
   if [[ -n "${public_url_value}" ]]; then
-    cat >> "${ENV_FILE}" <<EOF
+    cat >> "${ENV_FILE}" << EOF
 VOICE_AGENT_PUBLIC_SERVER_URL=${public_url_value}
 EOF
   fi
-  cat >> "${ENV_FILE}" <<EOF
+  cat >> "${ENV_FILE}" << EOF
 VOICE_AGENT_DEFAULT_EXECUTOR=codex
 VOICE_AGENT_CODEX_BINARY=codex
 VOICE_AGENT_CODEX_HOME=${codex_home_value}
@@ -294,8 +314,8 @@ VOICE_AGENT_CODEX_UNRESTRICTED=${codex_unrestricted}
 VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=${codex_search_value}
 VOICE_AGENT_CODEX_GUARDRAILS=warn
 VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]
-VOICE_AGENT_CODEX_USE_CONTEXT=true
-VOICE_AGENT_CODEX_CONTEXT_FILE=${context_file_value}
+VOICE_AGENT_USE_RUNTIME_CONTEXT=${use_runtime_context_value}
+VOICE_AGENT_RUNTIME_CONTEXT_FILE=${context_file_value}
 # Optional Claude Code support:
 VOICE_AGENT_CLAUDE_BINARY=claude
 # VOICE_AGENT_CLAUDE_MODEL=sonnet
@@ -358,7 +378,7 @@ main() {
         PROVISION_AUTONOMY_STACK="false"
         shift
         ;;
-      -h|--help)
+      -h | --help)
         echo "Usage: bash ./scripts/install_backend.sh [--mode safe|full-access] [--pair-ttl-min <minutes>] [--public-url <https://host[:port]>] [--phone-access tailscale|wifi|local] [--brief] [--expose-network] [--with-autonomy-stack|--skip-autonomy-stack]"
         exit 0
         ;;
@@ -444,18 +464,18 @@ main() {
   fi
 
   local pairing_qr_path=""
-  if command -v qrencode >/dev/null 2>&1; then
-    if bash "${REPO_ROOT}/scripts/pairing_qr.sh" >/dev/null 2>&1; then
+  if command -v qrencode > /dev/null 2>&1; then
+    if bash "${REPO_ROOT}/scripts/pairing_qr.sh" > /dev/null 2>&1; then
       pairing_qr_path="${REPO_ROOT}/backend/pairing-qr.png"
     fi
   fi
 
   local has_codex="false"
   local has_claude="false"
-  if command -v codex >/dev/null 2>&1; then
+  if command -v codex > /dev/null 2>&1; then
     has_codex="true"
   fi
-  if command -v claude >/dev/null 2>&1; then
+  if command -v claude > /dev/null 2>&1; then
     has_claude="true"
   fi
 

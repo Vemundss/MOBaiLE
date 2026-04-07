@@ -1,7 +1,8 @@
 # Architecture
 
-This file is the short engineering map for the current repo.
+This file is the short engineering map for contributors and coding agents.
 `README.md` is product/setup oriented; this document focuses on how the app works today.
+It is intentionally not a full API reference.
 
 ## Product Shape
 
@@ -15,7 +16,7 @@ There are three execution paths:
 1. `codex`
 - Primary agent executor for normal use.
 - Backend launches Codex CLI in the requested working directory.
-- Backend injects MOBaiLE-specific context and stages profile files into `.mobaile/`.
+- Backend injects repo-owned runtime context from `.mobaile/runtime/` and stages profile files into `.mobaile/`.
 
 2. `claude`
 - Alternate agent executor with the same phone/backend flow.
@@ -49,23 +50,18 @@ A fourth path exists for deterministic calendar requests:
 - Generated artifacts live in `contracts/`
 - Refresh with `uv run python ../scripts/sync_contracts.py` from `backend/`
 
-## Core API Surfaces
+## Core Backend Flows
 
-These are the important live endpoints:
+These are the important backend surfaces to understand before making changes:
 
-- `POST /v1/pair/exchange`
-- `POST /v1/utterances`
-- `POST /v1/audio`
-- `POST /v1/uploads`
-- `GET /v1/runs/{run_id}`
-- `GET /v1/runs/{run_id}/events`
-- `POST /v1/runs/{run_id}/cancel`
-- `GET /v1/runs/{run_id}/diagnostics`
-- `GET /v1/config`
-- `GET /v1/capabilities`
-- `GET /v1/tools/calendar/today`
-- `GET /v1/files`
-- `GET/POST /v1/directories`
+- Pairing, host URLs, and auth: `pairing_service.py`, `pairing_state.py`, `pairing_url.py`, and `/v1/pair/*`
+- Prompt submission: `utterance_service.py` plus `/v1/utterances` and `/v1/audio`
+- Run execution and streaming: `execution_service.py`, `agent_run_service.py`, and `/v1/runs/*`
+- Session/runtime controls: `runtime_session_service.py`, `session_runtime_state.py`, `/v1/config`, `/v1/slash-commands`, and `/v1/sessions/*`
+- Workspace and uploads: `workspace_service.py`, `/v1/uploads`, `/v1/files`, and `/v1/directories`
+- Typed contracts: `backend/app/models/schemas.py` and generated files in `contracts/`
+
+For the current concrete endpoint list, read [`backend/app/main.py`](backend/app/main.py).
 
 ## Message Model
 
@@ -82,6 +78,8 @@ If you change backend response shapes, update the Pydantic schemas first and the
 Backend:
 - run history is stored in SQLite
 - profile-scoped `AGENTS.md` and `MEMORY.md` live under `backend/data/profiles/<profile_id>/`
+- those files are private per-user runtime state, not repo-owned defaults
+- repo-owned runtime defaults live under `.mobaile/runtime/`
 - profile files are staged into each run working directory under `.mobaile/`
 
 iOS:

@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from app.models.schemas import AgentExecutorName
-from app.models.schemas import ExecutionEvent
+from app.models.schemas import AgentExecutorName, ExecutionEvent
 from app.profile_store import ProfileStore
 from app.run_state import RunState
 

@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${REPO_ROOT}/backend/.env"
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: bash ./scripts/set_security_mode.sh <safe|full-access>
 
 Switches backend runtime mode by updating backend/.env:
@@ -78,4 +78,3 @@ mv "${TMP_ENV}" "${ENV_FILE}"
 echo "Set security mode to ${MODE} in ${ENV_FILE}"
 echo "Restart backend:"
 echo "  bash ./scripts/service_macos.sh restart"
-

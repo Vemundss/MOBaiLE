@@ -42,7 +42,7 @@ run `mobaile update`.
 ## Contracts and Autonomy
 
 - `sync_contracts.py`: refresh checked-in contracts from backend schemas
-- `provision_codex_autonomy.py`: provision Codex MCP and skill stack for trusted hosts
+- `provision_codex_autonomy.py`: provision Codex MCP configuration for trusted hosts
 
 ## Release and App Store
 
@@ -53,6 +53,8 @@ run `mobaile update`.
 ## Optional npm Wrappers
 
 ```bash
+npm run shell:lint
+npm run shell:format
 npm run setup:server
 npm run setup:server:auto
 npm run backend:install
@@ -63,6 +65,20 @@ npm run pair:qr
 npm run ios:open
 npm run ios:version
 ```
+
+## Shell Tooling
+
+Shell scripts in `scripts/` use a small shared wrapper:
+
+```bash
+bash ./scripts/shell_checks.sh lint
+bash ./scripts/shell_checks.sh format
+```
+
+The lint command runs `shellcheck` and `shfmt -d`. The format command rewrites the shell
+scripts in place with `shfmt`.
+
+Install those tools with your preferred package manager before running the checks locally.
 
 ## Common Direct Commands
 

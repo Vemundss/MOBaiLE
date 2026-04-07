@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from app.models.schemas import RuntimeExecutorDescriptor
-from app.models.schemas import RuntimeSettingDescriptor
-from app.models.schemas import SessionContextResponse
-from app.models.schemas import SessionRuntimeSettingValue
+from app.models.schemas import (
+    RuntimeExecutorDescriptor,
+    RuntimeSettingDescriptor,
+    SessionContextResponse,
+    SessionRuntimeSettingValue,
+)
 from app.runtime_settings_catalog import RuntimeSettingsCatalog
 from app.session_runtime_state import SessionRuntimeState
 

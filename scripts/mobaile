@@ -7,7 +7,7 @@ resolve_repo_root() {
     return
   fi
 
-  python3 - "${BASH_SOURCE[0]}" <<'PY'
+  python3 - "${BASH_SOURCE[0]}" << 'PY'
 from pathlib import Path
 import sys
 
@@ -16,7 +16,7 @@ PY
 }
 
 usage() {
-  cat <<'EOF'
+  cat << 'EOF'
 Usage: mobaile [command]
 
 Commands:
@@ -37,7 +37,7 @@ read_env_value() {
   local key="$2"
   local default_value="${3:-}"
 
-  python3 - "${env_file}" "${key}" "${default_value}" <<'PY'
+  python3 - "${env_file}" "${key}" "${default_value}" << 'PY'
 from pathlib import Path
 import sys
 
@@ -68,7 +68,7 @@ read_pairing_value() {
   local field_name="$2"
   local default_value="${3:-}"
 
-  python3 - "${pairing_file}" "${field_name}" "${default_value}" <<'PY'
+  python3 - "${pairing_file}" "${field_name}" "${default_value}" << 'PY'
 import json
 from pathlib import Path
 import sys
@@ -187,7 +187,7 @@ active_backend_dir() {
 
 git_checkout_or_fail() {
   local repo_root="$1"
-  if ! command -v git >/dev/null 2>&1; then
+  if ! command -v git > /dev/null 2>&1; then
     echo "git is required for mobaile update." >&2
     exit 1
   fi
@@ -199,12 +199,12 @@ git_checkout_or_fail() {
 
 git_current_branch() {
   local repo_root="$1"
-  git -C "${repo_root}" branch --show-current 2>/dev/null
+  git -C "${repo_root}" branch --show-current 2> /dev/null
 }
 
 git_origin_url() {
   local repo_root="$1"
-  git -C "${repo_root}" remote get-url origin 2>/dev/null || true
+  git -C "${repo_root}" remote get-url origin 2> /dev/null || true
 }
 
 remote_is_update_source() {
@@ -215,7 +215,7 @@ remote_is_update_source() {
   fi
 
   case "${remote_url}" in
-    https://github.com/Vemundss/MOBaiLE.git|https://github.com/vemundss/MOBaiLE.git|git@github.com:Vemundss/MOBaiLE.git|git@github.com:vemundss/MOBaiLE.git|ssh://git@github.com/Vemundss/MOBaiLE.git|ssh://git@github.com/vemundss/MOBaiLE.git)
+    https://github.com/Vemundss/MOBaiLE.git | https://github.com/vemundss/MOBaiLE.git | git@github.com:Vemundss/MOBaiLE.git | git@github.com:vemundss/MOBaiLE.git | ssh://git@github.com/Vemundss/MOBaiLE.git | ssh://git@github.com/vemundss/MOBaiLE.git)
       return 0
       ;;
     *)
@@ -227,12 +227,12 @@ remote_is_update_source() {
 git_short_ref() {
   local repo_root="$1"
   local ref="$2"
-  git -C "${repo_root}" rev-parse --short "${ref}" 2>/dev/null
+  git -C "${repo_root}" rev-parse --short "${ref}" 2> /dev/null
 }
 
 git_worktree_dirty() {
   local repo_root="$1"
-  if [[ -n "$(git -C "${repo_root}" status --short 2>/dev/null)" ]]; then
+  if [[ -n "$(git -C "${repo_root}" status --short 2> /dev/null)" ]]; then
     return 0
   fi
   return 1
@@ -240,7 +240,7 @@ git_worktree_dirty() {
 
 fetch_update_refs() {
   local repo_root="$1"
-  git -C "${repo_root}" fetch --all --prune >/dev/null 2>&1
+  git -C "${repo_root}" fetch --all --prune > /dev/null 2>&1
 }
 
 print_update_status() {
@@ -266,7 +266,7 @@ service_state_label() {
 
   if [[ -n "${override}" ]]; then
     case "${override}" in
-      running|started|active) printf "Running\n" ;;
+      running | started | active) printf "Running\n" ;;
       *) printf "Stopped\n" ;;
     esac
     return
@@ -299,7 +299,7 @@ service_state_label() {
 pairing_status_label() {
   local pairing_file="$1"
 
-  python3 - "${pairing_file}" <<'PY'
+  python3 - "${pairing_file}" << 'PY'
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -364,13 +364,13 @@ open_file_if_possible() {
     return
   fi
 
-  if command -v open >/dev/null 2>&1; then
-    open "${path}" >/dev/null 2>&1 || true
+  if command -v open > /dev/null 2>&1; then
+    open "${path}" > /dev/null 2>&1 || true
     return
   fi
 
-  if command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "${path}" >/dev/null 2>&1 || true
+  if command -v xdg-open > /dev/null 2>&1; then
+    xdg-open "${path}" > /dev/null 2>&1 || true
   fi
 }
 
@@ -390,7 +390,7 @@ status_command() {
   public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
   server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
 
-  cat <<EOF
+  cat << EOF
 MOBaiLE: $(service_state_label "${repo_root}")
 Security: $(friendly_security_label "${security_mode}")
 Phone access: $(friendly_phone_access_label "${phone_access_mode}" "${public_server_url}" "${server_url}")
@@ -433,13 +433,13 @@ pair_command() {
     fi
 
     MOBAILE_BACKEND_DIR="${backend_dir}" \
-    MOBAILE_PAIRING_FILE="${pairing_file}" \
-    MOBAILE_PAIRING_QR_OUT="${qr_path}" \
-    MOBAILE_QR_PYTHON_ENV_DIR="${backend_dir}" \
-    bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}" --quiet --no-preview
+      MOBAILE_PAIRING_FILE="${pairing_file}" \
+      MOBAILE_PAIRING_QR_OUT="${qr_path}" \
+      MOBAILE_QR_PYTHON_ENV_DIR="${backend_dir}" \
+      bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}" --quiet --no-preview
   fi
 
-  cat <<EOF
+  cat << EOF
 Pairing QR: ${qr_path}
 URL: $(read_pairing_value "${pairing_file}" "server_url" "Not ready")
 Phone pairing: $(pairing_status_label "${pairing_file}")
@@ -485,20 +485,20 @@ config_command() {
   api_token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
   server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
 
-  cat <<EOF
+  cat << EOF
 MOBaiLE configuration
 
 Repo root: ${repo_root}
 Checkout backend dir: ${checkout_backend_dir}
 Active backend dir: ${backend_dir}
-Env file: ${env_file} $( [[ -f "${env_file}" ]] && printf "(present)" || printf "(missing)" )
-Pairing file: ${pairing_file} $( [[ -f "${pairing_file}" ]] && printf "(present)" || printf "(missing)" )
-Pairing QR image: ${qr_path} $( [[ -f "${qr_path}" ]] && printf "(present)" || printf "(missing)" )
+Env file: ${env_file} $([[ -f "${env_file}" ]] && printf "(present)" || printf "(missing)")
+Pairing file: ${pairing_file} $([[ -f "${pairing_file}" ]] && printf "(present)" || printf "(missing)")
+Pairing QR image: ${qr_path} $([[ -f "${qr_path}" ]] && printf "(present)" || printf "(missing)")
 Service helper: ${service_script}
 
 Security mode: $(friendly_security_label "${security_mode}") (${security_mode})
 Phone access mode: $(friendly_phone_access_label "${phone_access_mode}" "${public_server_url}" "${server_url}") (${phone_access_mode})
-API token: $( [[ -n "${api_token}" ]] && printf "Configured" || printf "Missing" )
+API token: $([[ -n "${api_token}" ]] && printf "Configured" || printf "Missing")
 Server URL: ${server_url}
 Phone pairing: $(pairing_status_label "${pairing_file}")
 EOF
@@ -551,7 +551,7 @@ update_command() {
   fi
 
   echo "Updating MOBaiLE from ${local_ref} to ${remote_ref}..."
-  git -C "${repo_root}" pull --ff-only >/dev/null
+  git -C "${repo_root}" pull --ff-only > /dev/null
 
   security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
   phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
@@ -585,17 +585,17 @@ main() {
     update)
       shift || true
       case "${1:-}" in
-        "" ) update_command "${repo_root}" "apply" ;;
-        --check|check) update_command "${repo_root}" "check" ;;
+        "") update_command "${repo_root}" "apply" ;;
+        --check | check) update_command "${repo_root}" "check" ;;
         *)
           echo "Usage: mobaile update [--check]" >&2
           exit 1
           ;;
       esac
       ;;
-    logs|restart|start|stop) delegate_service_command "${repo_root}" "${command_name}" ;;
+    logs | restart | start | stop) delegate_service_command "${repo_root}" "${command_name}" ;;
     config) config_command "${repo_root}" ;;
-    -h|--help|help) usage ;;
+    -h | --help | help) usage ;;
     *)
       usage
       exit 1

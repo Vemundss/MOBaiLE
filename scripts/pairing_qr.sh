@@ -14,16 +14,16 @@ SHOW_PREVIEW="true"
 PAIR_CODE_TTL_MIN="${VOICE_AGENT_PAIR_CODE_TTL_MIN:-30}"
 
 ensure_uv_available() {
-  if command -v uv >/dev/null 2>&1; then
+  if command -v uv > /dev/null 2>&1; then
     return 0
   fi
 
   export PATH="${HOME}/.local/bin:${PATH}"
-  command -v uv >/dev/null 2>&1
+  command -v uv > /dev/null 2>&1
 }
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: bash ./scripts/pairing_qr.sh [--out <path>] [--format url|json] [--scale <int>] [--quiet] [--no-preview]
 
 Reads backend/pairing.json and generates a local QR code image.
@@ -57,7 +57,7 @@ while [[ $# -gt 0 ]]; do
       SHOW_PREVIEW="false"
       shift
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -75,7 +75,8 @@ if [[ ! -f "${PAIRING_FILE}" ]]; then
   exit 1
 fi
 
-PAIRING_REFRESHED="$(PAIRING_PATH="${PAIRING_FILE}" PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - <<'PY'
+PAIRING_REFRESHED="$(
+  PAIRING_PATH="${PAIRING_FILE}" PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - << 'PY'
 import json
 import os
 import secrets
@@ -116,7 +117,8 @@ if [[ "${PAIRING_REFRESHED}" == "true" ]] && [[ "${QUIET}" != "true" ]]; then
   echo "Refreshed pairing code in: ${PAIRING_FILE}"
 fi
 
-PAYLOAD_JSON="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
+PAYLOAD_JSON="$(
+  PAIRING_PATH="${PAIRING_FILE}" python3 - << 'PY'
 import json
 import os
 from pathlib import Path
@@ -140,7 +142,8 @@ PY
 if [[ "${FORMAT}" == "json" ]]; then
   PAYLOAD="${PAYLOAD_JSON}"
 elif [[ "${FORMAT}" == "url" ]]; then
-  PAYLOAD="$(PAIRING_PATH="${PAIRING_FILE}" python3 - <<'PY'
+  PAYLOAD="$(
+    PAIRING_PATH="${PAIRING_FILE}" python3 - << 'PY'
 import json
 import os
 import urllib.parse
@@ -164,13 +167,13 @@ parts.append(f"pair_code={pair_code}")
 parts.append(f"session_id={session}")
 print("mobaile://pair?" + "&".join(parts))
 PY
-)"
+  )"
 else
   echo "Invalid --format: ${FORMAT} (expected: url or json)" >&2
   exit 1
 fi
 
-if command -v qrencode >/dev/null 2>&1; then
+if command -v qrencode > /dev/null 2>&1; then
   if ! [[ "${QR_SCALE}" =~ ^[0-9]+$ ]] || [[ "${QR_SCALE}" -lt 1 ]]; then
     echo "Invalid --scale: ${QR_SCALE} (expected positive integer)" >&2
     exit 1
@@ -193,7 +196,7 @@ fi
 if ensure_uv_available; then
   (
     cd "${PYTHON_ENV_DIR}"
-    uv run python - "${OUT_FILE}" "${PAYLOAD}" "${QR_SCALE}" <<'PY'
+    uv run python - "${OUT_FILE}" "${PAYLOAD}" "${QR_SCALE}" << 'PY'
 import sys
 from pathlib import Path
 

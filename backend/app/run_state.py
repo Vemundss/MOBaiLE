@@ -1,25 +1,27 @@
 from __future__ import annotations
 
-from datetime import datetime
-from datetime import timezone
 import json
 import threading
 import time
-from typing import Iterator
-from typing import Literal
 import uuid
+from datetime import datetime, timezone
+from typing import Iterator, Literal
 
-from app.chat_envelope import coerce_assistant_text_to_envelope
-from app.chat_envelope import parse_chat_envelope_payload
-from app.models.schemas import AgendaItem
-from app.models.schemas import ChatArtifact
-from app.models.schemas import ChatEnvelope
-from app.models.schemas import ChatSection
-from app.models.schemas import ExecutionEvent
-from app.models.schemas import HumanUnblockRequest
-from app.models.schemas import RunDiagnostics
-from app.models.schemas import RunRecord
-from app.models.schemas import RunSummary
+from app.chat_envelope import (
+    coerce_assistant_text_to_envelope,
+    parse_chat_envelope_payload,
+)
+from app.models.schemas import (
+    AgendaItem,
+    ChatArtifact,
+    ChatEnvelope,
+    ChatSection,
+    ExecutionEvent,
+    HumanUnblockRequest,
+    RunDiagnostics,
+    RunRecord,
+    RunSummary,
+)
 from app.storage import RunStore
 
 

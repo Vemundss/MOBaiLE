@@ -11,7 +11,7 @@ LAUNCH_APPS="true"
 WAIT_SECONDS="10"
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: bash ./scripts/warmup_capabilities.sh [options]
 
 Options:
@@ -48,7 +48,7 @@ wait_for_backend() {
   local max_wait="$2"
   local i
   for ((i = 0; i < max_wait; i++)); do
-    if curl -fsS "${url}/health" >/dev/null 2>&1; then
+    if curl -fsS "${url}/health" > /dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -75,7 +75,7 @@ main() {
         WAIT_SECONDS="$2"
         shift 2
         ;;
-      -h|--help)
+      -h | --help)
         usage
         exit 0
         ;;
@@ -103,8 +103,8 @@ main() {
   fi
 
   if [[ "${LAUNCH_APPS}" == "true" ]] && [[ "$(uname -s)" == "Darwin" ]]; then
-    open -ga Calendar >/dev/null 2>&1 || true
-    open -ga Mail >/dev/null 2>&1 || true
+    open -ga Calendar > /dev/null 2>&1 || true
+    open -ga Mail > /dev/null 2>&1 || true
   fi
 
   if ! wait_for_backend "${SERVER_URL}" "${WAIT_SECONDS}"; then
@@ -117,7 +117,7 @@ main() {
   url="${SERVER_URL}/v1/capabilities?${query}"
   response="$(curl -fsS -H "Authorization: Bearer ${token}" "${url}")"
 
-  CAPABILITIES_JSON="${response}" python3 - <<'PY'
+  CAPABILITIES_JSON="${response}" python3 - << 'PY'
 import json
 import os
 import sys

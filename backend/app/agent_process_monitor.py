@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from queue import Empty
-from queue import Queue
 import subprocess
 import threading
 import time
+from queue import Empty, Queue
 from typing import Callable
 
 from app.agent_run_finalizer import AgentRunOutcome
