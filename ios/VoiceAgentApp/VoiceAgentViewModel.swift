@@ -819,31 +819,37 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         await beginVoiceMode()
     }
 
-    func toggleRecordingFromHeadsetControl() async {
-        guard airPodsClickToRecordEnabled else { return }
+    private func canStartVoiceMode() -> Bool {
         guard !needsConnectionRepair else {
             statusText = "Connection needs repair"
             errorText = connectionRepairMessage
-            return
+            return false
         }
         guard hasConfiguredConnection else {
             statusText = "Run setup on your computer or enter connection details first."
-            return
+            return false
         }
+        return true
+    }
+
+    private func startExternalVoiceModeIfPossible() async {
+        guard canStartVoiceMode() else { return }
+        _ = prepareExternalVoiceResumeTarget()
+        await startVoiceModeIfNeeded()
+    }
+
+    func toggleRecordingFromHeadsetControl() async {
+        guard airPodsClickToRecordEnabled else { return }
         if isRecording {
             await stopRecordingAndSend()
         } else if !isLoading {
-            _ = prepareExternalVoiceResumeTarget()
-            await startVoiceModeIfNeeded()
+            await startExternalVoiceModeIfPossible()
         }
     }
 
     func handleStartVoiceTaskShortcut() async {
-        if isRecording || isLoading {
-            return
-        }
-        _ = prepareExternalVoiceResumeTarget()
-        await startVoiceModeIfNeeded()
+        guard !isRecording, !isLoading else { return }
+        await startExternalVoiceModeIfPossible()
     }
 
     func handleStartNewVoiceThreadShortcut() async {
@@ -896,13 +902,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func beginVoiceMode() async {
-        guard !needsConnectionRepair else {
-            statusText = "Connection needs repair"
-            errorText = connectionRepairMessage
-            return
-        }
-        guard hasConfiguredConnection else {
-            statusText = "Run setup on your computer or enter connection details first."
+        guard canStartVoiceMode() else {
             return
         }
         if activeThreadID == nil {
@@ -2083,8 +2083,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             guard let self else { return .commandFailed }
             Task { @MainActor in
                 if self.airPodsClickToRecordEnabled, !self.isRecording, !self.isLoading {
-                    _ = self.prepareExternalVoiceResumeTarget()
-                    await self.startVoiceModeIfNeeded()
+                    await self.startExternalVoiceModeIfPossible()
                 }
             }
             return .success

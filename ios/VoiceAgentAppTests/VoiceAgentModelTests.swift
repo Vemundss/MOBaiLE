@@ -1385,6 +1385,37 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testStartVoiceTaskShortcutDoesNotRetargetWhenConnectionMissing() async {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        let firstThreadID = try! XCTUnwrap(vm.activeThreadID)
+        vm.createNewThread()
+        let secondThreadID = try! XCTUnwrap(vm.activeThreadID)
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm.switchToThread(secondThreadID)
+        vm.serverURL = ""
+        vm.apiToken = ""
+
+        await vm.handleStartVoiceTaskShortcut()
+
+        XCTAssertEqual(vm.activeThreadID, secondThreadID)
+        XCTAssertEqual(vm.threads.count, 2)
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertEqual(
+            vm.statusText,
+            "Run setup on your computer or enter connection details first."
+        )
+    }
+
+    @MainActor
     func testLastVoiceModeThreadPersistsAcrossReload() {
         let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
         defer { cleanup() }
