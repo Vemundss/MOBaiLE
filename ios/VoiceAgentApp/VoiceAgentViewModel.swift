@@ -2083,7 +2083,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             guard let self else { return .commandFailed }
             Task { @MainActor in
                 if self.airPodsClickToRecordEnabled, !self.isRecording, !self.isLoading {
-                    await self.startRecording()
+                    _ = self.prepareExternalVoiceResumeTarget()
+                    await self.startVoiceModeIfNeeded()
                 }
             }
             return .success
