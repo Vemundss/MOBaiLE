@@ -32,7 +32,7 @@ private struct VoiceTaskWidgetView: View {
         switch family {
         case .accessoryInline:
             Link(destination: startVoiceURL) {
-                Text("Start Voice Task")
+                Text("Resume Voice Mode")
             }
         case .accessoryRectangular:
             Link(destination: startVoiceURL) {
@@ -40,7 +40,7 @@ private struct VoiceTaskWidgetView: View {
                     Text("MOBaiLE")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Label("Start Voice Task", systemImage: "mic.fill")
+                    Label("Resume Voice Mode", systemImage: "mic.fill")
                         .font(.caption.weight(.semibold))
                 }
             }
@@ -50,10 +50,10 @@ private struct VoiceTaskWidgetView: View {
                     Image(systemName: "mic.circle.fill")
                         .font(.system(size: 30))
                         .foregroundStyle(.blue)
-                    Text("Start Voice Task")
+                    Text("Resume Voice Mode")
                         .font(.headline)
                         .lineLimit(2)
-                    Text("Open MOBaiLE and record instantly.")
+                    Text("Open MOBaiLE and return to the active or last voice thread.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -72,8 +72,8 @@ struct VoiceTaskWidget: Widget {
             VoiceTaskWidgetView()
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Start Voice Task")
-        .description("Quickly launch MOBaiLE and begin recording.")
+        .configurationDisplayName("Resume Voice Mode")
+        .description("Quickly launch MOBaiLE and return to the active or last voice thread.")
         .supportedFamilies([.systemSmall, .accessoryRectangular, .accessoryInline])
     }
 }

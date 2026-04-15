@@ -2530,6 +2530,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func switchToThread(_ threadID: UUID) {
         guard let idx = threadIndex(for: threadID) else { return }
+        clearVoiceInteractionNotice()
         if voiceModeEnabled, voiceModeThreadID != threadID {
             deactivateVoiceMode(stopSpeaking: true)
             publishVoiceInteractionNotice("Voice mode ended")
