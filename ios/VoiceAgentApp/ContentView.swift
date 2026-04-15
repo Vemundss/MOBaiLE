@@ -984,6 +984,11 @@ struct ContentView: View {
                     composerSummaryRow
                 }
 
+                if shouldShowVoiceInteractionNotice {
+                    voiceInteractionNoticeCard
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
                 if !vm.draftAttachments.isEmpty && !vm.isRecording {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -1032,6 +1037,7 @@ struct ContentView: View {
         .padding(.bottom, 6)
         .animation(.easeInOut(duration: 0.18), value: vm.isRecording)
         .animation(.easeInOut(duration: 0.18), value: shouldShowRecordingNotice)
+        .animation(.easeInOut(duration: 0.18), value: vm.voiceInteractionNoticeText)
         .simultaneousGesture(
             DragGesture(minimumDistance: 14)
                 .onEnded { value in
@@ -1077,6 +1083,21 @@ struct ContentView: View {
             }
             .padding(.horizontal, 1)
         }
+    }
+
+    private var shouldShowVoiceInteractionNotice: Bool {
+        !vm.isRecording && !shouldShowRecordingNotice && vm.voiceInteractionNoticeText != nil
+    }
+
+    private var voiceInteractionNoticeCard: some View {
+        InlineNoticeCard(
+            title: "Voice mode",
+            message: vm.voiceInteractionNoticeText ?? "",
+            tint: .blue,
+            systemImage: "waveform.circle",
+            actionTitle: nil,
+            action: nil
+        )
     }
 
     private var standardComposerRow: some View {
@@ -2274,19 +2295,19 @@ struct ContentView: View {
 
     private var recordingSubtitle: String {
         if vm.isVoiceModeActiveForCurrentThread {
-            return "Pause to send automatically. Voice mode resumes after the reply."
+            return "Pause to send automatically. Voice mode resumes on this thread after the reply."
         }
         if vm.usesAutoSendForCurrentTurn {
-            return "Pause to send automatically."
+            return "Pause to send this prompt automatically."
         }
-        return "Tap send when ready."
+        return "Tap send to send this prompt once."
     }
 
     private var recordingContextSummaryText: String? {
         var parts: [String] = []
 
         if vm.isVoiceModeActiveForCurrentThread {
-            parts.append("Voice mode")
+            parts.append("Voice mode on this thread")
         }
         if let recordingTypedNoteSummaryText {
             parts.append(recordingTypedNoteSummaryText)

@@ -4,8 +4,8 @@ import Foundation
 private let pendingShortcutActionKey = "mobaile.pending_shortcut_action"
 
 struct StartVoiceTaskIntent: AppIntent {
-    static var title: LocalizedStringResource = "Start Voice Mode"
-    static var description = IntentDescription("Open MOBaiLE and keep listening after each reply.")
+    static var title: LocalizedStringResource = "Resume Voice Mode"
+    static var description = IntentDescription("Open MOBaiLE and resume voice mode on the active or last voice thread.")
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult {
@@ -16,7 +16,7 @@ struct StartVoiceTaskIntent: AppIntent {
 
 struct StartNewVoiceThreadIntent: AppIntent {
     static var title: LocalizedStringResource = "Start New Voice Thread"
-    static var description = IntentDescription("Open MOBaiLE, create a fresh thread, and begin recording.")
+    static var description = IntentDescription("Open MOBaiLE, create a fresh thread, and start voice mode there.")
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult {
@@ -41,13 +41,13 @@ struct MOBaiLEAppShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: StartVoiceTaskIntent(),
             phrases: [
-                "Start voice mode in \(.applicationName)",
-                "Start voice task in \(.applicationName)",
-                "Record with \(.applicationName)",
-                "Talk to my computer with \(.applicationName)",
-                "Talk hands-free with \(.applicationName)",
+                "Resume voice mode in \(.applicationName)",
+                "Continue voice mode in \(.applicationName)",
+                "Resume hands-free in \(.applicationName)",
+                "Talk to my computer again with \(.applicationName)",
+                "Continue talking hands-free with \(.applicationName)",
             ],
-            shortTitle: "Voice Mode",
+            shortTitle: "Resume Voice",
             systemImageName: "mic.fill"
         )
         AppShortcut(

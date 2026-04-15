@@ -140,6 +140,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
     @Published var autoSendAfterSilenceEnabled: Bool = false
     @Published var autoSendAfterSilenceSeconds: String = "1.2"
+    @Published private(set) var voiceInteractionNoticeText: String?
 
     private let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
@@ -167,6 +168,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var lastVoiceModeThreadID: UUID?
     private var shouldResumeVoiceModeAfterSpeech = false
     private var credentialRefreshTask: Task<String?, Error>?
+    private var clearVoiceInteractionNoticeTask: Task<Void, Never>?
 
     private static let defaultCodexReasoningEffortOptions = ["minimal", "low", "medium", "high", "xhigh"]
     private static let defaultCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
@@ -231,6 +233,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     deinit {
         pendingDraftPersistenceTask?.cancel()
+        clearVoiceInteractionNoticeTask?.cancel()
     }
 
     private enum DefaultsKey {
@@ -908,6 +911,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if activeThreadID == nil {
             createNewThread()
         }
+        clearVoiceInteractionNotice()
         voiceModeEnabled = true
         voiceModeThreadID = activeThreadID
         rememberLastVoiceModeThread(activeThreadID)
@@ -2528,6 +2532,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         guard let idx = threadIndex(for: threadID) else { return }
         if voiceModeEnabled, voiceModeThreadID != threadID {
             deactivateVoiceMode(stopSpeaking: true)
+            publishVoiceInteractionNotice("Voice mode ended")
         }
         persistActiveThreadSnapshot()
         fetchedRunDiagnostics = nil
@@ -4448,6 +4453,29 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         lastVoiceModeThreadID = threadID
     }
 
+    private func publishVoiceInteractionNotice(_ text: String) {
+        clearVoiceInteractionNoticeTask?.cancel()
+        voiceInteractionNoticeText = text
+        clearVoiceInteractionNoticeTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+            } catch {
+                return
+            }
+            await MainActor.run {
+                guard self?.voiceInteractionNoticeText == text else { return }
+                self?.voiceInteractionNoticeText = nil
+                self?.clearVoiceInteractionNoticeTask = nil
+            }
+        }
+    }
+
+    private func clearVoiceInteractionNotice() {
+        clearVoiceInteractionNoticeTask?.cancel()
+        clearVoiceInteractionNoticeTask = nil
+        voiceInteractionNoticeText = nil
+    }
+
     @discardableResult
     private func prepareExternalVoiceResumeTarget() -> VoiceThreadResumeTarget {
         let resolved = VoiceThreadResumeResolver.resolve(
@@ -5009,5 +5037,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_hasObservedRunContext(runID: String, threadID: UUID) -> Bool {
         observedRunContext(for: threadID, runID: runID) != nil
+    }
+
+    func _test_voiceInteractionNoticeText() -> String? {
+        voiceInteractionNoticeText
     }
 }

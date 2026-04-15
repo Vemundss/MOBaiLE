@@ -12,7 +12,8 @@ The app does not execute code on the phone. It forwards your prompt, audio, atta
 ## What You Can Do From The Phone
 
 - Send a text prompt to your paired backend
-- Record a voice task instead of typing
+- Record a one-shot voice prompt instead of typing
+- Keep one thread in voice mode for a hands-free send-reply-listen loop
 - Watch progress and final result inside the same thread
 - Reuse the same workspace and thread context across runs
 
@@ -92,10 +93,20 @@ The checked-in project does not hard-code a development team, so Xcode should le
 
 ## Features Worth Turning On
 
-- **Widget:** add `Start Voice Task` to jump straight into recording
+- **Widget:** add `Resume Voice Mode` to reopen the active or last voice thread hands-free
 - **Haptic and audio cues:** helpful when you are using the app while walking or multitasking
-- **Auto-send after silence:** useful for hands-free voice capture
-- **Siri and Shortcuts:** supports `Start Voice Task` and `Send Last Prompt`
+- **Auto-send after silence:** useful for one-shot voice capture without turning on persistent voice mode
+- **Siri and Shortcuts:** `Resume Voice Mode` returns to the active or last voice thread, while `Start New Voice Thread` creates a fresh thread and starts voice mode there
+
+## Voice Interaction Model
+
+- The mic button in the composer can be used two ways:
+  - one-shot recording records a single prompt and sends it once
+  - voice mode is persistent and thread-bound, so that thread keeps listening again after each reply
+- Switching to another thread ends voice mode on the previous thread instead of silently carrying it across conversations.
+- Shortcuts follow the same split:
+  - `Resume Voice Mode` reopens the current or most recent voice-mode thread
+  - `Start New Voice Thread` creates a new thread and starts voice mode there
 
 ## Fast Fixes
 

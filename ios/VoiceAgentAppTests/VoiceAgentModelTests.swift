@@ -1340,6 +1340,32 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingThreadsPublishesVoiceModeEndedNotice() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let firstThreadID = vm.activeThreadID else {
+            XCTFail("Expected a first thread")
+            return
+        }
+        vm.createNewThread()
+        guard let secondThreadID = vm.activeThreadID else {
+            XCTFail("Expected a second thread")
+            return
+        }
+
+        defer {
+            vm.deleteThread(secondThreadID)
+            vm.deleteThread(firstThreadID)
+        }
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm.switchToThread(secondThreadID)
+
+        XCTAssertEqual(vm._test_voiceInteractionNoticeText(), "Voice mode ended")
+    }
+
+    @MainActor
     func testSwitchingThreadsKeepsLastVoiceModeThreadForExternalResume() {
         let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
         defer { cleanup() }

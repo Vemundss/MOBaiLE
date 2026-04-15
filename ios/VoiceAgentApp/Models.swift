@@ -1089,8 +1089,8 @@ struct ComposerSlashCommand: Identifiable, Equatable {
         ),
         .local(
             .voiceNew,
-            title: "New Voice Thread",
-            description: "Start a fresh thread and jump straight into voice mode.",
+            title: "Start New Voice Thread",
+            description: "Create a fresh thread and start voice mode there.",
             symbol: "waveform.badge.plus",
             usage: "/voice-new",
             group: "Session",
@@ -1146,7 +1146,7 @@ struct ComposerSlashCommand: Identifiable, Equatable {
         .local(
             .voice,
             title: "Start Voice Mode",
-            description: "Open live voice mode and keep listening after each reply.",
+            description: "Start voice mode on the current thread and keep listening after each reply.",
             symbol: "mic",
             usage: "/voice",
             group: "Input",
