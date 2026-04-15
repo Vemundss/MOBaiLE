@@ -1340,6 +1340,34 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingThreadsDiscardsActiveRecording() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let firstThreadID = vm.activeThreadID else {
+            XCTFail("Expected a first thread")
+            return
+        }
+        vm.createNewThread()
+        guard let secondThreadID = vm.activeThreadID else {
+            XCTFail("Expected a second thread")
+            return
+        }
+
+        defer {
+            vm.deleteThread(secondThreadID)
+            vm.deleteThread(firstThreadID)
+        }
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setIsRecording(true)
+
+        vm.switchToThread(secondThreadID)
+
+        XCTAssertFalse(vm.isRecording)
+        XCTAssertNil(vm.recordingStartedAt)
+    }
+
+    @MainActor
     func testSwitchingThreadsPublishesVoiceModeEndedNotice() {
         let vm = VoiceAgentViewModel()
         vm.createNewThread()
@@ -1362,6 +1390,36 @@ final class VoiceAgentModelTests: XCTestCase {
         vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
         vm.switchToThread(secondThreadID)
 
+        XCTAssertEqual(vm._test_voiceInteractionNoticeText(), "Voice mode ended")
+    }
+
+    @MainActor
+    func testSwitchingThreadsWhileRecordingInVoiceModeDiscardsCaptureAndPublishesNotice() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        guard let firstThreadID = vm.activeThreadID else {
+            XCTFail("Expected a first thread")
+            return
+        }
+        vm.createNewThread()
+        guard let secondThreadID = vm.activeThreadID else {
+            XCTFail("Expected a second thread")
+            return
+        }
+
+        defer {
+            vm.deleteThread(secondThreadID)
+            vm.deleteThread(firstThreadID)
+        }
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm._test_setIsRecording(true)
+
+        vm.switchToThread(secondThreadID)
+
+        XCTAssertFalse(vm.isRecording)
+        XCTAssertFalse(vm.voiceModeEnabled)
         XCTAssertEqual(vm._test_voiceInteractionNoticeText(), "Voice mode ended")
     }
 

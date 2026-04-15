@@ -794,19 +794,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     func discardRecording() async {
-        guard isRecording else { return }
-        isRecording = false
-        recordingStartedAt = nil
-        updateRemoteCommandState()
-        if let audioFile = recorder.stop() {
-            try? FileManager.default.removeItem(at: audioFile)
-        }
-        errorText = ""
-        isLoading = false
-        runPhaseText = "Idle"
-        runStartedAt = nil
-        runEndedAt = nil
-        statusText = hasConfiguredConnection ? "Ready for prompts" : "Run setup on your computer or enter connection details first."
+        discardActiveRecording()
     }
 
     func toggleVoiceMode() async {
@@ -2531,6 +2519,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     func switchToThread(_ threadID: UUID) {
         guard let idx = threadIndex(for: threadID) else { return }
         clearVoiceInteractionNotice()
+        if activeThreadID != threadID {
+            discardActiveRecording()
+        }
         if voiceModeEnabled, voiceModeThreadID != threadID {
             deactivateVoiceMode(stopSpeaking: true)
             publishVoiceInteractionNotice("Voice mode ended")
@@ -4477,6 +4468,22 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         voiceInteractionNoticeText = nil
     }
 
+    private func discardActiveRecording() {
+        guard isRecording else { return }
+        isRecording = false
+        recordingStartedAt = nil
+        updateRemoteCommandState()
+        if let audioFile = recorder.stop() {
+            try? FileManager.default.removeItem(at: audioFile)
+        }
+        errorText = ""
+        isLoading = false
+        runPhaseText = "Idle"
+        runStartedAt = nil
+        runEndedAt = nil
+        statusText = hasConfiguredConnection ? "Ready for prompts" : "Run setup on your computer or enter connection details first."
+    }
+
     @discardableResult
     private func prepareExternalVoiceResumeTarget() -> VoiceThreadResumeTarget {
         let resolved = VoiceThreadResumeResolver.resolve(
@@ -5042,5 +5049,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_voiceInteractionNoticeText() -> String? {
         voiceInteractionNoticeText
+    }
+
+    func _test_setIsRecording(_ recording: Bool) {
+        isRecording = recording
+        recordingStartedAt = recording ? Date() : nil
     }
 }
