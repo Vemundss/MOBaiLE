@@ -19,7 +19,9 @@
 		5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D91AF3EDBB51ECC1F494AC /* Models.swift */; };
 		60CA8106724593E7295EC968 /* MOBaiLEShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */; };
 		8DAE313D0CFB3DB28FFAE81D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */; };
+		D778FC85B81C4FAC91F63184EFF4A8F8 /* VoiceThreadResumeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06268BF624D74EACA67086AB20BD4749 /* VoiceThreadResumeResolver.swift */; };
 		94980E4F676D67E7F0C2CE05 /* VoiceAgentModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */; };
+		51C9374BD7D540229A79B4D457B4F335 /* VoiceThreadResumeResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 157215EE78DA46AAA4D70FF2A6CDB543 /* VoiceThreadResumeResolverTests.swift */; };
 		A1862D9871A32EF06B8E9B46 /* SpeechTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */; };
 		B120A06EEC64BEA0F9DE734A /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */; };
 		B243A2C4EE00ACD44CEE8302 /* mobaile_logo.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C77CC2B09D6B641B70BFF28 /* mobaile_logo.png */; };
@@ -93,6 +95,7 @@
 		41B36A206F87ACAE5318E912 /* VoiceAgentAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentAppUITests.swift; sourceTree = "<group>"; };
 		55BD337AE620AD07C1581C7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5AE181C29769FD42498D7162 /* VoiceAgentPreviewFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentPreviewFixtures.swift; sourceTree = "<group>"; };
+		06268BF624D74EACA67086AB20BD4749 /* VoiceThreadResumeResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceThreadResumeResolver.swift; sourceTree = "<group>"; };
 		63BAD131350EBDE14EC0F8D4 /* PairingHostRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingHostRules.swift; sourceTree = "<group>"; };
 		68D4EC528B0377B653D98B6E /* ContentViewSupportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewSupportViews.swift; sourceTree = "<group>"; };
 		6F46E28C5030E56744250A3B /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
@@ -112,6 +115,7 @@
 		EDF33E49DD9EEF0442C7A3B1 /* RuntimeConfigurationCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConfigurationCatalog.swift; sourceTree = "<group>"; };
 		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3E6198279CE9DE1A7E6A096 /* VoiceAgentAppTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceAgentAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		157215EE78DA46AAA4D70FF2A6CDB543 /* VoiceThreadResumeResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceThreadResumeResolverTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -141,6 +145,7 @@
 			children = (
 				C5A63560C68468159F1DCE09 /* Info.plist */,
 				3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */,
+				157215EE78DA46AAA4D70FF2A6CDB543 /* VoiceThreadResumeResolverTests.swift */,
 			);
 			path = VoiceAgentAppTests;
 			sourceTree = "<group>";
@@ -193,6 +198,7 @@
 				BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */,
 				5AE181C29769FD42498D7162 /* VoiceAgentPreviewFixtures.swift */,
 				03AFE8DCC8EB158A6410CC44 /* VoiceAgentViewModel.swift */,
+				06268BF624D74EACA67086AB20BD4749 /* VoiceThreadResumeResolver.swift */,
 			);
 			path = VoiceAgentApp;
 			sourceTree = "<group>";
@@ -353,6 +359,7 @@
 				A1862D9871A32EF06B8E9B46 /* SpeechTranscriptionService.swift in Sources */,
 				02F1E8C0D81003A451563293 /* URLSchemeConfiguration.swift in Sources */,
 				059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */,
+				D778FC85B81C4FAC91F63184EFF4A8F8 /* VoiceThreadResumeResolver.swift in Sources */,
 				C358D7797037A55F784F3591 /* VoiceAgentPreviewFixtures.swift in Sources */,
 				BF652C85AFE113E7FB2D7E84 /* VoiceAgentViewModel.swift in Sources */,
 			);
@@ -372,6 +379,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				94980E4F676D67E7F0C2CE05 /* VoiceAgentModelTests.swift in Sources */,
+				51C9374BD7D540229A79B4D457B4F335 /* VoiceThreadResumeResolverTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
