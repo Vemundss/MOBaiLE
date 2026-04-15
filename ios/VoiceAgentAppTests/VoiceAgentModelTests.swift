@@ -1340,6 +1340,78 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingThreadsKeepsLastVoiceModeThreadForExternalResume() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        let firstThreadID = try! XCTUnwrap(vm.activeThreadID)
+        vm.createNewThread()
+        let secondThreadID = try! XCTUnwrap(vm.activeThreadID)
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm.switchToThread(secondThreadID)
+
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertEqual(vm._test_lastVoiceModeThreadID(), firstThreadID)
+        XCTAssertEqual(vm._test_prepareExternalVoiceResumeTarget(), .existing(firstThreadID))
+    }
+
+    @MainActor
+    func testDeletingStoredVoiceThreadFallsBackToCurrentThread() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        let firstThreadID = try! XCTUnwrap(vm.activeThreadID)
+        vm.createNewThread()
+        let secondThreadID = try! XCTUnwrap(vm.activeThreadID)
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm.switchToThread(secondThreadID)
+        vm.deleteThread(firstThreadID)
+
+        XCTAssertEqual(vm._test_prepareExternalVoiceResumeTarget(), .existing(secondThreadID))
+    }
+
+    @MainActor
+    func testLastVoiceModeThreadPersistsAcrossReload() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        let firstThreadID = try! XCTUnwrap(vm.activeThreadID)
+        vm.createNewThread()
+        let secondThreadID = try! XCTUnwrap(vm.activeThreadID)
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm.switchToThread(secondThreadID)
+
+        let reloaded = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+
+        XCTAssertEqual(reloaded._test_lastVoiceModeThreadID(), firstThreadID)
+    }
+
+    @MainActor
     func testRunEventsStayBoundToOriginThreadAfterSwitch() {
         let vm = VoiceAgentViewModel()
         vm.createNewThread()

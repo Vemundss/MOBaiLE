@@ -164,6 +164,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var lastHydratedSessionContextID: String?
     private var lastHydratedSessionContextServerURL: String?
     private var voiceModeThreadID: UUID?
+    private var lastVoiceModeThreadID: UUID?
     private var shouldResumeVoiceModeAfterSpeech = false
     private var credentialRefreshTask: Task<String?, Error>?
 
@@ -250,6 +251,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         static let developerMode = "mobaile.developer_mode"
         static let threads = "mobaile.threads"
         static let activeThreadID = "mobaile.active_thread_id"
+        static let lastVoiceModeThreadID = "mobaile.last_voice_mode_thread_id"
         static let trustedPairHosts = "mobaile.trusted_pair_hosts"
         static let connectionRepairState = "mobaile.connection_repair_state"
         static let airPodsClickToRecordEnabled = "mobaile.airpods_click_to_record"
@@ -831,7 +833,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if isRecording {
             await stopRecordingAndSend()
         } else if !isLoading {
-            await startRecording()
+            _ = prepareExternalVoiceResumeTarget()
+            await startVoiceModeIfNeeded()
         }
     }
 
@@ -839,6 +842,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if isRecording || isLoading {
             return
         }
+        _ = prepareExternalVoiceResumeTarget()
         await startVoiceModeIfNeeded()
     }
 
@@ -906,6 +910,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
         voiceModeEnabled = true
         voiceModeThreadID = activeThreadID
+        rememberLastVoiceModeThread(activeThreadID)
         shouldResumeVoiceModeAfterSpeech = false
         errorText = ""
         if !isRecording && !isLoading {
@@ -925,6 +930,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func deactivateVoiceMode(stopSpeaking: Bool) {
+        if let voiceModeThreadID {
+            rememberLastVoiceModeThread(voiceModeThreadID)
+        }
         voiceModeEnabled = false
         voiceModeThreadID = nil
         shouldResumeVoiceModeAfterSpeech = false
@@ -2621,6 +2629,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     func deleteThread(_ threadID: UUID) {
         if voiceModeThreadID == threadID {
             deactivateVoiceMode(stopSpeaking: true)
+        }
+        if lastVoiceModeThreadID == threadID {
+            rememberLastVoiceModeThread(nil)
         }
         if activeThreadID == threadID {
             persistActiveThreadSnapshot()
@@ -4404,6 +4415,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         } else {
             createNewThread()
         }
+        restoreLastVoiceModeThreadIfPossible()
 
         if let rawID = defaults.string(forKey: DefaultsKey.activeThreadID),
            let uuid = UUID(uuidString: rawID),
@@ -4413,6 +4425,48 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
         if let first = sortedThreads.first {
             switchToThread(first.id)
+        }
+    }
+
+    private func rememberLastVoiceModeThread(_ threadID: UUID?) {
+        lastVoiceModeThreadID = threadID
+        if let threadID {
+            defaults.set(threadID.uuidString, forKey: DefaultsKey.lastVoiceModeThreadID)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.lastVoiceModeThreadID)
+        }
+    }
+
+    private func restoreLastVoiceModeThreadIfPossible() {
+        let rawThreadID = defaults.string(forKey: DefaultsKey.lastVoiceModeThreadID)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let threadID = UUID(uuidString: rawThreadID),
+              threads.contains(where: { $0.id == threadID }) else {
+            rememberLastVoiceModeThread(nil)
+            return
+        }
+        lastVoiceModeThreadID = threadID
+    }
+
+    @discardableResult
+    private func prepareExternalVoiceResumeTarget() -> VoiceThreadResumeTarget {
+        let resolved = VoiceThreadResumeResolver.resolve(
+            activeVoiceModeThreadID: voiceModeThreadID,
+            lastVoiceModeThreadID: lastVoiceModeThreadID,
+            currentThreadID: activeThreadID,
+            existingThreadIDs: Set(threads.map(\.id))
+        )
+
+        switch resolved {
+        case let .existing(threadID):
+            if activeThreadID != threadID {
+                switchToThread(threadID)
+            }
+            return .existing(threadID)
+        case .createNewThread:
+            startNewChat()
+            guard let activeThreadID else { return .createNewThread }
+            return .existing(activeThreadID)
         }
     }
 
@@ -4943,6 +4997,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_persistActiveThreadSnapshot() {
         persistActiveThreadSnapshot()
+    }
+
+    func _test_lastVoiceModeThreadID() -> UUID? {
+        lastVoiceModeThreadID
+    }
+
+    func _test_prepareExternalVoiceResumeTarget() -> VoiceThreadResumeTarget {
+        prepareExternalVoiceResumeTarget()
     }
 
     func _test_hasObservedRunContext(runID: String, threadID: UUID) -> Bool {
