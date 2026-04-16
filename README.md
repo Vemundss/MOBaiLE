@@ -4,18 +4,19 @@
   <img src="ios/VoiceAgentApp/mobaile_logo.png" alt="MOBaiLE logo" width="180" />
 </p>
 
-<p align="center"><strong>Handheld control for your own Mac or Linux machine.</strong></p>
+<p align="center"><strong>Your own computer, in your pocket.</strong></p>
 
 <p align="center">
-  Start a task from your iPhone, run it on your own computer, and keep the whole thread visible while you are away from the keyboard.
+  Start a task from iPhone, run it on your own Mac or Linux machine, and keep the whole execution thread visible while you are away from the keyboard.
 </p>
 
 <p align="center">
-  Use the iPhone app to control your own machine. This repo contains both the phone app and the computer-side setup if you want to build or self-host it.
+  MOBaiLE is the handheld control surface. Your computer does the work with your real repo, CLI tools, auth, files, and network.
+  This repo contains both the iPhone app and the computer-side setup if you want to build or self-host it.
 </p>
 
 <p align="center">
-  <a href="docs/USAGE.md"><strong>Usage</strong></a>
+  <a href="docs/USAGE.md"><strong>Install Guide</strong></a>
   ·
   <a href="backend/README.md"><strong>Backend</strong></a>
   ·
@@ -26,53 +27,57 @@
   <a href="scripts/README.md"><strong>Scripts</strong></a>
 </p>
 
-<p align="center">
-  <img src="docs/readme-hero.png" alt="MOBaiLE hero showing the configured start screen, a live run thread, and voice mode on iPhone" width="1200" />
-</p>
+> The phone starts and follows the run. Your Mac or Linux machine does the work.
 
-> MOBaiLE is the phone app. Your Mac or Linux machine does the work.
-
-Copy this on the computer you want MOBaiLE to use:
+## Install on the computer you want to control
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
 ```
 
-## Quick Start
+If you want the shortest path, do this:
 
-If you just want it working, start here.
-
-1. Paste the install command on the Mac or Linux machine you want to control.
-2. Keep the default answers unless you know you want something else.
-   Those defaults mean: use your normal tools and files, let the phone reach that machine when you are away from home, and keep MOBaiLE ready after you close the terminal.
+1. Run the installer on the Mac or Linux machine you want MOBaiLE to use.
+2. Keep the defaults: `Full Access`, `Anywhere with Tailscale`, and usually `Yes` for the background service.
 3. When the installer shows the pairing QR, open MOBaiLE on your iPhone and tap `Scan Pairing QR`.
-4. Point the phone at the screen and confirm the pairing.
+4. Point the phone at the screen, confirm the pairing, and send a small prompt.
 5. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
-When you want the latest CLI/backend updates later, run `mobaile update`.
+When you want the latest installed CLI/backend later, run `mobaile update`.
 
-What the installer does for you:
+`install.sh` installs or updates MOBaiLE in `~/MOBaiLE`, configures the backend, creates the pairing QR, keeps the service running in the background when supported, and installs the `mobaile` command for status, pairing, and logs.
 
-- installs or updates MOBaiLE in `~/MOBaiLE`
-- gets that computer ready
-- keeps it running in the background when supported
-- creates the pairing QR
-- installs the `mobaile` command for status, pairing, and logs
-
-Need more detail? See [`docs/USAGE.md`](docs/USAGE.md), [`ios/README.md`](ios/README.md), [`backend/README.md`](backend/README.md), and [`scripts/README.md`](scripts/README.md).
-
-## Why It Feels Different
-
-- **Runs against your real machine.** Use your actual repo, CLI tools, auth, files, and network instead of a toy remote environment.
-- **Keeps the run legible.** Planning, execution, summaries, and follow-up all stay in one thread instead of collapsing into a final notification.
-- **Works away from the desk.** Voice input, auto-send after silence, widgets, haptics, audio cues, and Shortcuts make it usable when your laptop is the inconvenient device.
-- **Lets you choose the trust level.** Use `Safe` on a cautious host, or `Full Access` on a trusted private machine.
-
-## What The Product Looks Like
+Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USAGE.md).
 
 <p align="center">
-  <img src="docs/readme-showcase.png" alt="Three MOBaiLE product moments: starting in the right workspace, following a live run, and using voice mode hands-free" width="1200" />
+  <img src="docs/readme-hero.png" alt="MOBaiLE hero showing the configured start screen, a live run thread, and voice mode on iPhone" width="1200" />
 </p>
+
+## Why people reach for it
+
+- **It uses your real machine.** Work against your actual repo, shell, auth, files, and network instead of moving everything into a separate hosted environment.
+- **It keeps the run readable.** Prompt, live progress, result, and follow-up stay in one thread instead of collapsing into a final notification.
+- **It works when the laptop is the inconvenient device.** Voice mode, silence-based send, widgets, haptics, audio cues, and Shortcuts make it usable while walking, commuting, or away from the desk.
+- **It preserves momentum.** Pair once, stay in the same workspace thread, and keep the next step grounded in what just happened.
+
+## Keep trust boundaries explicit
+
+- **The phone does not run the code.** It sends prompts, audio, attachments, and session metadata to the backend you control.
+- **Security mode stays visible.** Use `safe` on a cautious host, or `full-access` on a trusted private machine.
+- **Pairing is deliberate.** MOBaiLE uses a pairing QR and one-time `pair_code`; the long-lived API token stays on the host.
+- **The network path is inspectable.** Pairing prefers Tailscale or configured public URLs, and the backend remains yours to operate.
+
+## Three moments that matter
+
+<p align="center">
+  <img src="docs/readme-screens/configured-empty.png" alt="Configured start screen showing runtime, working directory, and quick starts" width="250" />
+  <img src="docs/readme-screens/conversation.png" alt="Live run thread showing the result and the next recommended step" width="250" />
+  <img src="docs/readme-screens/recording.png" alt="Voice capture controls that stay attached to the current thread" width="250" />
+</p>
+
+- **Start in the right workspace.** See the paired runtime, working directory, and quick starts before you send the first prompt.
+- **Follow the run live.** Result, summary, and next recommended action stay together in the same thread.
+- **Keep talking without losing context.** Voice mode reopens the mic after each reply, while attachments and typed follow-ups stay in the same conversation.
 
 ## Good First Prompts
 
