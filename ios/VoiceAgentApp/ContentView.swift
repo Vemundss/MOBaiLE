@@ -125,7 +125,7 @@ struct ContentView: View {
                 .task {
                     await vm.refreshRunDiagnosticsIfPossible()
                 }
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showWorkspaceBrowser, onDismiss: {
@@ -1301,14 +1301,22 @@ struct ContentView: View {
             Text(recordingSubtitle)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let contextSummary = recordingContextSummaryText {
-                Text(contextSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            if !recordingContextItems.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(recordingContextItems.enumerated()), id: \.offset) { _, item in
+                            ComposerMetaPill(
+                                text: item.text,
+                                systemImage: item.systemImage,
+                                tint: item.tint
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
             }
         }
     }
@@ -1456,21 +1464,21 @@ struct ContentView: View {
         if lower.contains("timed out") {
             return (
                 "Run timed out",
-                "Start the last prompt again from this thread. The previous execution timeline stays available in Run Logs."
+                "Retry the last prompt or inspect Run Logs."
             )
         }
 
         if lower.contains("cancel") {
             return (
                 "Run stopped early",
-                "Retry the last prompt from this thread, or inspect Run Logs before starting again."
+                "Retry the last prompt or inspect Run Logs."
             )
         }
 
         if lower.contains("fail") || lower.contains("rejected") {
             return (
                 "Run failed",
-                "Retry the last prompt from this thread, or inspect Run Logs before starting again."
+                "Retry the last prompt or inspect Run Logs."
             )
         }
 
@@ -2352,30 +2360,27 @@ struct ContentView: View {
 
     private var recordingSubtitle: String {
         if vm.isVoiceModeActiveForCurrentThread {
-            return "Pause to send automatically. Voice mode resumes on this thread after the reply."
+            return "Pause to auto-send. Voice mode resumes after the reply."
         }
         if vm.usesAutoSendForCurrentTurn {
-            return "Pause to send this prompt automatically."
+            return "Pause to auto-send this prompt."
         }
-        return "Tap send to send this prompt once."
+        return "Tap send when you are ready."
     }
 
-    private var recordingContextSummaryText: String? {
-        var parts: [String] = []
-
+    private var recordingContextItems: [(text: String, systemImage: String, tint: Color)] {
+        var items: [(text: String, systemImage: String, tint: Color)] = []
         if vm.isVoiceModeActiveForCurrentThread {
-            parts.append("Voice mode on this thread")
+            items.append(("Voice mode", "waveform.circle.fill", .blue))
         }
         if let recordingTypedNoteSummaryText {
-            parts.append(recordingTypedNoteSummaryText)
+            items.append((recordingTypedNoteSummaryText, "square.and.pencil", .secondary))
         }
         if !vm.draftAttachments.isEmpty {
-            parts.append(attachmentSummaryText)
+            items.append((attachmentSummaryText, "paperclip", .secondary))
         }
-
-        return parts.isEmpty ? nil : parts.joined(separator: " • ")
+        return items
     }
-
 
     private func recordingDurationLabel(since startedAt: Date, now: Date) -> String {
         let elapsed = max(0, Int(now.timeIntervalSince(startedAt)))

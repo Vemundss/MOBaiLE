@@ -63,7 +63,7 @@ final class VoiceAgentAppUITests: XCTestCase {
     func testConversationPreviewOpensRunLogsSheet() {
         let app = launchApp(previewScenario: "conversation", previewPresentation: "logs")
 
-        XCTAssertTrue(app.staticTexts["Raw Execution Events"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Run Highlights"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Run Health"].exists)
         XCTAssertTrue(app.staticTexts["3 raw events"].exists)
         XCTAssertTrue(app.staticTexts["Preparing the release summary."].exists)

@@ -689,7 +689,7 @@ struct LogsView: View {
     let events: [ExecutionEvent]
     let diagnostics: RunDiagnostics?
     @Environment(\.dismiss) private var dismiss
-    @State private var scope: LogScope = .all
+    @State private var scope: LogScope = .highlights
 
     private enum LogScope: String, CaseIterable, Identifiable {
         case all
@@ -1012,7 +1012,11 @@ private struct RunHealthSummaryCard: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
         )
     }
 }
@@ -1270,45 +1274,61 @@ struct ThreadsView: View {
                     )
                 } else {
                     List {
+                        Section {
+                            SheetIntroCard(
+                                title: "Chats",
+                                message: "Switch threads here. The current thread stays pinned at the top so it is easy to jump back.",
+                                systemImage: "bubble.left.and.bubble.right",
+                                tint: .blue
+                            )
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+
                         ForEach(displayedThreads) { thread in
                             Button {
                                 onSelect(thread.id)
                             } label: {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                        Text(thread.title)
-                                            .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
-                                            .lineLimit(1)
+                                HStack(alignment: .top, spacing: 12) {
+                                    threadIcon(for: thread)
 
-                                        Spacer(minLength: 0)
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                            Text(thread.title)
+                                                .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
+                                                .lineLimit(1)
 
-                                        Text(thread.updatedAt, style: .relative)
-                                            .font(.caption2.weight(.medium))
+                                            Spacer(minLength: 0)
+
+                                            Text(thread.updatedAt, style: .relative)
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                        }
+
+                                        Text(threadPreview(for: thread))
+                                            .font(.subheadline)
                                             .foregroundStyle(.secondary)
-                                    }
+                                            .lineLimit(2)
 
-                                    Text(threadPreview(for: thread))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-
-                                    HStack(spacing: 8) {
-                                        Text(threadStatusText(for: thread))
-                                            .font(.caption2.weight(.semibold))
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(threadStatusColor(for: thread).opacity(0.14))
-                                            .foregroundStyle(threadStatusColor(for: thread))
-                                            .clipShape(Capsule())
-
-                                        if activeThreadID == thread.id {
-                                            Text("Current")
+                                        HStack(spacing: 8) {
+                                            Text(threadStatusText(for: thread))
                                                 .font(.caption2.weight(.semibold))
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
-                                                .background(Color.accentColor.opacity(0.12))
-                                                .foregroundStyle(Color.accentColor)
+                                                .background(threadStatusColor(for: thread).opacity(0.14))
+                                                .foregroundStyle(threadStatusColor(for: thread))
                                                 .clipShape(Capsule())
+
+                                            if activeThreadID == thread.id {
+                                                Text("Current")
+                                                    .font(.caption2.weight(.semibold))
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 4)
+                                                    .background(Color.accentColor.opacity(0.12))
+                                                    .foregroundStyle(Color.accentColor)
+                                                    .clipShape(Capsule())
+                                            }
                                         }
                                     }
                                 }
@@ -1454,5 +1474,39 @@ struct ThreadsView: View {
             return thread.draftAttachments[0].fileName
         }
         return "\(thread.draftAttachments.count) attachments"
+    }
+
+    @ViewBuilder
+    private func threadIcon(for thread: ChatThread) -> some View {
+        let tint = threadStatusColor(for: thread)
+        let symbol: String = switch thread.presentationStatus {
+        case .draft:
+            "square.and.pencil"
+        case .running:
+            "waveform.path.ecg"
+        case .needsInput:
+            "hand.raised.fill"
+        case .completed:
+            "checkmark.circle.fill"
+        case .failed, .cancelled:
+            "exclamationmark.circle.fill"
+        case .ready:
+            "bubble.left.and.bubble.right.fill"
+        default:
+            "bubble.left.and.bubble.right.fill"
+        }
+
+        Image(systemName: symbol)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: 34, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(tint.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(tint.opacity(0.12), lineWidth: 1)
+            )
     }
 }

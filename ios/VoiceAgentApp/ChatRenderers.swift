@@ -395,11 +395,15 @@ private struct SectionCard: View {
                 MarkdownText(text: trimmed, isUser: isUser)
             }
         }
-        .padding(10)
-        .background(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.08))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isUser ? Color.white.opacity(0.08) : Color(.tertiarySystemGroupedBackground))
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.14), lineWidth: 1)
+                .stroke(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.10), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -442,8 +446,9 @@ private struct AgentStatusCard: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(Color.blue.opacity(0.08))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Color(.tertiarySystemGroupedBackground))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.blue.opacity(0.10), lineWidth: 1)
@@ -488,7 +493,7 @@ private struct LiveActivityCard: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.blue.opacity(0.08))
+                .fill(Color(.tertiarySystemGroupedBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -555,7 +560,7 @@ private struct ArtifactCard: View {
             }
         }
         .padding(10)
-        .background(Color(.secondarySystemBackground))
+        .background(Color(.tertiarySystemGroupedBackground))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
