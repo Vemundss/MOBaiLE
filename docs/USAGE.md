@@ -3,8 +3,9 @@
 This is the canonical operator/setup document for the repo. If another document disagrees on installation, service management, or runtime configuration, prefer this file.
 
 This document explains how to run the backend that MOBaiLE pairs with on your own Mac or Linux computer.
+The shortest reliable path is still: install on the computer you want to control, pair the iPhone, then confirm one successful run.
 
-## Set It Up
+## Fastest Path
 
 If you want the iPhone app working with the least friction, do this first.
 
@@ -20,7 +21,7 @@ The installer asks three quick questions. For the normal setup, keep the default
 - `Anywhere with Tailscale`
 - `Yes` for the background service
 
-This path:
+What this path does:
 
 - installs or updates MOBaiLE in `~/MOBaiLE`
 - configures the backend for phone pairing
@@ -40,6 +41,12 @@ bash ./scripts/install.sh --checkout "$PWD"
 2. Tap `Scan Pairing QR` inside MOBaiLE.
 3. Point the phone at the QR on the computer and confirm the pairing.
 4. Send a small prompt to confirm the thread works.
+
+What success looks like:
+
+- the app connects without manually editing settings
+- the thread shows live progress instead of only a final result
+- the final message comes back to the same thread that launched the run
 
 ### Step 3. Later, check status with one command
 
@@ -67,7 +74,12 @@ mobaile update
 If Tailscale MagicDNS is available, pairing prefers the stable `*.ts.net` hostname automatically before raw `100.x` or LAN IPs.
 The iPhone app only talks to this backend. It does not run code on-device.
 
+## Trust Boundary And Modes
+
+The phone starts and follows the run. The paired host machine does the work.
+
 Safe mode defaults:
+
 - restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
 - restricted file reads (`VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false`)
 - workdir constrained to default root
@@ -108,6 +120,7 @@ bash ./run_backend.sh
 ```
 
 API will be available at:
+
 - `http://127.0.0.1:8000/health`
 - `http://127.0.0.1:8000/docs`
 
@@ -128,6 +141,7 @@ bash ./scripts/service_linux.sh logs
 ```
 
 Notes:
+
 - Service runtime is synced to `~/Library/Application Support/MOBaiLE/backend-runtime`.
 - Linux user service runtime is synced to `~/.local/share/MOBaiLE/backend-runtime`.
 - Linux service management uses `systemd --user`; on headless hosts you may need `sudo loginctl enable-linger $USER` for reboot persistence.
@@ -143,6 +157,7 @@ uv run python ../scripts/backend_smoke.py
 ```
 
 Expected behavior:
+
 - A run is created (`status=accepted`, message `Run started`).
 - Backend writes `<working_directory>/hello.py`.
 - Backend executes the script and returns `hello from voice agent` in event output.
@@ -207,6 +222,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/utterances \
 ```
 
 Agent executor config (`backend/.env`):
+
 - `VOICE_AGENT_SECURITY_MODE=safe|full-access` controls security defaults.
 - `VOICE_AGENT_DEFAULT_EXECUTOR=codex|claude|local` selects the app/backend default executor.
   - if the selected agent CLI is unavailable, backend falls back to another available agent executor and finally to the internal `local` fallback
@@ -234,6 +250,7 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_DB_PATH=data/runs.db` controls SQLite run persistence path.
 
 Notes:
+
 - Context injection affects agent runs launched via MOBaiLE backend only.
 - Direct terminal usage (`codex ...` / `claude ...`) is unchanged unless you configure that separately.
 - Runtime config advertises agent executors (`codex`, `claude`) for normal UX; `local` is kept for internal smoke/dev flows.
@@ -329,6 +346,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/audio \
 ```
 
 Notes:
+
 - `transcript_hint` is optional and useful for deterministic MVP testing.
 - Default provider is OpenAI (`VOICE_AGENT_TRANSCRIBE_PROVIDER=openai`).
 - `VOICE_AGENT_MAX_AUDIO_MB=20` caps accepted audio payload size.
@@ -374,15 +392,18 @@ bash ./scripts/pairing_qr.sh
 ```
 
 By default this writes:
+
 - `backend/pairing-qr.png`
 - QR payload format is `mobaile://pair?server_url=...&server_url=...&pair_code=...&session_id=...`
 
 Phone onboarding with QR:
+
 1. Open `backend/pairing-qr.png` on the computer.
 2. In MOBaiLE, tap `Scan Pairing QR`.
 3. Point the phone at the QR. MOBaiLE exchanges the one-time pair code with the backend and stores the API token locally.
 
 Notes:
+
 - App now confirms pairing details before applying server/session changes.
 - Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding.
 - Non-local servers must use `https://` for pairing.
@@ -395,6 +416,7 @@ bash ./scripts/pairing_qr.sh --format json
 ```
 
 Pairing endpoint:
+
 - `POST /v1/pair/exchange` (unauthenticated, one-time code exchange, rate-limited)
 
 ## 10) Rotate API token
@@ -407,6 +429,7 @@ bash ./scripts/service_linux.sh restart
 ```
 
 This updates:
+
 - `backend/.env` (`VOICE_AGENT_API_TOKEN`)
 - `backend/pairing.json` (`pair_code`, `pair_code_expires_at`, and removes any legacy `api_token` export)
 
@@ -444,11 +467,13 @@ For use beyond local network:
 ## iOS Chat UX mode
 
 iOS chat is now always concise by default:
+
 - user-facing chat shows assistant summaries/structured cards.
 - noisy execution stream stays out of chat.
 - raw backend event output remains available in the `Logs` view (Developer Mode).
 - artifact `Open` actions now use authenticated in-app download/preview, so protected `/v1/files` resources open reliably.
 
 Event channel model:
+
 - `chat.message`: user-facing structured assistant envelope.
 - `log.message`: raw execution/log stream for diagnostics.

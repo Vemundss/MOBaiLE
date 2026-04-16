@@ -1,123 +1,435 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MOBaiLE Privacy Policy</title>
-  <style>
-    :root {
-      --bg: #f7f8fb;
-      --panel: #ffffff;
-      --text: #1b1f2a;
-      --muted: #4a5266;
-      --accent: #2357d6;
-      --border: #e3e8f3;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-      color: var(--text);
-      background: radial-gradient(circle at top left, #e9efff 0%, var(--bg) 48%, #f2f4f9 100%);
-      padding: 24px;
-    }
-    main {
-      max-width: 860px;
-      margin: 0 auto;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 28px;
-      box-shadow: 0 8px 22px rgba(27, 31, 42, 0.08);
-    }
-    h1 { margin-top: 0; line-height: 1.25; }
-    h2 { margin-top: 28px; margin-bottom: 8px; }
-    p, li { color: var(--muted); }
-    ul { padding-left: 20px; }
-    a { color: var(--accent); }
-    .updated {
-      display: inline-block;
-      margin-top: 6px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: #edf2ff;
-      color: #284078;
-      font-size: 13px;
-      font-weight: 600;
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Privacy Policy for MOBaiLE</h1>
-    <div class="updated">Last updated: March 29, 2026</div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MOBaiLE Privacy Policy</title>
+    <meta
+      name="description"
+      content="Plain-language privacy policy for the MOBaiLE iPhone app."
+    />
+    <style>
+      :root {
+        --bg: #f3efe7;
+        --paper: rgba(255, 251, 246, 0.9);
+        --panel: rgba(255, 255, 255, 0.76);
+        --text: #1f1d1a;
+        --muted: #61594e;
+        --line: rgba(31, 29, 26, 0.12);
+        --accent: #0f5c4d;
+        --accent-strong: #09382f;
+        --blue: #1f77e3;
+        --shadow: 0 24px 64px rgba(43, 33, 20, 0.14);
+      }
 
-    <p><a href="./">Home</a> · <a href="support.html">Support</a></p>
+      * {
+        box-sizing: border-box;
+      }
 
-    <p>
-      This Privacy Policy explains how MOBaiLE ("the app") processes information when you use the iOS app.
-      MOBaiLE is designed to connect to a backend server that you configure and control.
-    </p>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino,
+          Georgia, serif;
+        color: var(--text);
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(15, 92, 77, 0.15),
+            transparent 30%
+          ),
+          radial-gradient(
+            circle at top right,
+            rgba(31, 119, 227, 0.12),
+            transparent 26%
+          ),
+          linear-gradient(180deg, #faf6ef 0%, var(--bg) 52%, #efe5d8 100%);
+        padding: 24px;
+      }
 
-    <h2>Information the app processes</h2>
-    <ul>
-      <li>Connection settings such as server URL and session ID.</li>
-      <li>API token used to authenticate to your backend (stored in iOS Keychain).</li>
-      <li>Text prompts and chat history you submit in the app.</li>
-      <li>Voice recordings when you choose to use microphone input.</li>
-      <li>Photos, files, and other attachments you explicitly choose to import and send to your backend.</li>
-      <li>Run status, logs, and result metadata returned by your backend.</li>
-    </ul>
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
 
-    <h2>How information is used</h2>
-    <p>
-      The app uses this information only to run your requested tasks, show run progress/results, and persist local
-      app state (for example, your settings and chat threads).
-    </p>
+      .shell {
+        max-width: 1040px;
+        margin: 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        overflow: hidden;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+      }
 
-    <h2>Where information is sent</h2>
-    <p>
-      The iOS app sends prompts, audio, attachments, and related metadata to the backend server URL you configure.
-      If your backend is configured to call third-party providers (for example, AI or transcription services), data
-      may also be processed by those providers under their own policies.
-    </p>
+      .hero,
+      .section,
+      footer {
+        padding-left: 32px;
+        padding-right: 32px;
+      }
 
-    <h2>Data sharing and sale</h2>
-    <p>
-      The app does not sell personal data and does not include advertising SDKs or third-party analytics/tracking
-      libraries.
-    </p>
+      .hero {
+        padding-top: 28px;
+        padding-bottom: 26px;
+        border-bottom: 1px solid var(--line);
+      }
 
-    <h2>Data retention and deletion</h2>
-    <ul>
-      <li>On-device settings and chat history remain until you delete them or uninstall the app.</li>
-      <li>Backend-side retention depends on your backend setup and configuration.</li>
-      <li>You can remove app data by uninstalling MOBaiLE and deleting backend data on your server.</li>
-    </ul>
+      .eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(15, 92, 77, 0.1);
+        color: var(--accent-strong);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
 
-    <h2>Security</h2>
-    <p>
-      You are responsible for securing your backend endpoint. Use HTTPS for non-local connections and manage API
-      tokens carefully.
-    </p>
+      h1 {
+        margin: 16px 0 12px;
+        font-size: clamp(42px, 7vw, 74px);
+        line-height: 0.96;
+        letter-spacing: -0.05em;
+      }
 
-    <h2>Children's privacy</h2>
-    <p>
-      MOBaiLE is not directed to children under 13.
-    </p>
+      .lede {
+        max-width: 760px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 20px;
+        line-height: 1.58;
+      }
 
-    <h2>Changes to this policy</h2>
-    <p>
-      This policy may be updated over time. Changes will be published at this URL with a revised "Last updated" date.
-    </p>
+      .actions,
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 22px;
+      }
 
-    <h2>Contact</h2>
-    <p>
-      For privacy questions, open an issue on
-      <a href="https://github.com/Vemundss/MOBaiLE/issues">the MOBaiLE GitHub issue tracker</a>
-      or use the support channel linked from the app's App Store listing for distributed builds.
-    </p>
-  </main>
-</body>
+      .button,
+      .link-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        padding: 0 16px;
+        border-radius: 999px;
+        font-size: 15px;
+        font-weight: 700;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .button.primary {
+        background: var(--accent);
+        border-color: transparent;
+        color: #f7f4ee;
+      }
+
+      .section {
+        padding-top: 26px;
+        padding-bottom: 30px;
+      }
+
+      .section-header {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: clamp(30px, 5vw, 46px);
+        line-height: 1;
+        letter-spacing: -0.045em;
+      }
+
+      .section-copy {
+        max-width: 780px;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.62;
+        font-size: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--panel);
+        padding: 22px;
+      }
+
+      .card h3,
+      .panel h3 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        line-height: 1.14;
+      }
+
+      .card p,
+      .card li,
+      .panel p,
+      .panel li {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.66;
+      }
+
+      .card ul,
+      .panel ul {
+        margin: 12px 0 0;
+        padding-left: 22px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      footer {
+        padding-top: 0;
+        padding-bottom: 32px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      footer a {
+        color: var(--accent-strong);
+        font-weight: 700;
+      }
+
+      @media (max-width: 900px) {
+        .grid,
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 14px;
+        }
+
+        .hero,
+        .section,
+        footer {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">MOBaiLE Privacy</div>
+        <h1>Plain-language privacy for a paired app.</h1>
+        <p class="lede">
+          MOBaiLE is designed to connect your iPhone to a backend server you
+          configure and control. The app stores some data on-device and sends
+          prompts, audio, attachments, and run metadata to that backend so it
+          can do the work you asked for.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="./">Home</a>
+          <a class="button" href="support.html">Support</a>
+          <a class="button" href="https://github.com/Vemundss/MOBaiLE"
+            >GitHub</a
+          >
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div class="eyebrow">At a glance</div>
+          <h2>What the app does and does not do.</h2>
+          <p class="section-copy">
+            This summary is meant to be easy to read. The sections below provide
+            the policy details in fuller form.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Stored on your iPhone</h3>
+            <p>
+              Connection settings, local thread history, and the API token you
+              save in the app. The token is stored in iOS Keychain.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Sent to your backend</h3>
+            <p>
+              Prompts, voice recordings, attachments, session metadata, run
+              status, logs, and results needed for the thread to work.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Not built around ads or tracking</h3>
+            <p>
+              MOBaiLE does not include advertising SDKs and does not sell
+              personal data.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
+            <h3>Information the app processes</h3>
+            <ul>
+              <li>Connection settings such as server URL and session ID.</li>
+              <li>API token used to authenticate to your backend.</li>
+              <li>
+                Text prompts and local chat history you choose to keep in the
+                app.
+              </li>
+              <li>Voice recordings when you choose microphone input.</li>
+              <li>
+                Photos, files, and other attachments you explicitly import and
+                send.
+              </li>
+              <li>
+                Run status, logs, and result metadata returned by your backend.
+              </li>
+            </ul>
+          </article>
+          <article class="panel">
+            <h3>How that information is used</h3>
+            <ul>
+              <li>
+                To send your requested task to the backend you paired with.
+              </li>
+              <li>
+                To show live progress, results, and follow-up context in the
+                thread.
+              </li>
+              <li>
+                To keep local app state such as settings and saved
+                conversations.
+              </li>
+              <li>
+                To reopen or continue the same thread on your phone later.
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
+            <h3>Where information is sent</h3>
+            <p>
+              The iOS app sends prompts, audio, attachments, and related
+              metadata to the backend server URL you configure. If that backend
+              is configured to call third-party providers, such as AI or
+              transcription services, those providers may also process data
+              under their own policies.
+            </p>
+          </article>
+          <article class="panel">
+            <h3>What is not safe to assume</h3>
+            <p>
+              MOBaiLE should not be described as "no data leaves your devices"
+              because the app is explicitly designed to send data to the backend
+              you pair with. Whether anything goes beyond that depends on your
+              backend setup.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
+            <h3>Retention and deletion</h3>
+            <ul>
+              <li>
+                On-device settings and local chat history remain until you
+                delete them or uninstall the app.
+              </li>
+              <li>
+                Backend-side retention depends on how your backend is configured
+                and operated.
+              </li>
+              <li>
+                You can remove app data by deleting local app data and deleting
+                backend-side data on the server you control.
+              </li>
+            </ul>
+          </article>
+          <article class="panel">
+            <h3>Security responsibilities</h3>
+            <ul>
+              <li>
+                Use HTTPS for non-local connections unless you intentionally
+                rely on a trusted alternative such as Tailscale.
+              </li>
+              <li>
+                Protect the backend endpoint and the API token used to
+                authenticate to it.
+              </li>
+              <li>
+                Choose safe mode or full-access mode based on how much you trust
+                the host machine.
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
+            <h3>Children's privacy</h3>
+            <p>MOBaiLE is not directed to children under 13.</p>
+          </article>
+          <article class="panel">
+            <h3>Changes and contact</h3>
+            <p>
+              This policy may be updated over time. Changes will be published at
+              this URL with a revised last-updated date. For privacy questions,
+              open an issue on
+              <a href="https://github.com/Vemundss/MOBaiLE/issues"
+                >the MOBaiLE GitHub issue tracker</a
+              >
+              or use the support path linked from the app's App Store listing
+              for distributed builds.
+            </p>
+            <div class="footer-links">
+              <a class="link-pill" href="support.html">Support</a>
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/issues"
+                >GitHub issues</a
+              >
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer>
+        MOBaiLE privacy policy. Last updated: April 16, 2026.
+        <a href="./">Home</a> · <a href="support.html">Support</a> ·
+        <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a>
+      </footer>
+    </main>
+  </body>
 </html>

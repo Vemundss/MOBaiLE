@@ -1,87 +1,409 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MOBaiLE Support</title>
-  <style>
-    :root {
-      --bg: #f7f8fb;
-      --panel: #ffffff;
-      --text: #1b1f2a;
-      --muted: #4a5266;
-      --accent: #2357d6;
-      --border: #e3e8f3;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-      color: var(--text);
-      background: radial-gradient(circle at top left, #e9efff 0%, var(--bg) 48%, #f2f4f9 100%);
-      padding: 24px;
-    }
-    main {
-      max-width: 860px;
-      margin: 0 auto;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 28px;
-      box-shadow: 0 8px 22px rgba(27, 31, 42, 0.08);
-    }
-    h1 { margin-top: 0; line-height: 1.25; }
-    h2 { margin-top: 28px; margin-bottom: 8px; }
-    p, li { color: var(--muted); }
-    ul { padding-left: 20px; }
-    a { color: var(--accent); }
-    .updated {
-      display: inline-block;
-      margin-top: 6px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: #edf2ff;
-      color: #284078;
-      font-size: 13px;
-      font-weight: 600;
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>MOBaiLE Support</h1>
-    <div class="updated">Last updated: March 29, 2026</div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MOBaiLE Support</title>
+    <meta
+      name="description"
+      content="Support for MOBaiLE setup, pairing, connectivity, and voice issues."
+    />
+    <style>
+      :root {
+        --bg: #f3efe7;
+        --paper: rgba(255, 251, 246, 0.9);
+        --panel: rgba(255, 255, 255, 0.76);
+        --text: #1f1d1a;
+        --muted: #61594e;
+        --line: rgba(31, 29, 26, 0.12);
+        --accent: #0f5c4d;
+        --accent-strong: #09382f;
+        --blue: #1f77e3;
+        --shadow: 0 24px 64px rgba(43, 33, 20, 0.14);
+      }
 
-    <p><a href="./">Home</a> · <a href="privacy-policy.html">Privacy Policy</a></p>
+      * {
+        box-sizing: border-box;
+      }
 
-    <p>
-      MOBaiLE is an iPhone client for a paired backend running on your own computer. If setup or pairing fails,
-      the fastest way to debug it is usually to verify the backend health check, token, and reachable server URL.
-    </p>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino,
+          Georgia, serif;
+        color: var(--text);
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(31, 119, 227, 0.12),
+            transparent 30%
+          ),
+          radial-gradient(
+            circle at top right,
+            rgba(15, 92, 77, 0.16),
+            transparent 28%
+          ),
+          linear-gradient(180deg, #faf6ef 0%, var(--bg) 52%, #efe5d8 100%);
+        padding: 24px;
+      }
 
-    <h2>Quick help</h2>
-    <ul>
-      <li>Confirm the paired backend responds at `/health`.</li>
-      <li>Re-check the saved `Server URL`, `API Token`, and `Session ID` in Settings.</li>
-      <li>For remote use, prefer an HTTPS or Tailscale URL over `127.0.0.1`.</li>
-      <li>For voice fallback, confirm backend transcription is configured when local Speech Recognition is unavailable.</li>
-    </ul>
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
 
-    <h2>Before opening an issue</h2>
-    <ul>
-      <li>Confirm your backend responds at `/health`.</li>
-      <li>Confirm the app has the correct `Server URL` and `API Token`.</li>
-      <li>For remote use, prefer a Tailscale or HTTPS URL instead of `127.0.0.1`.</li>
-      <li>For voice fallback, confirm `OPENAI_API_KEY` is configured if backend transcription is expected.</li>
-    </ul>
+      .shell {
+        max-width: 1040px;
+        margin: 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        overflow: hidden;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+      }
 
-    <h2>Contact</h2>
-    <p>
-      For bugs, setup help, or release issues, open an issue on
-      <a href="https://github.com/Vemundss/MOBaiLE/issues">the MOBaiLE GitHub issue tracker</a>.
-      If you are using a distributed build, you can also use the support channel linked from the app's App Store listing.
-    </p>
-  </main>
-</body>
+      .hero,
+      .section,
+      footer {
+        padding-left: 32px;
+        padding-right: 32px;
+      }
+
+      .hero {
+        padding-top: 28px;
+        padding-bottom: 26px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(15, 92, 77, 0.1);
+        color: var(--accent-strong);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 16px 0 12px;
+        font-size: clamp(42px, 7vw, 74px);
+        line-height: 0.96;
+        letter-spacing: -0.05em;
+      }
+
+      .lede {
+        max-width: 760px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 20px;
+        line-height: 1.58;
+      }
+
+      .actions,
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 22px;
+      }
+
+      .button,
+      .link-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        padding: 0 16px;
+        border-radius: 999px;
+        font-size: 15px;
+        font-weight: 700;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .button.primary {
+        background: var(--accent);
+        border-color: transparent;
+        color: #f7f4ee;
+      }
+
+      .section {
+        padding-top: 26px;
+        padding-bottom: 30px;
+      }
+
+      .section-header {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: clamp(30px, 5vw, 46px);
+        line-height: 1;
+        letter-spacing: -0.045em;
+      }
+
+      .section-copy {
+        max-width: 760px;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.62;
+        font-size: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--panel);
+        padding: 22px;
+      }
+
+      .card h3,
+      .panel h3 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        line-height: 1.14;
+      }
+
+      .card p,
+      .card li,
+      .panel p,
+      .panel li {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.66;
+      }
+
+      .card ul,
+      .panel ul,
+      .panel ol {
+        margin: 12px 0 0;
+        padding-left: 22px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 18px;
+      }
+
+      footer {
+        padding-top: 0;
+        padding-bottom: 32px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      footer a {
+        color: var(--accent-strong);
+        font-weight: 700;
+      }
+
+      @media (max-width: 860px) {
+        .grid,
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 14px;
+        }
+
+        .hero,
+        .section,
+        footer {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">MOBaiLE Support</div>
+        <h1>Help without guesswork.</h1>
+        <p class="lede">
+          Most setup problems come down to one of four things: backend health,
+          the saved server URL, the API token, or a network path the phone
+          cannot reach. Start there and you usually recover fast.
+        </p>
+        <div class="actions">
+          <a
+            class="button primary"
+            href="https://github.com/Vemundss/MOBaiLE/issues"
+            >Open a GitHub issue</a
+          >
+          <a
+            class="button"
+            href="https://github.com/Vemundss/MOBaiLE/blob/main/docs/USAGE.md"
+            >Install guide</a
+          >
+          <a class="button" href="privacy-policy.html">Privacy policy</a>
+          <a class="button" href="./">Home</a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div class="eyebrow">Quick recovery</div>
+          <h2>Common fixes, grouped by symptom.</h2>
+          <p class="section-copy">
+            Use the symptom that matches what you see. The goal is to get you
+            back to a successful first run, not send you wandering through every
+            possible configuration.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Pairing does not complete</h3>
+            <ul>
+              <li>Confirm the backend responds at <code>/health</code>.</li>
+              <li>Re-open the pairing QR and make sure it is current.</li>
+              <li>
+                Verify the app has the right <code>Server URL</code>,
+                <code>API Token</code>, and <code>Session ID</code>.
+              </li>
+              <li>
+                If pairing fails immediately, rotate the pairing token with
+                <code>bash ./scripts/rotate_api_token.sh</code>.
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Works on Wi-Fi but not remotely</h3>
+            <ul>
+              <li>Do not use <code>127.0.0.1</code> on a real iPhone.</li>
+              <li>Prefer a Tailscale or HTTPS URL for remote use.</li>
+              <li>
+                Confirm the chosen URL is reachable from the phone, not just
+                from the host machine.
+              </li>
+              <li>
+                Run <code>mobaile status</code> on the host and check that the
+                advertised URL still looks right.
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Voice or mic flow feels broken</h3>
+            <ul>
+              <li>
+                Confirm MOBaiLE has microphone and Speech Recognition permission
+                in iOS Settings.
+              </li>
+              <li>
+                On Simulator or when on-device speech is unavailable, configure
+                <code>OPENAI_API_KEY</code> for backend audio fallback.
+              </li>
+              <li>
+                If text works and audio does not, the backend path is usually
+                fine and the problem is voice-specific.
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>The host seems idle or outdated</h3>
+            <ul>
+              <li>
+                Run <code>mobaile status</code> to confirm the service is still
+                ready.
+              </li>
+              <li>
+                Run <code>mobaile update</code> to pick up the latest installed
+                backend and CLI.
+              </li>
+              <li>
+                If you changed code or config in a checkout, re-sync and restart
+                the service.
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
+            <h3>Before opening an issue</h3>
+            <p>
+              A good issue report makes it obvious whether the problem is
+              pairing, network reachability, host runtime, or voice fallback.
+            </p>
+            <ol>
+              <li>Say whether you are using a real iPhone or Simulator.</li>
+              <li>
+                Include the setup path: local, LAN, Tailscale, or public HTTPS.
+              </li>
+              <li>
+                Include the exact symptom and the first step where it fails.
+              </li>
+              <li>
+                Include any relevant error message, but remove tokens and
+                private URLs you do not want to publish.
+              </li>
+              <li>
+                Say whether <code>/health</code> and
+                <code>mobaile status</code> both look healthy.
+              </li>
+            </ol>
+            <div class="footer-links">
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/issues"
+                >Issue tracker</a
+              >
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/blob/main/ios/README.md"
+                >iPhone app guide</a
+              >
+            </div>
+          </article>
+          <article class="panel">
+            <h3>Where to get help</h3>
+            <p>
+              GitHub Issues are the main support path for setup problems,
+              regressions, and feature requests. If you are using a distributed
+              build, you can also use the support contact linked from the app's
+              App Store listing.
+            </p>
+            <div class="footer-links">
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/issues"
+                >GitHub Issues</a
+              >
+              <a class="link-pill" href="./">Public site</a>
+              <a class="link-pill" href="privacy-policy.html">Privacy policy</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer>
+        MOBaiLE support page. Last updated: April 16, 2026.
+        <a href="./">Home</a> · <a href="privacy-policy.html">Privacy</a> ·
+        <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a>
+      </footer>
+    </main>
+  </body>
 </html>

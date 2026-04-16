@@ -1,343 +1,700 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MOBaiLE</title>
-  <meta
-    name="description"
-    content="MOBaiLE lets you start a task from iPhone, run it on your own Mac or Linux machine, and follow the result live."
-  />
-  <style>
-    :root {
-      --bg: #f3f0e8;
-      --sand: #e8dfcf;
-      --paper: rgba(255, 251, 245, 0.88);
-      --text: #1d1b18;
-      --muted: #5f574d;
-      --line: rgba(29, 27, 24, 0.12);
-      --accent: #0f5c4d;
-      --accent-strong: #083b31;
-      --sun: #d57b2a;
-      --shadow: 0 20px 60px rgba(47, 37, 21, 0.14);
-    }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MOBaiLE | Your own computer, in your pocket.</title>
+    <meta
+      name="description"
+      content="MOBaiLE lets you start a task from iPhone, run it on your own Mac or Linux machine, and stay in one live thread while you are away from the keyboard."
+    />
+    <style>
+      :root {
+        --bg: #f3efe7;
+        --paper: rgba(255, 251, 246, 0.88);
+        --panel: rgba(255, 255, 255, 0.76);
+        --text: #1f1d1a;
+        --muted: #61594e;
+        --line: rgba(31, 29, 26, 0.12);
+        --accent: #0f5c4d;
+        --accent-strong: #09382f;
+        --blue: #1f77e3;
+        --warm: #c97b2c;
+        --shadow: 0 24px 64px rgba(43, 33, 20, 0.14);
+      }
 
-    * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
 
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(213, 123, 42, 0.22), transparent 34%),
-        radial-gradient(circle at top right, rgba(15, 92, 77, 0.18), transparent 28%),
-        linear-gradient(180deg, #faf6ef 0%, var(--bg) 48%, #efe7da 100%);
-      padding: 24px;
-    }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino,
+          Georgia, serif;
+        color: var(--text);
+        background:
+          radial-gradient(
+            circle at top left,
+            rgba(201, 123, 44, 0.24),
+            transparent 34%
+          ),
+          radial-gradient(
+            circle at top right,
+            rgba(15, 92, 77, 0.2),
+            transparent 28%
+          ),
+          linear-gradient(180deg, #faf6ef 0%, var(--bg) 50%, #efe5d8 100%);
+        padding: 24px;
+      }
 
-    .shell {
-      max-width: 1080px;
-      margin: 0 auto;
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 28px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
-      backdrop-filter: blur(10px);
-    }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
 
-    .hero {
-      position: relative;
-      padding: 64px 32px 48px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 14px;
-      border-radius: 999px;
-      background: rgba(15, 92, 77, 0.08);
-      color: var(--accent-strong);
-      font-size: 14px;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
-    h1 {
-      margin: 20px 0 16px;
-      max-width: 760px;
-      font-size: clamp(48px, 8vw, 90px);
-      line-height: 0.95;
-      letter-spacing: -0.05em;
-    }
-
-    .lede {
-      max-width: 700px;
-      margin: 0;
-      font-size: clamp(18px, 2.5vw, 24px);
-      line-height: 1.45;
-      color: var(--muted);
-    }
-
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 14px;
-      margin-top: 28px;
-    }
-
-    .button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 48px;
-      padding: 0 18px;
-      border-radius: 999px;
-      border: 1px solid transparent;
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 0.01em;
-      text-decoration: none;
-      transition: transform 160ms ease, background 160ms ease, color 160ms ease;
-    }
-
-    .button:hover {
-      transform: translateY(-1px);
-    }
-
-    .button.primary {
-      background: var(--accent);
-      color: #f8f6f1;
-    }
-
-    .button.secondary {
-      border-color: var(--line);
-      color: var(--text);
-      background: rgba(255, 255, 255, 0.55);
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-      padding: 24px 32px 40px;
-    }
-
-    .card {
-      min-height: 100%;
-      padding: 22px;
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      background: rgba(255, 255, 255, 0.62);
-    }
-
-    .card h2 {
-      margin: 0 0 10px;
-      font-size: 20px;
-      line-height: 1.2;
-    }
-
-    .card p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.65;
-    }
-
-    .card a {
-      color: var(--accent-strong);
-      font-weight: 700;
-    }
-
-    .strip {
-      display: grid;
-      grid-template-columns: 1.3fr 1fr;
-      gap: 18px;
-      padding: 0 32px 32px;
-    }
-
-    .panel {
-      padding: 26px;
-      border-radius: 24px;
-      border: 1px solid var(--line);
-      background: linear-gradient(135deg, rgba(255, 250, 244, 0.92), rgba(245, 238, 228, 0.92));
-    }
-
-    .panel h2 {
-      margin: 0 0 12px;
-      font-size: 28px;
-      line-height: 1.05;
-    }
-
-    .panel p, .panel li {
-      color: var(--muted);
-      line-height: 1.65;
-    }
-
-    .showcase {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-      padding: 0 32px 32px;
-    }
-
-    .shot {
-      padding: 18px;
-      border-radius: 24px;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.72);
-    }
-
-    .shot img {
-      display: block;
-      width: 100%;
-      border-radius: 20px;
-      box-shadow: 0 18px 32px rgba(23, 18, 12, 0.14);
-    }
-
-    .shot h3 {
-      margin: 16px 0 8px;
-      font-size: 20px;
-      line-height: 1.15;
-    }
-
-    .shot p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    ul {
-      margin: 14px 0 0;
-      padding-left: 20px;
-    }
-
-    footer {
-      padding: 24px 32px 32px;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    footer a {
-      color: var(--accent-strong);
-      font-weight: 700;
-    }
-
-    @media (max-width: 860px) {
-      .grid,
-      .strip,
-      .showcase {
-        grid-template-columns: 1fr;
+      .shell {
+        max-width: 1120px;
+        margin: 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        overflow: hidden;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
       }
 
       .hero {
-        padding: 42px 22px 30px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+        gap: 28px;
+        padding: 34px 34px 26px;
+        border-bottom: 1px solid var(--line);
       }
 
-      .grid,
-      .strip,
-      .showcase,
-      footer {
+      .hero-copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(15, 92, 77, 0.1);
+        color: var(--accent-strong);
+        font-size: 14px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 18px 0 14px;
+        font-size: clamp(50px, 8vw, 92px);
+        line-height: 0.94;
+        letter-spacing: -0.055em;
+      }
+
+      .lede {
+        margin: 0;
+        max-width: 620px;
+        font-size: clamp(19px, 2.4vw, 25px);
+        line-height: 1.48;
+        color: var(--muted);
+      }
+
+      .tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        padding: 0 16px;
+        border-radius: 999px;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .tag.blue {
+        background: rgba(31, 119, 227, 0.12);
+        color: #1558b5;
+      }
+      .tag.green {
+        background: rgba(15, 92, 77, 0.12);
+        color: var(--accent);
+      }
+      .tag.gold {
+        background: rgba(201, 123, 44, 0.14);
+        color: #8b5415;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 28px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 50px;
+        padding: 0 18px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        transition:
+          transform 160ms ease,
+          background 160ms ease,
+          color 160ms ease;
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+      }
+
+      .button.primary {
+        background: var(--accent);
+        color: #f8f5ef;
+      }
+
+      .button.secondary {
+        background: rgba(255, 255, 255, 0.58);
+        border-color: var(--line);
+        color: var(--text);
+      }
+
+      .hero-media {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 22px;
+        border-radius: 28px;
+        background:
+          radial-gradient(
+            circle at top right,
+            rgba(15, 92, 77, 0.16),
+            transparent 34%
+          ),
+          linear-gradient(
+            180deg,
+            rgba(255, 253, 250, 0.95),
+            rgba(240, 233, 223, 0.92)
+          );
+        border: 1px solid rgba(31, 29, 26, 0.08);
+        min-height: 100%;
+        overflow: hidden;
+      }
+
+      .phone-stack {
+        position: relative;
+        width: 100%;
+        min-height: 520px;
+      }
+
+      .phone {
+        position: absolute;
+        width: 42%;
+        max-width: 250px;
+        display: block;
+        border-radius: 30px;
+        box-shadow: 0 26px 44px rgba(24, 18, 12, 0.18);
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(31, 29, 26, 0.06);
+      }
+
+      .phone.front {
+        right: 20%;
+        top: 8px;
+        z-index: 3;
+      }
+
+      .phone.middle {
+        left: 18%;
+        top: 116px;
+        transform: rotate(-8deg);
+        z-index: 2;
+      }
+
+      .phone.back {
+        right: 4%;
+        top: 82px;
+        transform: rotate(10deg);
+        z-index: 1;
+      }
+
+      .section {
+        padding: 0 34px 34px;
+      }
+
+      .section-header {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding-top: 34px;
+        margin-bottom: 18px;
+      }
+
+      .section-header .eyebrow {
+        font-size: 13px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: clamp(34px, 5vw, 52px);
+        line-height: 0.98;
+        letter-spacing: -0.045em;
+      }
+
+      .section-copy {
+        max-width: 760px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.62;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card,
+      .panel,
+      .shot {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--panel);
+      }
+
+      .card {
+        padding: 22px;
+      }
+
+      .card h3,
+      .panel h3,
+      .shot h3 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        line-height: 1.12;
+      }
+
+      .card p,
+      .panel p,
+      .panel li,
+      .shot p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.65;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 18px;
+      }
+
+      .panel {
+        padding: 24px;
+      }
+
+      .panel pre {
+        margin: 16px 0;
+        padding: 16px 18px;
+        border-radius: 18px;
+        background: #1e241f;
+        color: #edf1ea;
+        overflow-x: auto;
+        font-size: 15px;
+      }
+
+      .panel ul,
+      .panel ol {
+        margin: 14px 0 0;
         padding-left: 22px;
-        padding-right: 22px;
       }
-    }
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <section class="hero">
-      <div class="eyebrow">MOBaiLE • Paired iPhone Client</div>
-      <h1>Your computer, in your pocket.</h1>
-      <p class="lede">
-        Start a task from iPhone, run it on your own Mac or Linux machine, and keep planning, execution, and results
-        in one live thread. These pages also host the public support and privacy URLs used for distribution.
-      </p>
-      <div class="actions">
-        <a class="button primary" href="https://github.com/Vemundss/MOBaiLE">View on GitHub</a>
-        <a class="button secondary" href="support.html">Support</a>
-        <a class="button secondary" href="privacy-policy.html">Privacy Policy</a>
-      </div>
-    </section>
 
-    <section class="grid">
-      <article class="card">
-        <h2>Run on your own machine</h2>
-        <p>
-          Pair MOBaiLE with your own backend so work happens on the files, tools, and credentials you already trust.
-        </p>
-      </article>
-      <article class="card">
-        <h2>Stay in one thread</h2>
-        <p>
-          Prompts, voice input, status updates, results, and follow-ups stay in one conversation instead of vanishing
-          into a black box.
-        </p>
-      </article>
-      <article class="card">
-        <h2>Support and privacy</h2>
-        <p>
-          The app stores local settings on-device and sends prompts, audio, attachments, and run metadata only to the
-          backend you pair with. Full details live in the <a href="privacy-policy.html">privacy policy</a>.
-        </p>
-      </article>
-    </section>
+      .showcase {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
 
-    <section class="showcase">
-      <article class="shot">
-        <img src="readme-screens/configured-empty.png" alt="MOBaiLE configured start screen with runtime context and quick-start prompts" />
-        <h3>Start with context</h3>
-        <p>Pick up in the right workspace, choose a focused starter prompt, or begin a voice-first thread immediately.</p>
-      </article>
-      <article class="shot">
-        <img src="readme-screens/conversation.png" alt="MOBaiLE live conversation showing a prompt, result, and next step" />
-        <h3>Watch the run live</h3>
-        <p>See progress, summaries, and the next recommended step in the same thread that launched the work.</p>
-      </article>
-      <article class="shot">
-        <img src="readme-screens/recording.png" alt="MOBaiLE recording screen with voice mode, auto-send, and attachments" />
-        <h3>Handle voice tasks cleanly</h3>
-        <p>Record, review, and send without losing the thread, attachments, or the next action.</p>
-      </article>
-    </section>
+      .shot {
+        overflow: hidden;
+      }
 
-    <section class="strip">
-      <article class="panel">
-        <h2>Public URLs for distribution</h2>
-        <p>
-          These pages stay live so the shipped app has stable support and privacy-policy URLs, and so anyone landing
-          here can verify what MOBaiLE does before installing or pairing it.
-        </p>
-        <ul>
-          <li>Support URL: this site’s <a href="support.html">support page</a></li>
-          <li>Privacy Policy URL: this site’s <a href="privacy-policy.html">privacy page</a></li>
-          <li>Repository URL: <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a></li>
-        </ul>
-      </article>
-      <article class="panel">
-        <h2>Open-source project</h2>
-        <p>
-          MOBaiLE ships as an open repository with the iPhone app, paired backend, setup scripts, and release
-          automation in one place.
-        </p>
-        <ul>
-          <li><a href="https://github.com/Vemundss/MOBaiLE">Repository homepage</a></li>
-          <li><a href="https://github.com/Vemundss/MOBaiLE/issues">Issue tracker</a></li>
-          <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/CONTRIBUTING.md">Contributing Guide</a></li>
-          <li><a href="https://github.com/Vemundss/MOBaiLE/blob/main/SECURITY.md">Security Policy</a></li>
-        </ul>
-      </article>
-    </section>
+      .shot img {
+        display: block;
+        width: 100%;
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.92),
+          rgba(237, 232, 224, 0.92)
+        );
+      }
 
-    <footer>
-      Public site for MOBaiLE. Last updated: March 29, 2026.
-      <a href="privacy-policy.html">Privacy</a> ·
-      <a href="support.html">Support</a> ·
-      <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a>
-    </footer>
-  </main>
-</body>
+      .shot-copy {
+        padding: 18px 18px 20px;
+      }
+
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .link-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.56);
+        font-weight: 700;
+        color: var(--accent-strong);
+      }
+
+      footer {
+        padding: 0 34px 34px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      @media (max-width: 980px) {
+        .hero,
+        .split,
+        .showcase,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .phone-stack {
+          min-height: 440px;
+        }
+
+        .phone.front {
+          right: 26%;
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 14px;
+        }
+
+        .hero,
+        .section,
+        footer {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+
+        .hero {
+          padding-top: 22px;
+        }
+
+        .section {
+          padding-bottom: 24px;
+        }
+
+        .phone-stack {
+          min-height: 360px;
+        }
+
+        .phone {
+          width: 48%;
+        }
+
+        .phone.front {
+          right: 22%;
+        }
+
+        .phone.middle {
+          left: 10%;
+          top: 96px;
+        }
+
+        .phone.back {
+          right: 2%;
+          top: 72px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">Paired iPhone control for your own machine</div>
+          <h1>Your own computer, in your pocket.</h1>
+          <p class="lede">
+            Start a task from iPhone, run it on your own Mac or Linux machine,
+            and keep planning, execution, results, and follow-up in one live
+            thread while you are away from the keyboard.
+          </p>
+          <div class="tag-row">
+            <span class="tag blue">Voice and text</span>
+            <span class="tag green">Runs on your machine</span>
+            <span class="tag gold">Live run stream</span>
+          </div>
+          <div class="actions">
+            <a class="button primary" href="https://github.com/Vemundss/MOBaiLE"
+              >View on GitHub</a
+            >
+            <a
+              class="button secondary"
+              href="https://github.com/Vemundss/MOBaiLE/blob/main/docs/USAGE.md"
+              >Install guide</a
+            >
+            <a class="button secondary" href="support.html">Support</a>
+          </div>
+        </div>
+        <div class="hero-media">
+          <div class="phone-stack" aria-hidden="true">
+            <img
+              class="phone front"
+              src="readme-screens/configured-empty.png"
+              alt="Configured start screen showing runtime, working directory, and quick starts"
+            />
+            <img
+              class="phone middle"
+              src="readme-screens/recording.png"
+              alt="Voice capture controls that stay attached to the current thread"
+            />
+            <img
+              class="phone back"
+              src="readme-screens/conversation.png"
+              alt="Live run thread showing the result and the next recommended step"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div class="eyebrow">Why it feels different</div>
+          <h2>Useful when your laptop is the inconvenient device.</h2>
+          <p class="section-copy">
+            MOBaiLE is not a toy cloud shell and it is not an opaque autopilot.
+            It is a handheld control surface for the computer you already use,
+            with a thread you can actually follow.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Runs on your real machine</h3>
+            <p>
+              Your repo, shell, auth, files, and network stay where the work
+              already happens.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Keeps one visible thread</h3>
+            <p>
+              Prompt, progress, result, and next step stay together instead of
+              collapsing into a final notification.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Feels natural on phone</h3>
+            <p>
+              Voice mode, silence-based send, widgets, haptics, and Shortcuts
+              make it usable away from the desk.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Keeps trust explicit</h3>
+            <p>
+              Safe mode, full-access mode, pairing, and the network path stay
+              visible instead of hidden behind vague claims.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
+            <h3>Set it up in a few minutes</h3>
+            <p>
+              The shortest path is to run the installer on the computer you want
+              to control, keep the default answers, then pair the iPhone with
+              the QR it shows.
+            </p>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/Vemundss/MOBaiLE/main/scripts/install.sh | bash</code></pre>
+            <ol>
+              <li>Run the installer on your Mac or Linux machine.</li>
+              <li>
+                Keep the defaults: Full Access, Anywhere with Tailscale, and
+                usually Yes for the background service.
+              </li>
+              <li>
+                Open MOBaiLE on iPhone and tap <strong>Scan Pairing QR</strong>.
+              </li>
+              <li>Send a small prompt and keep going in the same thread.</li>
+            </ol>
+            <div class="footer-links">
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/blob/main/docs/USAGE.md"
+                >Full setup guide</a
+              >
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/blob/main/ios/README.md"
+                >iPhone app guide</a
+              >
+            </div>
+          </article>
+          <article class="panel">
+            <h3>Know what runs where</h3>
+            <p>
+              The phone starts and follows the run. Your computer does the work.
+              That split is intentional and stays clear in the product and the
+              docs.
+            </p>
+            <ul>
+              <li>The iPhone app does not execute code on-device.</li>
+              <li>
+                Prompts, audio, attachments, and session metadata go to the
+                backend you configure.
+              </li>
+              <li>
+                Use <strong>safe</strong> mode on a cautious host, or
+                <strong>full-access</strong> on a trusted private machine.
+              </li>
+              <li>
+                Pairing uses a one-time pair code; the long-lived API token
+                stays on the host.
+              </li>
+            </ul>
+            <div class="footer-links">
+              <a class="link-pill" href="privacy-policy.html">Privacy policy</a>
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/blob/main/SECURITY.md"
+                >Security policy</a
+              >
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div class="eyebrow">Product tour</div>
+          <h2>Three moments that matter.</h2>
+          <p class="section-copy">
+            The experience needs to feel legible at a glance: getting oriented,
+            following a run, and sending the next voice task without losing
+            context.
+          </p>
+        </div>
+        <div class="showcase">
+          <article class="shot">
+            <img
+              src="readme-screens/configured-empty.png"
+              alt="Configured start screen showing runtime, working directory, and quick starts"
+            />
+            <div class="shot-copy">
+              <h3>Start in the right workspace</h3>
+              <p>
+                See the runtime, working directory, and quick starts before you
+                send the first prompt.
+              </p>
+            </div>
+          </article>
+          <article class="shot">
+            <img
+              src="readme-screens/conversation.png"
+              alt="Live run thread showing the result and the next recommended step"
+            />
+            <div class="shot-copy">
+              <h3>Follow the run live</h3>
+              <p>
+                Stay with the result, summary, and next recommended action in
+                the same thread that launched the work.
+              </p>
+            </div>
+          </article>
+          <article class="shot">
+            <img
+              src="readme-screens/recording.png"
+              alt="Voice capture controls that stay attached to the current thread"
+            />
+            <div class="shot-copy">
+              <h3>Keep talking without losing context</h3>
+              <p>
+                Voice mode reopens the mic after each reply while typed
+                follow-up and attachments stay in the same conversation.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
+            <h3>Need help?</h3>
+            <p>
+              Most setup issues come down to backend health, the saved URL, the
+              API token, or a remote path that is not reachable from the phone.
+            </p>
+            <div class="footer-links">
+              <a class="link-pill" href="support.html">Support page</a>
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/issues"
+                >GitHub issues</a
+              >
+            </div>
+          </article>
+          <article class="panel">
+            <h3>Open, inspectable, and self-hostable</h3>
+            <p>
+              The iPhone app, paired backend, setup scripts, and release
+              automation all live in one repository so you can inspect how the
+              product works before you trust it.
+            </p>
+            <div class="footer-links">
+              <a class="link-pill" href="https://github.com/Vemundss/MOBaiLE"
+                >Repository</a
+              >
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/MOBaiLE/blob/main/CONTRIBUTING.md"
+                >Contributing</a
+              >
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer>
+        Public pages for MOBaiLE. Last updated: April 16, 2026.
+        <a href="privacy-policy.html">Privacy</a> ·
+        <a href="support.html">Support</a> ·
+        <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a>
+      </footer>
+    </main>
+  </body>
 </html>

@@ -4,22 +4,28 @@
   <img src="../docs/readme-screens/conversation.png" alt="MOBaiLE conversation screen on iPhone" width="250" />
 </p>
 
-MOBaiLE on iPhone is the handheld control surface for your paired backend.
-You open the app, connect it to your own computer, send text or voice requests, and follow the run without going back to your laptop.
+MOBaiLE on iPhone is the handheld control surface for your own Mac or Linux machine.
+You open the app, pair it with your computer, send text or voice requests, and keep the run legible without going back to your laptop.
 
 The app does not execute code on the phone. It forwards your prompt, audio, attachments, and session context to the backend you control.
 
-## What You Can Do From The Phone
+## Why It Feels Good On Phone
 
-- Send a text prompt to your paired backend
-- Record a one-shot voice prompt instead of typing
+- Start from the same workspace thread you were already using
+- Send a quick typed prompt or record a one-shot voice task
 - Keep one thread in voice mode for a hands-free send-reply-listen loop
-- Watch progress and final result inside the same thread
-- Reuse the same workspace and thread context across runs
+- Watch progress, results, and the next recommended step in the same conversation
+- Reuse the same runtime, working directory, and context across runs
 
 You do not need to understand agents, Xcode, or backend internals to use the app once it is paired.
 
-## Set It Up
+## What Runs Where
+
+- **Phone:** prompt capture, voice capture, local thread history, haptics, widgets, and Shortcuts
+- **Paired host:** actual execution, files, shell tools, auth, network access, and run orchestration
+- **Trust boundary:** the app sends prompts, audio, attachments, and session metadata to the backend you configure; it does not run code locally on the iPhone
+
+## Fastest Setup
 
 This is the shortest path:
 
@@ -32,11 +38,10 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/insta
 2. Keep the default answers in the installer:
    `Full Access`, `Anywhere with Tailscale`, and usually `Yes` for the background service.
 3. Open `backend/pairing-qr.png` on that computer.
-4. Scan it with the iPhone camera.
-5. Open the `mobaile://pair...` link.
-6. Confirm the pairing inside MOBaiLE.
+4. In MOBaiLE, tap `Scan Pairing QR` and point the phone at the screen.
+5. If you scan it with Camera instead, open the `mobaile://pair...` link it detects.
+6. Confirm the pairing inside MOBaiLE and send a small prompt.
 7. Later, run `mobaile status` on the computer if you want to check the connection. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
-8. Send a prompt or tap the mic button.
 
 Already inside this repo? Run:
 
@@ -57,6 +62,13 @@ Important:
 - when Tailscale MagicDNS is enabled, pairing prefers the stable `*.ts.net` hostname before raw Tailscale IPs
 - the app asks for microphone and Speech Recognition permission
 - if you have a stable remote hostname, set `VOICE_AGENT_PUBLIC_SERVER_URL` on the backend so pairing prefers that URL
+
+## Good First Actions
+
+- `create a hello python script and run it`
+- `inspect this repo and tell me where onboarding feels rough`
+- `summarize what changed in this project today`
+- `review this thread and tell me the next thing I should do`
 
 ## If You Are Building It From This Repo
 
