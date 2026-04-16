@@ -3153,12 +3153,21 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     func runtimeSettingDefaultOptionLabel(for settingID: String, executor: String? = nil) -> String {
         let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
         let backendValue = runtimeSettingBackendValue(for: normalizedSettingID, executor: executor)
-        guard !backendValue.isEmpty else { return "Backend default" }
-        return "Backend default (\(runtimeSettingPresentationValue(backendValue, settingID: normalizedSettingID)))"
+        let defaultPrefix = isProfileContextRuntimeSetting(normalizedSettingID) ? "Follow backend default" : "Backend default"
+        guard !backendValue.isEmpty else { return defaultPrefix }
+        return "\(defaultPrefix) (\(runtimeSettingPresentationValue(backendValue, settingID: normalizedSettingID)))"
     }
 
     func runtimeSettingHasOverride(for settingID: String, executor: String? = nil) -> Bool {
         !runtimeSettingStoredValue(for: settingID, executor: executor).isEmpty
+    }
+
+    func isProfileContextRuntimeSetting(_ settingID: String) -> Bool {
+        Self.globalAgentRuntimeSettingIDs.contains(normalizedRuntimeSettingIdentifier(settingID))
+    }
+
+    func runtimeSettingUsesBackendDefault(for settingID: String, executor: String? = nil) -> Bool {
+        !runtimeSettingHasOverride(for: settingID, executor: executor)
     }
 
     func runtimeSettingPickerTitle(for value: String, settingID: String, executor: String? = nil) -> String {
@@ -3185,6 +3194,78 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func runtimeSettingAllowsCustom(_ settingID: String, executor: String? = nil) -> Bool {
         runtimeSettingDescriptor(for: settingID, executor: executor)?.allowCustom ?? false
+    }
+
+    func runtimeSettingSummary(for settingID: String) -> String {
+        switch normalizedRuntimeSettingIdentifier(settingID) {
+        case "profile_agents":
+            return "Your saved instructions for this profile, such as preferred workflow, tone, or standing rules."
+        case "profile_memory":
+            return "Durable notes learned across sessions, like project facts, paths, or stable preferences."
+        default:
+            return ""
+        }
+    }
+
+    func runtimeSettingToggleTitle(for settingID: String) -> String {
+        switch normalizedRuntimeSettingIdentifier(settingID) {
+        case "profile_agents":
+            return "Include saved instructions in new runs"
+        case "profile_memory":
+            return "Use saved memory in new runs"
+        default:
+            return "Use setting"
+        }
+    }
+
+    func runtimeSettingStateLabel(for settingID: String, executor: String? = nil) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let currentValue = runtimeSettingCurrentValue(for: normalizedSettingID, executor: executor) ?? ""
+        switch (normalizedSettingID, currentValue) {
+        case ("profile_agents", "enabled"), ("profile_memory", "enabled"):
+            return "Included"
+        case ("profile_agents", "disabled"), ("profile_memory", "disabled"):
+            return "Skipped"
+        default:
+            return runtimeSettingDisplayValue(for: normalizedSettingID, executor: executor)
+        }
+    }
+
+    func runtimeSettingEffectSummary(for settingID: String, executor: String? = nil) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let currentValue = runtimeSettingCurrentValue(for: normalizedSettingID, executor: executor) ?? ""
+        switch (normalizedSettingID, currentValue) {
+        case ("profile_agents", "enabled"):
+            return "New runs include your saved profile instructions on top of the repo and runtime rules."
+        case ("profile_agents", "disabled"):
+            return "New runs skip your saved profile instructions. Repo and runtime rules still apply."
+        case ("profile_memory", "enabled"):
+            return "New runs can use your saved profile memory from earlier sessions."
+        case ("profile_memory", "disabled"):
+            return "New runs start without saved profile memory. Existing saved notes stay untouched."
+        default:
+            return ""
+        }
+    }
+
+    func runtimeSettingBackendDefaultSummary(for settingID: String, executor: String? = nil) -> String {
+        let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let backendValue = runtimeSettingBackendValue(for: normalizedSettingID, executor: executor)
+        guard !backendValue.isEmpty else { return "No backend default available." }
+        switch normalizedSettingID {
+        case "profile_agents":
+            if backendValue == "enabled" {
+                return "Backend default: include saved instructions."
+            }
+            return "Backend default: skip saved instructions."
+        case "profile_memory":
+            if backendValue == "enabled" {
+                return "Backend default: use saved memory."
+            }
+            return "Backend default: start without saved memory."
+        default:
+            return "Backend default: \(runtimeSettingPresentationValue(backendValue, settingID: normalizedSettingID))."
+        }
     }
 
     func runtimeSettingStoredValue(for settingID: String, executor: String? = nil) -> String {
@@ -3253,13 +3334,30 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func runtimeSettingPresentationValue(_ value: String, settingID: String) -> String {
         let normalizedSettingID = normalizedRuntimeSettingIdentifier(settingID)
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         switch normalizedSettingID {
         case "reasoning_effort":
-            return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        case "profile_agents", "profile_memory":
-            return value.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
+            return trimmedValue.uppercased()
+        case "profile_agents":
+            switch trimmedValue.lowercased() {
+            case "enabled":
+                return "Include saved instructions"
+            case "disabled":
+                return "Ignore saved instructions"
+            default:
+                return trimmedValue.capitalized
+            }
+        case "profile_memory":
+            switch trimmedValue.lowercased() {
+            case "enabled":
+                return "Use saved memory"
+            case "disabled":
+                return "Start without saved memory"
+            default:
+                return trimmedValue.capitalized
+            }
         default:
-            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedValue
         }
     }
 

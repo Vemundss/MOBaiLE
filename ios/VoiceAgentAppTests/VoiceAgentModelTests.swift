@@ -991,6 +991,70 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertTrue(vm.runtimeSettingAllowsCustom("model", executor: "codex"))
     }
 
+    @MainActor
+    func testProfileRuntimeSettingPresentationExplainsStateAndDefaults() {
+        let vm = VoiceAgentViewModel()
+        vm.backendExecutorDescriptors = [
+            RuntimeExecutorDescriptor(
+                id: "codex",
+                title: "Codex",
+                kind: "agent",
+                available: true,
+                isDefault: true,
+                internalOnly: false,
+                model: "gpt-5.4",
+                settings: [
+                    RuntimeSettingDescriptor(
+                        id: "profile_agents",
+                        title: "Profile Instructions",
+                        kind: "enum",
+                        allowCustom: false,
+                        value: "enabled",
+                        options: ["enabled", "disabled"]
+                    ),
+                    RuntimeSettingDescriptor(
+                        id: "profile_memory",
+                        title: "Profile Memory",
+                        kind: "enum",
+                        allowCustom: false,
+                        value: "disabled",
+                        options: ["enabled", "disabled"]
+                    ),
+                ]
+            )
+        ]
+        vm.backendDefaultExecutor = "codex"
+        vm.executor = "codex"
+
+        XCTAssertTrue(vm.isProfileContextRuntimeSetting("profile_agents"))
+        XCTAssertEqual(
+            vm.runtimeSettingDefaultOptionLabel(for: "profile_agents", executor: "codex"),
+            "Follow backend default (Include saved instructions)"
+        )
+        XCTAssertEqual(
+            vm.runtimeSettingPickerTitle(for: "disabled", settingID: "profile_agents", executor: "codex"),
+            "Ignore saved instructions"
+        )
+        XCTAssertEqual(
+            vm.runtimeSettingEffectSummary(for: "profile_agents", executor: "codex"),
+            "New runs include your saved profile instructions on top of the repo and runtime rules."
+        )
+        XCTAssertEqual(
+            vm.runtimeSettingBackendDefaultSummary(for: "profile_memory", executor: "codex"),
+            "Backend default: start without saved memory."
+        )
+        XCTAssertEqual(vm.runtimeSettingToggleTitle(for: "profile_memory"), "Use saved memory in new runs")
+
+        vm.setRuntimeSettingValue("disabled", for: "profile_agents", executor: "codex")
+
+        XCTAssertFalse(vm.runtimeSettingUsesBackendDefault(for: "profile_agents", executor: "codex"))
+        XCTAssertEqual(vm.runtimeSettingStateLabel(for: "profile_agents", executor: "codex"), "Skipped")
+        XCTAssertEqual(
+            vm.runtimeSettingEffectSummary(for: "profile_agents", executor: "codex"),
+            "New runs skip your saved profile instructions. Repo and runtime rules still apply."
+        )
+    }
+
     func testSessionContextDecodingSupportsResolvedDefaults() throws {
         let json = """
         {

@@ -500,6 +500,10 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
 
+                        if showsProfileContextRuntimeGuidance {
+                            RuntimeProfileContextOverviewCard()
+                        }
+
                         ForEach(vm.selectedRuntimeSettings) { setting in
                             runtimeSettingControl(setting)
                         }
@@ -855,19 +859,56 @@ struct ContentView: View {
         )
     }
 
+    private func runtimeSettingToggleBinding(for settingID: String) -> Binding<Bool> {
+        Binding(
+            get: { vm.runtimeSettingCurrentValue(for: settingID) == "enabled" },
+            set: { vm.setRuntimeSettingValue($0 ? "enabled" : "disabled", for: settingID) }
+        )
+    }
+
+    private func runtimeSettingTint(for settingID: String) -> Color {
+        switch settingID {
+        case "profile_agents":
+            return .blue
+        case "profile_memory":
+            return .indigo
+        default:
+            return .accentColor
+        }
+    }
+
     @ViewBuilder
     private func runtimeSettingControl(_ setting: RuntimeSettingDescriptor) -> some View {
-        let options = vm.runtimeSettingPickerOptions(for: setting.id)
-        if setting.kind == "enum", !options.isEmpty {
-            Picker(setting.title, selection: runtimeSettingBinding(for: setting.id)) {
-                ForEach(options, id: \.self) { option in
-                    Text(vm.runtimeSettingPickerTitle(for: option, settingID: setting.id)).tag(option)
+        if vm.isProfileContextRuntimeSetting(setting.id) {
+            RuntimeProfileContextSettingCard(
+                systemImage: vm.runtimeSettingIconName(for: setting.id),
+                title: setting.title,
+                summary: vm.runtimeSettingSummary(for: setting.id),
+                toggleTitle: vm.runtimeSettingToggleTitle(for: setting.id),
+                stateLabel: vm.runtimeSettingStateLabel(for: setting.id),
+                stateDetail: vm.runtimeSettingEffectSummary(for: setting.id),
+                backendDefaultSummary: vm.runtimeSettingBackendDefaultSummary(for: setting.id),
+                isUsingBackendDefault: vm.runtimeSettingUsesBackendDefault(for: setting.id),
+                tint: runtimeSettingTint(for: setting.id),
+                accessibilityIdentifier: runtimeSettingAccessibilityIdentifier(for: setting.id),
+                isEnabled: runtimeSettingToggleBinding(for: setting.id),
+                onUseBackendDefault: {
+                    vm.setRuntimeSettingValue(nil, for: setting.id)
                 }
-            }
-            .pickerStyle(.menu)
-            .accessibilityIdentifier(runtimeSettingAccessibilityIdentifier(for: setting.id))
+            )
         } else {
-            LabeledContent(setting.title, value: vm.runtimeSettingDisplayValue(for: setting.id))
+            let options = vm.runtimeSettingPickerOptions(for: setting.id)
+            if setting.kind == "enum", !options.isEmpty {
+                Picker(setting.title, selection: runtimeSettingBinding(for: setting.id)) {
+                    ForEach(options, id: \.self) { option in
+                        Text(vm.runtimeSettingPickerTitle(for: option, settingID: setting.id)).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier(runtimeSettingAccessibilityIdentifier(for: setting.id))
+            } else {
+                LabeledContent(setting.title, value: vm.runtimeSettingDisplayValue(for: setting.id))
+            }
         }
     }
 
@@ -1647,20 +1688,14 @@ struct ContentView: View {
         guard !vm.selectedRuntimeSettings.isEmpty else {
             return "Choose an executor to show its backend-advertised runtime settings."
         }
-        let showsProfileContextToggles = vm.selectedRuntimeSettings.contains {
-            $0.id == "profile_agents" || $0.id == "profile_memory"
-        }
         if vm.selectedRuntimeSettings.contains(where: { vm.runtimeSettingAllowsCustom($0.id) }) {
-            return
-                "Menu pickers follow the backend-advertised enum values. Custom text fields stay in Advanced Runtime and only appear for backend-marked settings."
-                + (showsProfileContextToggles
-                    ? " Profile Instructions and Profile Memory control whether your per-user AGENTS and MEMORY files are included in new runs."
-                    : "")
+            return "Changes here apply to new runs in this session. Custom text fields stay in Advanced Runtime and only appear for backend-marked settings."
         }
-        return "Menu pickers follow the backend-advertised runtime values for this session."
-            + (showsProfileContextToggles
-                ? " Profile Instructions and Profile Memory control whether your per-user AGENTS and MEMORY files are included in new runs."
-                : "")
+        return "Changes here apply to new runs in this session."
+    }
+
+    private var showsProfileContextRuntimeGuidance: Bool {
+        vm.selectedRuntimeSettings.contains { vm.isProfileContextRuntimeSetting($0.id) }
     }
 
     private var runtimeDirectoryLabel: String {

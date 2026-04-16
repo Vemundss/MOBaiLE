@@ -158,12 +158,221 @@ struct RuntimeStatusBadge: View {
     }
 }
 
+struct RuntimeProfileContextOverviewCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 34, height: 34)
+                    .background(
+                        Circle()
+                            .fill(Color.accentColor.opacity(0.10))
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Personal context for new runs")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Project instructions and MOBaiLE runtime rules are always included. These controls only decide whether your saved profile files are added on top.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                RuntimeProfileContextExplanationRow(
+                    systemImage: "person.text.rectangle",
+                    title: "Profile Instructions",
+                    detail: "Saved AGENTS guidance for how you like the agent to work."
+                )
+                RuntimeProfileContextExplanationRow(
+                    systemImage: "brain",
+                    title: "Profile Memory",
+                    detail: "Saved MEMORY notes that carry durable facts across sessions."
+                )
+            }
+
+            Label("Applies to new runs in this session.", systemImage: "clock.arrow.circlepath")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+        )
+    }
+}
+
+struct RuntimeProfileContextSettingCard: View {
+    let systemImage: String
+    let title: String
+    let summary: String
+    let toggleTitle: String
+    let stateLabel: String
+    let stateDetail: String
+    let backendDefaultSummary: String
+    let isUsingBackendDefault: Bool
+    let tint: Color
+    let accessibilityIdentifier: String
+    @Binding var isEnabled: Bool
+    let onUseBackendDefault: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(tint.opacity(0.10))
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                RuntimeProfileContextStateBadge(
+                    text: stateLabel,
+                    tint: isEnabled ? tint : .secondary
+                )
+            }
+
+            Toggle(toggleTitle, isOn: $isEnabled)
+                .tint(tint)
+                .accessibilityIdentifier(accessibilityIdentifier)
+
+            Text(stateDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 10) {
+                    RuntimeProfileContextMetaLabel(
+                        systemImage: "server.rack",
+                        text: backendDefaultSummary
+                    )
+                    Spacer(minLength: 8)
+                    backendDefaultAction
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    RuntimeProfileContextMetaLabel(
+                        systemImage: "server.rack",
+                        text: backendDefaultSummary
+                    )
+                    backendDefaultAction
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var backendDefaultAction: some View {
+        if isUsingBackendDefault {
+            RuntimeProfileContextMetaLabel(
+                systemImage: "checkmark.circle",
+                text: "Following backend default"
+            )
+        } else {
+            Button("Use Backend Default") {
+                onUseBackendDefault()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+}
+
 struct SettingsRuntimeDetailItem: Identifiable {
     let icon: String
     let label: String
     let value: String
 
     var id: String { label }
+}
+
+private struct RuntimeProfileContextExplanationRow: View {
+    let systemImage: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct RuntimeProfileContextStateBadge: View {
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.10))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(tint.opacity(0.12), lineWidth: 1)
+            )
+    }
+}
+
+private struct RuntimeProfileContextMetaLabel: View {
+    let systemImage: String
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
 }
 
 struct DraftAttachmentChip: View {
