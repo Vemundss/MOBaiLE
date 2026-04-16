@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MOBaiLE | Your own computer, in your pocket.</title>
+    <title>MOBaiLE | Your computer, in your pocket.</title>
     <meta
       name="description"
       content="MOBaiLE lets you start a task from iPhone, run it on your own Mac or Linux machine, and stay in one live thread while you are away from the keyboard."
@@ -67,8 +67,8 @@
 
       .hero {
         display: grid;
-        grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
-        gap: 28px;
+        grid-template-columns: minmax(0, 0.92fr) minmax(380px, 1.08fr);
+        gap: 24px;
         padding: 34px 34px 26px;
         border-bottom: 1px solid var(--line);
       }
@@ -77,6 +77,7 @@
         display: flex;
         flex-direction: column;
         justify-content: center;
+        max-width: 560px;
       }
 
       .eyebrow {
@@ -95,16 +96,18 @@
 
       h1 {
         margin: 18px 0 14px;
-        font-size: clamp(50px, 8vw, 92px);
-        line-height: 0.94;
-        letter-spacing: -0.055em;
+        max-width: 7.6ch;
+        font-size: clamp(42px, 6.2vw, 76px);
+        line-height: 0.98;
+        letter-spacing: -0.05em;
+        text-wrap: balance;
       }
 
       .lede {
         margin: 0;
-        max-width: 620px;
-        font-size: clamp(19px, 2.4vw, 25px);
-        line-height: 1.48;
+        max-width: 33ch;
+        font-size: clamp(18px, 2vw, 22px);
+        line-height: 1.55;
         color: var(--muted);
       }
 
@@ -112,7 +115,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
-        margin-top: 24px;
+        margin-top: 20px;
       }
 
       .tag {
@@ -142,7 +145,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 14px;
-        margin-top: 28px;
+        margin-top: 22px;
       }
 
       .button {
@@ -444,7 +447,7 @@
       <section class="hero">
         <div class="hero-copy">
           <div class="eyebrow">Paired iPhone control for your own machine</div>
-          <h1>Your own computer, in your pocket.</h1>
+          <h1>Your computer, in your pocket.</h1>
           <p class="lede">
             Start a task from iPhone, run it on your own Mac or Linux machine,
             and keep planning, execution, results, and follow-up in one live
