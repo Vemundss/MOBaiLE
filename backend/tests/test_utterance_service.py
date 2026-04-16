@@ -6,6 +6,7 @@ from app.models.schemas import (
     Action,
     ActionPlan,
     SessionContextResponse,
+    SessionRuntimeSettingValue,
     UtteranceRequest,
 )
 from app.run_state import RunState
@@ -33,6 +34,8 @@ class FakeExecutionService:
         codex_model_override: str | None = None,
         codex_reasoning_effort_override: str | None = None,
         claude_model_override: str | None = None,
+        include_profile_agents: bool = True,
+        include_profile_memory: bool = True,
         guardrail_message: str | None = None,
     ) -> None:
         self.calls.append(
@@ -49,6 +52,8 @@ class FakeExecutionService:
                     codex_model_override,
                     codex_reasoning_effort_override,
                     claude_model_override,
+                    include_profile_agents,
+                    include_profile_memory,
                     guardrail_message,
                 ),
             )
@@ -82,6 +87,7 @@ def _session_context(
     executor: str = "local",
     working_directory: str | None = None,
     resolved_working_directory: str,
+    runtime_settings: list[SessionRuntimeSettingValue] | None = None,
     codex_model: str | None = None,
     codex_reasoning_effort: str | None = None,
     claude_model: str | None = None,
@@ -90,7 +96,7 @@ def _session_context(
         session_id=session_id,
         executor=executor,  # type: ignore[arg-type]
         working_directory=working_directory,
-        runtime_settings=[],
+        runtime_settings=runtime_settings or [],
         codex_model=codex_model,
         codex_reasoning_effort=codex_reasoning_effort,  # type: ignore[arg-type]
         claude_model=claude_model,
@@ -208,3 +214,40 @@ def test_utterance_service_uses_session_defaults_for_local_runs(monkeypatch, tmp
     assert run.working_directory == str(project_dir)
     assert launched[0][0] == "run_local_plan"
     assert launched[0][1][2] == project_dir
+
+
+def test_utterance_service_passes_profile_context_toggles_to_agent_runs(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path, VOICE_AGENT_DEFAULT_EXECUTOR="codex")
+    run_state = _run_state(tmp_path)
+    execution = FakeExecutionService()
+    launched: list[tuple[str, tuple[object, ...]]] = []
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="codex",
+            resolved_working_directory=str(env.default_workdir),
+            runtime_settings=[
+                SessionRuntimeSettingValue(executor="codex", id="profile_agents", value="disabled"),
+                SessionRuntimeSettingValue(executor="codex", id="profile_memory", value="enabled"),
+            ],
+        ),
+        background_launcher=lambda target, args: launched.append((target.__name__, args)),
+        run_id_factory=lambda: "run-profile-context",
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-profile-context",
+            executor="codex",
+            utterance_text="inspect the repo status",
+        )
+    )
+
+    assert result.status == "accepted"
+    assert launched[0][0] == "run_agent"
+    assert launched[0][1][10] is False
+    assert launched[0][1][11] is True

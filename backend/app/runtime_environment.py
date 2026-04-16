@@ -213,6 +213,8 @@ class RuntimeEnvironment:
         response_profile: ResponseProfile = "guided",
         profile_agents: str = "",
         profile_memory: str = "",
+        include_profile_agents: bool = True,
+        include_profile_memory: bool = True,
         memory_file_hint: str = ".mobaile/MEMORY.md",
     ) -> str:
         return build_agent_prompt(
@@ -220,6 +222,8 @@ class RuntimeEnvironment:
             response_profile=response_profile,
             profile_agents=profile_agents,
             profile_memory=profile_memory,
+            include_profile_agents=include_profile_agents,
+            include_profile_memory=include_profile_memory,
             memory_file_hint=memory_file_hint,
             use_context=self.use_agent_context,
             runtime_context=self.runtime_context,

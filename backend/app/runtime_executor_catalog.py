@@ -7,6 +7,11 @@ from app.models.schemas import (
     RuntimeExecutorDescriptor,
     RuntimeSettingDescriptor,
 )
+from app.runtime_settings_catalog import (
+    PROFILE_AGENTS_SETTING_ID,
+    PROFILE_CONTEXT_OPTIONS,
+    PROFILE_MEMORY_SETTING_ID,
+)
 
 if TYPE_CHECKING:
     from app.models.schemas import AgentExecutorName
@@ -18,6 +23,27 @@ AGENT_TITLES = {
     "codex": "Codex",
     "claude": "Claude Code",
 }
+
+
+def _profile_context_settings() -> list[RuntimeSettingDescriptor]:
+    return [
+        RuntimeSettingDescriptor(
+            id=PROFILE_AGENTS_SETTING_ID,
+            title="Profile Instructions",
+            kind="enum",
+            allow_custom=False,
+            value="enabled",
+            options=list(PROFILE_CONTEXT_OPTIONS),
+        ),
+        RuntimeSettingDescriptor(
+            id=PROFILE_MEMORY_SETTING_ID,
+            title="Profile Memory",
+            kind="enum",
+            allow_custom=False,
+            value="enabled",
+            options=list(PROFILE_CONTEXT_OPTIONS),
+        ),
+    ]
 
 
 def build_runtime_executor_descriptors(
@@ -58,6 +84,7 @@ def build_runtime_executor_descriptors(
                     value=env.codex_reasoning_effort_override or None,
                     options=list(env.codex_reasoning_effort_options),
                 ),
+                *_profile_context_settings(),
             ],
         ),
         RuntimeExecutorDescriptor(
@@ -76,6 +103,7 @@ def build_runtime_executor_descriptors(
                     value=env.claude_model_override or None,
                     options=list(env.claude_model_options),
                 ),
+                *_profile_context_settings(),
             ],
         ),
     ]

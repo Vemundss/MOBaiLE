@@ -151,6 +151,8 @@ class ExecutionService:
         codex_model_override: str | None = None,
         codex_reasoning_effort_override: str | None = None,
         claude_model_override: str | None = None,
+        include_profile_agents: bool = True,
+        include_profile_memory: bool = True,
         guardrail_message: str | None = None,
     ) -> None:
         self.agent_run_service.run(
@@ -164,6 +166,8 @@ class ExecutionService:
             codex_model_override=codex_model_override,
             codex_reasoning_effort_override=codex_reasoning_effort_override,
             claude_model_override=claude_model_override,
+            include_profile_agents=include_profile_agents,
+            include_profile_memory=include_profile_memory,
             guardrail_message=guardrail_message,
         )
 

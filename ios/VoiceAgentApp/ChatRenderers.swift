@@ -1346,15 +1346,19 @@ private func resolveImageURL(from raw: String, serverURL: String) -> String? {
 }
 
 private func extractArtifactPath(from text: String) -> String {
-    text
-        .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" <>"))
-        .replacingOccurrences(of: "file://", with: "")
+    normalizeFilesystemPath(
+        text
+            .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" <>"))
+            .replacingOccurrences(of: "file://", with: "")
+    )
 }
 
 private func extractImagePath(from text: String) -> String {
-    let stripped = text
-        .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" "))
-        .replacingOccurrences(of: "file://", with: "")
+    let stripped = normalizeFilesystemPath(
+        text
+            .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" "))
+            .replacingOccurrences(of: "file://", with: "")
+    )
     let absolutePattern = #"/[^`'\"()\n]+?\.(?:png|jpg|jpeg|gif|webp)"#
     if let regex = try? NSRegularExpression(pattern: absolutePattern, options: [.caseInsensitive]) {
         let range = NSRange(stripped.startIndex..., in: stripped)
@@ -1378,6 +1382,14 @@ private func extractImagePath(from text: String) -> String {
 private func fallbackArtifactTitle(from reference: String) -> String {
     let name = URL(fileURLWithPath: extractArtifactPath(from: reference)).lastPathComponent
     return name.isEmpty ? "file" : name
+}
+
+private func normalizeFilesystemPath(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.contains("%") else {
+        return trimmed
+    }
+    return trimmed.removingPercentEncoding ?? trimmed
 }
 
 private func inferArtifactMimeType(from fileName: String) -> String? {
@@ -1449,12 +1461,21 @@ private func defaultPort(for scheme: String?) -> Int {
 }
 
 #if DEBUG
+func _test_extractArtifactPath(_ text: String) -> String {
+    extractArtifactPath(from: text)
+}
+
 func _test_extractImagePath(_ text: String) -> String {
     extractImagePath(from: text)
 }
 
 func _test_resolveImageURL(_ raw: String, serverURL: String) -> String? {
     resolveImageURL(from: raw, serverURL: serverURL)
+}
+
+func _test_resolveArtifactURL(path: String, serverURL: String) -> String? {
+    let artifact = ChatArtifact(type: "file", title: "file", path: path, mime: nil, url: nil)
+    return APIClient()._test_resolveArtifactURL(serverURL: serverURL, artifact: artifact)?.absoluteString
 }
 
 func _test_extractInlineArtifactTitles(_ text: String, serverURL: String) -> [String] {

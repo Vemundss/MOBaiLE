@@ -64,6 +64,8 @@ class AgentRunService:
         codex_model_override: str | None = None,
         codex_reasoning_effort_override: str | None = None,
         claude_model_override: str | None = None,
+        include_profile_agents: bool = True,
+        include_profile_memory: bool = True,
         guardrail_message: str | None = None,
     ) -> None:
         agent_executor = self._make_agent_executor(executor, workdir)
@@ -71,6 +73,8 @@ class AgentRunService:
         workdir_memory_path = self.profile_store.stage_files_in_workdir(
             workdir,
             session_id_hint=session_id,
+            include_agents=include_profile_agents,
+            include_memory=include_profile_memory,
         )
         agent_prompt = self.environment.build_runtime_agent_prompt(
             prompt,
@@ -78,6 +82,8 @@ class AgentRunService:
             response_profile=response_profile,
             profile_agents=profile_agents,
             profile_memory=profile_memory,
+            include_profile_agents=include_profile_agents,
+            include_profile_memory=include_profile_memory,
             memory_file_hint=".mobaile/MEMORY.md",
         )
         normalized_client_thread_id = (client_thread_id or "").strip() or None

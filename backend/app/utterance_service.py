@@ -25,6 +25,10 @@ from app.orchestrator.planner import plan_from_utterance
 from app.policy.validator import validate_plan
 from app.run_state import RunState
 from app.runtime_environment import RuntimeEnvironment
+from app.runtime_settings_catalog import (
+    PROFILE_AGENTS_SETTING_ID,
+    PROFILE_MEMORY_SETTING_ID,
+)
 
 
 class ExecutionRunner(Protocol):
@@ -42,6 +46,8 @@ class ExecutionRunner(Protocol):
         codex_model_override: str | None = None,
         codex_reasoning_effort_override: str | None = None,
         claude_model_override: str | None = None,
+        include_profile_agents: bool = True,
+        include_profile_memory: bool = True,
         guardrail_message: str | None = None,
     ) -> None: ...
 
@@ -116,6 +122,16 @@ class UtteranceService:
     def _submit_agent_request(self, prepared: PreparedUtterance, request: UtteranceRequest) -> UtteranceResponse:
         agent_executor = prepared.executor
         assert self.environment.is_agent_executor(agent_executor)
+        include_profile_agents = self._profile_context_enabled(
+            prepared.session_context,
+            executor=agent_executor,
+            setting_id=PROFILE_AGENTS_SETTING_ID,
+        )
+        include_profile_memory = self._profile_context_enabled(
+            prepared.session_context,
+            executor=agent_executor,
+            setting_id=PROFILE_MEMORY_SETTING_ID,
+        )
 
         if self.calendar_request_detector(prepared.effective_text):
             self.run_state.store_run(self._running_run_record(prepared))
@@ -151,10 +167,28 @@ class UtteranceService:
                 prepared.session_context.codex_model,
                 prepared.session_context.codex_reasoning_effort,
                 prepared.session_context.claude_model,
+                include_profile_agents,
+                include_profile_memory,
                 guardrail_message if guardrail_status == "warn" else None,
             ),
         )
         return self._accepted_response(prepared.run_id)
+
+    @staticmethod
+    def _profile_context_enabled(
+        context: SessionContextResponse,
+        *,
+        executor: AgentExecutorName,
+        setting_id: str,
+    ) -> bool:
+        normalized_setting_id = setting_id.strip().lower()
+        for item in context.runtime_settings:
+            if item.executor != executor:
+                continue
+            if item.id.strip().lower() != normalized_setting_id:
+                continue
+            return (item.value or "").strip().lower() != "disabled"
+        return True
 
     def _submit_local_request(self, prepared: PreparedUtterance) -> UtteranceResponse:
         plan = self.plan_builder(prepared.effective_text)

@@ -45,6 +45,8 @@ def build_agent_prompt(
     response_profile: ResponseProfile = "guided",
     profile_agents: str = "",
     profile_memory: str = "",
+    include_profile_agents: bool = True,
+    include_profile_memory: bool = True,
     memory_file_hint: str = ".mobaile/MEMORY.md",
     use_context: bool = True,
     runtime_context: str = "",
@@ -67,18 +69,28 @@ def build_agent_prompt(
             "- Keep that note concise and non-repetitive; let the final response carry the substance.\n"
             "- Do not dump raw logs or long command output unless the user asks.\n\n"
         )
-    session_block = ""
-    if profile_agents.strip() or profile_memory.strip():
-        session_block = (
+    session_sections: list[str] = []
+    if include_profile_agents and profile_agents.strip():
+        session_sections.append(
             "Persistent AGENTS profile:\n"
-            f"{profile_agents.strip() or '(empty)'}\n\n"
-            "Persistent MEMORY (shared across sessions):\n"
-            f"{profile_memory.strip() or '(empty)'}\n\n"
-            "Persistence guidance:\n"
-            f"- If you learn durable facts, update `{memory_file_hint}`.\n"
-            f"- Do not store MOBaiLE persistence in `{global_agent_home}`.\n"
-            "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
+            f"{profile_agents.strip() or '(empty)'}"
         )
+    if include_profile_memory and profile_memory.strip():
+        session_sections.append(
+            "Persistent MEMORY (shared across sessions):\n"
+            f"{profile_memory.strip() or '(empty)'}"
+        )
+
+    session_block = ""
+    if session_sections:
+        session_block = "\n\n".join(session_sections) + "\n\n"
+        if include_profile_memory:
+            session_block += (
+                "Persistence guidance:\n"
+                f"- If you learn durable facts, update `{memory_file_hint}`.\n"
+                f"- Do not store MOBaiLE persistence in `{global_agent_home}`.\n"
+                "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
+            )
     autonomy_block = (
         "Remote-control guidance:\n"
         "- Prefer the least-fragile control surface: local CLI/API first, browser automation second, desktop UI automation third.\n"

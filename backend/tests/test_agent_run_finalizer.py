@@ -13,7 +13,9 @@ from app.storage import RunStore
 class _FakeProfileStore:
     synced_paths: list[Path] = field(default_factory=list)
 
-    def sync_memory_from_workdir(self, workdir_memory_path: Path) -> None:
+    def sync_memory_from_workdir(self, workdir_memory_path: Path | None) -> None:
+        if workdir_memory_path is None:
+            return
         self.synced_paths.append(workdir_memory_path)
 
 
@@ -128,3 +130,22 @@ def test_agent_run_finalizer_marks_successful_runs_completed(tmp_path: Path) -> 
     assert [event.type for event in run.events] == ["action.completed", "run.completed"]
     assert "claude exec finished (exit=0)" in run.events[0].message
     assert profile_store.synced_paths == [workdir_memory_path]
+
+
+def test_agent_run_finalizer_skips_memory_sync_when_profile_memory_is_disabled(tmp_path: Path) -> None:
+    run_state = _run_state(tmp_path)
+    profile_store = _FakeProfileStore()
+    finalizer = AgentRunFinalizer(
+        run_state=run_state,
+        profile_store=profile_store,  # type: ignore[arg-type]
+        timeout_resolver=lambda executor: 60,
+    )
+
+    finalizer.finalize_run(
+        "run-1",
+        executor="codex",
+        outcome=AgentRunOutcome(exit_code=0),
+        workdir_memory_path=None,
+    )
+
+    assert profile_store.synced_paths == []

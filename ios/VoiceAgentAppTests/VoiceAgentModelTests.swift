@@ -1194,6 +1194,23 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(extracted, ["notes.txt", "report.pdf"])
     }
 
+    func testExtractArtifactPathDecodesPercentEncodedAbsolutePaths() {
+        let extracted = _test_extractArtifactPath("/Users/test/Mobile%20Documents/session/AGENTS.md")
+        XCTAssertEqual(extracted, "/Users/test/Mobile Documents/session/AGENTS.md")
+    }
+
+    func testResolveArtifactURLDecodesPercentEncodedAbsolutePaths() {
+        let resolved = _test_resolveArtifactURL(
+            path: "/Users/test/Mobile%20Documents/session/AGENTS.md",
+            serverURL: "http://127.0.0.1:8000"
+        )
+        XCTAssertEqual(
+            resolved,
+            "http://127.0.0.1:8000/v1/files?path=/Users/test/Mobile%20Documents/session/AGENTS.md"
+        )
+        XCTAssertFalse(resolved?.contains("%2520") == true)
+    }
+
     func testSlashCommandStateForBareSlashShowsCatalog() {
         let state = _test_resolveComposerSlashCommandState("/")
         XCTAssertNotNil(state)

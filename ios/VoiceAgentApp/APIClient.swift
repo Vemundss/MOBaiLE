@@ -764,11 +764,13 @@ final class APIClient {
             return URL(string: raw)
         }
         if let path = artifact.path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
-            let normalizedServer = normalizedBaseURL(serverURL)
-            guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            let normalizedPath = path.removingPercentEncoding ?? path
+            guard var components = URLComponents(string: normalizedBaseURL(serverURL)) else {
                 return nil
             }
-            return URL(string: "\(normalizedServer)/v1/files?path=\(encoded)")
+            components.path = "/v1/files"
+            components.queryItems = [URLQueryItem(name: "path", value: normalizedPath)]
+            return components.url
         }
         return nil
     }
@@ -895,6 +897,14 @@ final class APIClient {
         return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-")).nonEmpty ?? "artifact"
     }
 }
+
+#if DEBUG
+extension APIClient {
+    func _test_resolveArtifactURL(serverURL: String, artifact: ChatArtifact) -> URL? {
+        resolveArtifactURL(serverURL: serverURL, artifact: artifact)
+    }
+}
+#endif
 
 private extension Data {
     mutating func append(_ string: String) {

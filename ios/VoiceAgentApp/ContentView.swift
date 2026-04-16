@@ -316,72 +316,77 @@ struct ContentView: View {
 
     private var conversationView: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    if vm.conversation.isEmpty {
-                        ConversationEmptyStateView(
-                            isConfigured: vm.hasConfiguredConnection,
-                            needsConnectionRepair: vm.needsConnectionRepair,
-                            statusText: headerStatusText,
-                            canRetryLastPrompt: vm.canRetryLastPrompt,
-                            runtimeContext: emptyStateRuntimeContext,
-                            onOpenSetupGuide: {
-                                showSetupGuide = true
-                            },
-                            onOpenPairingScanner: {
-                                showPairingScanner = true
-                            },
-                            onOpenSettings: {
-                                showConnectionSettings = true
-                            },
-                            onRetryLastPrompt: {
-                                Task { await vm.retryLastPrompt() }
-                            },
-                            onStartVoiceMode: {
-                                handleVoiceModeStartTap()
-                            },
-                            onUsePrompt: { prompt in
-                                vm.promptText = prompt
-                                composerFocused = true
-                            }
-                        )
-                        .padding(.top, 24)
-                    }
+            ZStack {
+                conversationBackground
+                    .ignoresSafeArea()
 
-                    ForEach(vm.conversation) { message in
-                        HStack {
-                            if message.role == "user" {
-                                Spacer(minLength: 52)
-                            }
-                            MessageBubble(message: message, serverURL: vm.serverURL, apiToken: vm.apiToken)
-                            if message.role != "user" {
-                                Spacer(minLength: 52)
-                            }
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        if vm.conversation.isEmpty {
+                            ConversationEmptyStateView(
+                                isConfigured: vm.hasConfiguredConnection,
+                                needsConnectionRepair: vm.needsConnectionRepair,
+                                statusText: headerStatusText,
+                                canRetryLastPrompt: vm.canRetryLastPrompt,
+                                runtimeContext: emptyStateRuntimeContext,
+                                onOpenSetupGuide: {
+                                    showSetupGuide = true
+                                },
+                                onOpenPairingScanner: {
+                                    showPairingScanner = true
+                                },
+                                onOpenSettings: {
+                                    showConnectionSettings = true
+                                },
+                                onRetryLastPrompt: {
+                                    Task { await vm.retryLastPrompt() }
+                                },
+                                onStartVoiceMode: {
+                                    handleVoiceModeStartTap()
+                                },
+                                onUsePrompt: { prompt in
+                                    vm.promptText = prompt
+                                    composerFocused = true
+                                }
+                            )
+                            .padding(.top, 20)
                         }
-                        .id(message.id)
-                    }
 
-                    if !vm.errorText.isEmpty && !shouldShowRecordingNotice {
-                        InlineNoticeCard(
-                            title: "Something went wrong",
-                            message: vm.errorText,
-                            tint: .red,
-                            systemImage: "exclamationmark.triangle.fill",
-                            actionTitle: vm.hasConfiguredConnection ? nil : "Open Settings",
-                            action: vm.hasConfiguredConnection ? nil : {
-                                showConnectionSettings = true
+                        ForEach(vm.conversation) { message in
+                            HStack {
+                                if message.role == "user" {
+                                    Spacer(minLength: 52)
+                                }
+                                MessageBubble(message: message, serverURL: vm.serverURL, apiToken: vm.apiToken)
+                                if message.role != "user" {
+                                    Spacer(minLength: 52)
+                                }
                             }
-                        )
-                    }
+                            .id(message.id)
+                        }
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id("conversation-bottom")
+                        if !vm.errorText.isEmpty && !shouldShowRecordingNotice {
+                            InlineNoticeCard(
+                                title: "Something went wrong",
+                                message: vm.errorText,
+                                tint: .red,
+                                systemImage: "exclamationmark.triangle.fill",
+                                actionTitle: vm.hasConfiguredConnection ? nil : "Open Settings",
+                                action: vm.hasConfiguredConnection ? nil : {
+                                    showConnectionSettings = true
+                                }
+                            )
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("conversation-bottom")
+                    }
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .scrollDismissesKeyboard(.never)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
-            .scrollDismissesKeyboard(.never)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if shouldShowRuntimeInfoBar {
                     runtimeInfoBar
@@ -1024,17 +1029,17 @@ struct ContentView: View {
             }
             .padding(10)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color(.systemBackground))
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.ultraThinMaterial)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.05), radius: 14, y: 4)
+            .shadow(color: Color.black.opacity(0.06), radius: 18, y: 8)
         }
-        .padding(.horizontal)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
         .animation(.easeInOut(duration: 0.18), value: vm.isRecording)
         .animation(.easeInOut(duration: 0.18), value: shouldShowRecordingNotice)
         .animation(.easeInOut(duration: 0.18), value: vm.voiceInteractionNoticeText)
@@ -1117,12 +1122,12 @@ struct ContentView: View {
                 .accessibilityIdentifier("composer.textEditor")
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 9)
+                .padding(.vertical, 10)
                 .frame(height: composerHeight)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(
                             composerFocused
                                 ? Color.accentColor.opacity(0.30)
@@ -1149,7 +1154,7 @@ struct ContentView: View {
     }
 
     private var composerUtilityActionTray: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
             Button {
                 composerFocused = false
                 showAttachmentOptions = true
@@ -1157,7 +1162,7 @@ struct ContentView: View {
                 ComposerTrayButtonLabel(
                     systemImage: "plus",
                     tint: vm.draftAttachments.isEmpty ? Color.secondary : Color.accentColor,
-                    fill: vm.draftAttachments.isEmpty ? .clear : Color.accentColor.opacity(0.16)
+                    fill: vm.draftAttachments.isEmpty ? Color(.tertiarySystemGroupedBackground) : Color.accentColor.opacity(0.16)
                 )
             }
             .buttonStyle(.plain)
@@ -1173,7 +1178,7 @@ struct ContentView: View {
                 ComposerTrayButtonLabel(
                     systemImage: vm.isVoiceModeActiveForCurrentThread ? "waveform.circle.fill" : "waveform.circle",
                     tint: Color.blue,
-                    fill: vm.isVoiceModeActiveForCurrentThread ? Color.blue.opacity(0.16) : .clear
+                    fill: vm.isVoiceModeActiveForCurrentThread ? Color.blue.opacity(0.16) : Color(.tertiarySystemGroupedBackground)
                 )
             }
             .buttonStyle(.plain)
@@ -1181,9 +1186,6 @@ struct ContentView: View {
             .disabled(!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode)
             .opacity((!vm.isVoiceModeActiveForCurrentThread && !canStartVoiceMode) ? 0.45 : 1)
         }
-        .padding(4)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(Capsule())
     }
 
     private var composerPrimaryActionButtonConfiguration: ComposerPrimaryActionConfiguration {
@@ -1637,10 +1639,20 @@ struct ContentView: View {
         guard !vm.selectedRuntimeSettings.isEmpty else {
             return "Choose an executor to show its backend-advertised runtime settings."
         }
+        let showsProfileContextToggles = vm.selectedRuntimeSettings.contains {
+            $0.id == "profile_agents" || $0.id == "profile_memory"
+        }
         if vm.selectedRuntimeSettings.contains(where: { vm.runtimeSettingAllowsCustom($0.id) }) {
-            return "Menu pickers follow the backend-advertised enum values. Custom text fields stay in Advanced Runtime and only appear for backend-marked settings."
+            return
+                "Menu pickers follow the backend-advertised enum values. Custom text fields stay in Advanced Runtime and only appear for backend-marked settings."
+                + (showsProfileContextToggles
+                    ? " Profile Instructions and Profile Memory control whether your per-user AGENTS and MEMORY files are included in new runs."
+                    : "")
         }
         return "Menu pickers follow the backend-advertised runtime values for this session."
+            + (showsProfileContextToggles
+                ? " Profile Instructions and Profile Memory control whether your per-user AGENTS and MEMORY files are included in new runs."
+                : "")
     }
 
     private var runtimeDirectoryLabel: String {
@@ -1777,7 +1789,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.thinMaterial)
+        .background(Color(.systemGroupedBackground))
         .overlay(
             Rectangle()
                 .fill(Color(.separator).opacity(0.35))
@@ -1884,8 +1896,14 @@ struct ContentView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(Capsule())
+        .background(
+            Capsule()
+                .fill(Color(.tertiarySystemGroupedBackground))
+        )
+        .overlay(
+            Capsule()
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+        )
     }
 
     private var runtimeThreadButton: some View {
@@ -1909,8 +1927,14 @@ struct ContentView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(Capsule())
+            .background(
+                Capsule()
+                    .fill(Color(.tertiarySystemGroupedBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open chats")
@@ -1945,8 +1969,14 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(Capsule())
+                    .background(
+                        Capsule()
+                            .fill(Color(.tertiarySystemGroupedBackground))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Browse workspace \(runtimeDirectoryLabel)")
@@ -2200,6 +2230,33 @@ struct ContentView: View {
         guard !parent.isEmpty, parent != "/", parent != last else { return last }
 
         return "\(parent)/\(last)"
+    }
+
+    private var conversationBackground: some View {
+        ZStack {
+            Color(.systemGroupedBackground)
+
+            LinearGradient(
+                colors: [
+                    Color.accentColor.opacity(0.04),
+                    Color.clear,
+                    Color.blue.opacity(0.03)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            RadialGradient(
+                colors: [
+                    Color.accentColor.opacity(0.10),
+                    Color.clear
+                ],
+                center: .topTrailing,
+                startRadius: 12,
+                endRadius: 240
+            )
+            .offset(x: 70, y: -40)
+        }
     }
 
     private func applyPreviewPresentationIfNeeded() {

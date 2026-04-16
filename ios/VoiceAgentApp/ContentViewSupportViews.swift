@@ -42,12 +42,15 @@ struct ComposerSlashCommandMenu: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.03), radius: 10, y: 3)
     }
 }
 
@@ -62,8 +65,14 @@ struct ComposerMetaPill: View {
             .foregroundStyle(tint)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(tint.opacity(0.12))
-            .clipShape(Capsule())
+            .background(
+                Capsule()
+                    .fill(tint.opacity(0.10))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(tint.opacity(0.14), lineWidth: 1)
+            )
     }
 }
 
@@ -109,10 +118,14 @@ struct ComposerTrayButtonLabel: View {
         Image(systemName: systemImage)
             .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(tint)
-            .frame(width: 36, height: 36)
+            .frame(width: 38, height: 38)
             .background(
                 Circle()
                     .fill(fill)
+            )
+            .overlay(
+                Circle()
+                    .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
             )
     }
 }
@@ -134,8 +147,14 @@ struct RuntimeStatusBadge: View {
         .foregroundStyle(tint)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(tint.opacity(0.12))
-        .clipShape(Capsule())
+        .background(
+            Capsule()
+                .fill(tint.opacity(0.10))
+        )
+        .overlay(
+            Capsule()
+                .stroke(tint.opacity(0.14), lineWidth: 1)
+        )
     }
 }
 
@@ -188,6 +207,10 @@ struct DraftAttachmentChip: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(backgroundColor)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(borderColor, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
@@ -264,11 +287,22 @@ struct DraftAttachmentChip: View {
     private var backgroundColor: Color {
         switch transferState {
         case .idle:
-            return Color(.secondarySystemBackground)
+            return Color(.tertiarySystemGroupedBackground)
         case .uploading:
             return tintColor.opacity(0.12)
         case .failed:
             return Color.red.opacity(0.10)
+        }
+    }
+
+    private var borderColor: Color {
+        switch transferState {
+        case .idle:
+            return Color(.separator).opacity(0.10)
+        case .uploading:
+            return tintColor.opacity(0.16)
+        case .failed:
+            return Color.red.opacity(0.16)
         }
     }
 }

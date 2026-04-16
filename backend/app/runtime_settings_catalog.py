@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 
 from app.models.schemas import RuntimeSettingDescriptor, SlashCommandDescriptor
-from app.runtime_environment import RuntimeEnvironment
 from app.runtime_environment_loader import CODEX_REASONING_EFFORT_OPTIONS
 
+if TYPE_CHECKING:
+    from app.runtime_environment import RuntimeEnvironment
+
 RuntimeSettingKey = tuple[str, str]
+PROFILE_AGENTS_SETTING_ID = "profile_agents"
+PROFILE_MEMORY_SETTING_ID = "profile_memory"
+PROFILE_CONTEXT_OPTIONS = ("enabled", "disabled")
 
 
 class RuntimeSettingsCatalog:
@@ -136,6 +142,22 @@ class RuntimeSettingsCatalog:
                 ["thinking", "reasoning", "reasoning-effort"],
                 "brain.head.profile",
                 "effort",
+            )
+        if normalized_setting_id == PROFILE_AGENTS_SETTING_ID:
+            return (
+                "Profile Instructions",
+                "Include or skip the per-user AGENTS profile for new runs in this session.",
+                [],
+                "person.text.rectangle",
+                "enabled|disabled",
+            )
+        if normalized_setting_id == PROFILE_MEMORY_SETTING_ID:
+            return (
+                "Profile Memory",
+                "Allow or skip the per-user MEMORY profile for new runs in this session.",
+                [],
+                "brain",
+                "enabled|disabled",
             )
 
         primary_descriptor = descriptors[0][1]

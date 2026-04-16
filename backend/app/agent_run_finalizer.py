@@ -29,7 +29,13 @@ class AgentRunFinalizer:
         self.profile_store = profile_store
         self.timeout_resolver = timeout_resolver
 
-    def record_missing_binary(self, run_id: str, *, executor: AgentExecutorName, workdir_memory_path: Path) -> None:
+    def record_missing_binary(
+        self,
+        run_id: str,
+        *,
+        executor: AgentExecutorName,
+        workdir_memory_path: Path | None,
+    ) -> None:
         self.run_state.append_event(
             run_id,
             ExecutionEvent(type="action.stderr", action_index=0, message=f"{executor} binary not found"),
@@ -48,7 +54,7 @@ class AgentRunFinalizer:
         *,
         executor: AgentExecutorName,
         outcome: AgentRunOutcome,
-        workdir_memory_path: Path,
+        workdir_memory_path: Path | None,
     ) -> None:
         if not outcome.blocked:
             self.run_state.append_event(

@@ -73,8 +73,10 @@ private struct ConnectionBadge: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(backgroundFill)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(backgroundFill)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(borderTint, lineWidth: 1)
@@ -88,7 +90,7 @@ private struct ConnectionBadge: View {
         if isConnected {
             return Color.green.opacity(0.10)
         }
-        return Color(.systemBackground)
+        return Color(.tertiarySystemGroupedBackground)
     }
 
     private var borderTint: Color {
@@ -134,34 +136,39 @@ struct ConversationEmptyStateView: View {
             label: "Map the repo",
             prompt: "summarize this repo and point out the most important modules",
             systemImage: "square.stack.3d.up",
-            detail: "Get a quick codebase map and where to start."
+            detail: "Get a quick codebase map."
         ),
         StarterPrompt(
             label: "Run Smoke Test",
             prompt: "run the recommended smoke test for this project and summarize the result",
             systemImage: "checkmark.seal",
-            detail: "Validate the current baseline before changing anything."
+            detail: "Check the current baseline first."
         ),
         StarterPrompt(
             label: "Review Latest UI",
             prompt: "review the current UI and suggest the highest-impact improvements",
             systemImage: "wand.and.stars",
-            detail: "Tighten the current screen before you ask for implementation."
+            detail: "Tighten the current screen."
         )
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             if isConfigured && !needsConnectionRepair {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(alignment: .top, spacing: 12) {
                         MobaileLogoMark()
-                            .frame(width: 40, height: 40)
+                            .frame(width: 38, height: 38)
+                            .padding(5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(Color(.systemBackground))
+                            )
 
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Start with a focused task")
                                 .font(.title3.weight(.semibold))
-                            Text("Ask directly in the composer below, or use a quick start to keep the first run narrow and useful.")
+                            Text("Use a quick start or type below. Keeping the first run narrow makes the thread easier to scan.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -174,8 +181,14 @@ struct ConversationEmptyStateView: View {
                             .foregroundStyle(.green)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.green.opacity(0.12))
-                            .clipShape(Capsule())
+                            .background(
+                                Capsule()
+                                    .fill(Color.green.opacity(0.10))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.green.opacity(0.14), lineWidth: 1)
+                            )
                     }
 
                     if let runtimeContext {
@@ -183,7 +196,7 @@ struct ConversationEmptyStateView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Quick starts")
+                        Text("Try one")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
@@ -233,7 +246,7 @@ struct ConversationEmptyStateView: View {
                             }
                         }
                     } else {
-                        Label("Use the mic in the composer for voice mode.", systemImage: "waveform.circle.fill")
+                        Label("Voice mode stays in the composer for fast hands-free follow-up.", systemImage: "waveform.circle.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -345,7 +358,7 @@ struct ConversationEmptyStateView: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(needsConnectionRepair ? Color.orange.opacity(0.08) : Color(.systemBackground))
+                .fill(needsConnectionRepair ? Color.orange.opacity(0.08) : Color(.secondarySystemGroupedBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -356,12 +369,12 @@ struct ConversationEmptyStateView: View {
                     lineWidth: 1
                 )
         )
-        .shadow(color: Color.black.opacity(0.04), radius: 12, y: 4)
+        .shadow(color: Color.black.opacity(0.03), radius: 14, y: 6)
     }
 
     @ViewBuilder
     private func configuredRuntimeContextRow(context: EmptyStateRuntimeContext) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "bolt.horizontal.circle.fill")
                     .font(.caption.weight(.semibold))
@@ -378,7 +391,6 @@ struct ConversationEmptyStateView: View {
                     if let effort = context.effort {
                         EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
                     }
-                    EmptyStateMetaPill(systemImage: "folder.fill", text: context.workspace)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -389,15 +401,41 @@ struct ConversationEmptyStateView: View {
                             EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
                         }
                     }
-
-                    EmptyStateMetaPill(systemImage: "folder.fill", text: context.workspace)
                 }
             }
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+
+                Text(context.workspace)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+            )
         }
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(Color(.tertiarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
         )
     }
 }
@@ -416,12 +454,14 @@ private struct EmptyStateMetaPill: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color(.systemBackground))
-        .clipShape(Capsule())
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color(.systemBackground))
+        )
         .overlay(
             Capsule()
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
         )
     }
 }
@@ -437,7 +477,7 @@ private struct CompactStarterPromptButton: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.accentColor)
                     .frame(width: 32, height: 32)
-                    .background(Color.accentColor.opacity(0.12))
+                    .background(Color.accentColor.opacity(0.10))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -455,17 +495,17 @@ private struct CompactStarterPromptButton: View {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Color(.systemBackground))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
+                    .stroke(Color(.separator).opacity(0.14), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -555,21 +595,41 @@ struct InlineNoticeCard: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if actionTitle != nil || secondaryActionTitle != nil {
-                    HStack(spacing: 8) {
-                        if let actionTitle, let action {
-                            Button(actionTitle) {
-                                action()
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            if let actionTitle, let action {
+                                Button(actionTitle) {
+                                    action()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+
+                            if let secondaryActionTitle, let secondaryAction {
+                                Button(secondaryActionTitle) {
+                                    secondaryAction()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
                         }
 
-                        if let secondaryActionTitle, let secondaryAction {
-                            Button(secondaryActionTitle) {
-                                secondaryAction()
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let actionTitle, let action {
+                                Button(actionTitle) {
+                                    action()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+
+                            if let secondaryActionTitle, let secondaryAction {
+                                Button(secondaryActionTitle) {
+                                    secondaryAction()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
                         }
                     }
                 }
@@ -578,8 +638,14 @@ struct InlineNoticeCard: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(tint.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(tint.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(tint.opacity(0.14), lineWidth: 1)
+        )
     }
 }
 
@@ -610,11 +676,11 @@ private struct SheetIntroCard: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(Color(.secondarySystemGroupedBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(.separator).opacity(0.22), lineWidth: 1)
+                .stroke(Color(.separator).opacity(0.14), lineWidth: 1)
         )
     }
 }

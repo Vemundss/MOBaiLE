@@ -173,6 +173,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private static let defaultCodexReasoningEffortOptions = ["minimal", "low", "medium", "high", "xhigh"]
     private static let defaultCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
     private static let defaultClaudeModelOptions = ["claude-sonnet-4-5"]
+    private static let globalAgentRuntimeSettingIDs: Set<String> = ["profile_agents", "profile_memory"]
 
     private var runtimeCatalogDefaults: RuntimeCatalogDefaults {
         RuntimeCatalogDefaults(
@@ -3173,6 +3174,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             return "sparkles"
         case "reasoning_effort":
             return "brain.head.profile"
+        case "profile_agents":
+            return "person.text.rectangle"
+        case "profile_memory":
+            return "brain"
         default:
             return "slider.horizontal.3"
         }
@@ -3251,6 +3256,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         switch normalizedSettingID {
         case "reasoning_effort":
             return value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        case "profile_agents", "profile_memory":
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
         default:
             return value.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -3331,22 +3338,43 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }()
 
         var next = runtimeSettingOverrides
-        var executorOverrides = next[normalizedExecutorValue] ?? [:]
-        if let normalizedValue {
-            executorOverrides[normalizedSettingID] = normalizedValue
-        } else {
-            executorOverrides.removeValue(forKey: normalizedSettingID)
-        }
+        for targetExecutor in runtimeSettingTargetExecutors(
+            for: normalizedSettingID,
+            preferredExecutor: normalizedExecutorValue
+        ) {
+            var executorOverrides = next[targetExecutor] ?? [:]
+            if let normalizedValue {
+                executorOverrides[normalizedSettingID] = normalizedValue
+            } else {
+                executorOverrides.removeValue(forKey: normalizedSettingID)
+            }
 
-        if executorOverrides.isEmpty {
-            next.removeValue(forKey: normalizedExecutorValue)
-        } else {
-            next[normalizedExecutorValue] = executorOverrides
+            if executorOverrides.isEmpty {
+                next.removeValue(forKey: targetExecutor)
+            } else {
+                next[targetExecutor] = executorOverrides
+            }
         }
 
         if next != runtimeSettingOverrides {
             runtimeSettingOverrides = next
         }
+    }
+
+    private func runtimeSettingTargetExecutors(for settingID: String, preferredExecutor: String) -> [String] {
+        guard Self.globalAgentRuntimeSettingIDs.contains(settingID) else {
+            return [preferredExecutor]
+        }
+        var values = backendExecutorDescriptors
+            .filter { $0.kind == "agent" }
+            .map(\.id)
+        if values.isEmpty {
+            values = ["codex", "claude"]
+        }
+        if !values.contains(preferredExecutor) {
+            values.insert(preferredExecutor, at: 0)
+        }
+        return values
     }
 
     private func normalizedRuntimeSettingOverrides(_ raw: [String: [String: String]]) -> [String: [String: String]] {

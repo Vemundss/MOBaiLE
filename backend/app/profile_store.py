@@ -63,17 +63,33 @@ class ProfileStore:
         )
         return agents, memory
 
-    def stage_files_in_workdir(self, workdir: Path, *, session_id_hint: str | None = None) -> Path:
+    def stage_files_in_workdir(
+        self,
+        workdir: Path,
+        *,
+        session_id_hint: str | None = None,
+        include_agents: bool = True,
+        include_memory: bool = True,
+    ) -> Path | None:
         agents_path, memory_path = self.ensure_files(session_id_hint=session_id_hint)
         mobaile_dir = (workdir / ".mobaile").resolve()
         mobaile_dir.mkdir(parents=True, exist_ok=True)
         workdir_agents = mobaile_dir / "AGENTS.md"
         workdir_memory = mobaile_dir / "MEMORY.md"
-        workdir_agents.write_text(agents_path.read_text(encoding="utf-8"), encoding="utf-8")
-        workdir_memory.write_text(memory_path.read_text(encoding="utf-8"), encoding="utf-8")
-        return workdir_memory
+        if include_agents:
+            workdir_agents.write_text(agents_path.read_text(encoding="utf-8"), encoding="utf-8")
+        elif workdir_agents.exists():
+            workdir_agents.unlink()
+        if include_memory:
+            workdir_memory.write_text(memory_path.read_text(encoding="utf-8"), encoding="utf-8")
+            return workdir_memory
+        if workdir_memory.exists():
+            workdir_memory.unlink()
+        return None
 
-    def sync_memory_from_workdir(self, workdir_memory_path: Path) -> None:
+    def sync_memory_from_workdir(self, workdir_memory_path: Path | None) -> None:
+        if workdir_memory_path is None:
+            return
         candidates = [workdir_memory_path]
         mobaile_dir = workdir_memory_path.parent
         workdir = mobaile_dir.parent

@@ -33,6 +33,9 @@ def test_build_runtime_executor_descriptors_marks_defaults_and_models() -> None:
     assert descriptors["local"].internal_only is True
     assert descriptors["codex"].available is True
     assert descriptors["codex"].settings[0].value == "gpt-5.1"
+    assert descriptors["codex"].settings[2].id == "profile_agents"
+    assert descriptors["codex"].settings[2].options == ["enabled", "disabled"]
+    assert descriptors["codex"].settings[3].id == "profile_memory"
     assert descriptors["claude"].available is False
     assert descriptors["claude"].default is True
 
