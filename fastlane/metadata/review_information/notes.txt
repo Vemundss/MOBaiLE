@@ -1,25 +1,28 @@
-MOBaiLE is an iPhone client for a paired backend that runs on the user's own machine. The app does not execute code on-device.
+MOBaiLE is an iPhone client for a paired backend that runs on the user's own Mac or Linux machine. The app never executes code on-device.
 
 Basic review:
-1. Open the app and inspect onboarding, settings, thread list, and voice/chat UI.
+1. Open the app and inspect onboarding, settings, thread list, chat, and voice UI.
 2. Microphone access is optional and only needed for voice input.
-3. Local-network access is only used when the paired backend is on the same network.
+3. Local-network access is only used when the paired backend is reachable on the same network.
 
 Functional review:
 1. Open the app.
-2. Go to Settings.
+2. Tap Settings.
 3. Enter the review backend URL and API token supplied for App Review.
-4. Keep Session ID as iphone-app.
-5. Return to the main screen.
+4. Leave Session ID as iphone-app.
+5. Tap Done and return to the main screen.
+6. Send the prompt below.
 
 Suggested test prompt:
 "map the repo and summarize the current workspace"
 
 Expected behavior:
 - the app sends the request to the paired backend
-- live progress appears in the conversation
-- a final summary is returned in the same thread
+- live progress appears in the same thread
+- a final summary is returned in chat
+- any work runs on the paired backend, not on the phone
 
 Notes:
-- the production app expects a secure reviewer-reachable backend such as HTTPS for non-local connections
+- the review backend should be reachable without extra account setup
+- HTTPS is preferred for non-local review access
 - public support and privacy pages are already published

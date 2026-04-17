@@ -1,1 +1,1 @@
-Run tasks on your own machine
+Run tasks on Mac or Linux

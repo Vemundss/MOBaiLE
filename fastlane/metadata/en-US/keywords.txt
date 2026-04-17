@@ -1,1 +1,1 @@
-developer,remote,coding,terminal,voice,assistant,git,linux,mac,agent
+mac,linux,terminal,developer,coding,voice,agent,repo,remote,computer

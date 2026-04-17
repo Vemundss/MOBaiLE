@@ -485,10 +485,12 @@ struct ContentView: View {
                     }
                 }
 
-                Section {
-                    settingsConnectionCard
-                } header: {
-                    Text(settingsConnectionTitle)
+                if !isRuntimeSettingsPreviewFocus {
+                    Section {
+                        settingsConnectionCard
+                    } header: {
+                        Text(settingsConnectionTitle)
+                    }
                 }
 
                 if canUseConnectedFeatures {
@@ -2303,19 +2305,16 @@ struct ContentView: View {
     }
 
     private func applyPreviewPresentationIfNeeded() {
-        let raw = ProcessInfo.processInfo.environment["MOBAILE_PREVIEW_PRESENTATION"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
         let previewPairingPayload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123&session_id=iphone-app"
 
-        switch raw {
+        switch previewPresentation {
         case "setup":
             showSetupGuide = true
         case "pairing-scanner":
             showPairingScanner = true
         case "pairing-confirmation":
             _ = vm.applyPairingPayload(previewPairingPayload)
-        case "settings":
+        case "settings", "settings-runtime":
             showConnectionSettings = true
         case "threads":
             showThreads = true
@@ -2324,6 +2323,16 @@ struct ContentView: View {
         default:
             break
         }
+    }
+
+    private var previewPresentation: String? {
+        ProcessInfo.processInfo.environment["MOBAILE_PREVIEW_PRESENTATION"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private var isRuntimeSettingsPreviewFocus: Bool {
+        previewPresentation == "settings-runtime"
     }
 
     private var shouldShowRecordingNotice: Bool {

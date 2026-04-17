@@ -50,6 +50,7 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["demo.mobaile.app"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["app-preview"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Test"].exists)
+        revealRuntimeSection(in: app)
         XCTAssertTrue(element(in: app, identifier: "settings.runtime.codexModel").exists)
         XCTAssertTrue(element(in: app, identifier: "settings.runtime.codexEffort").exists)
 
@@ -150,6 +151,15 @@ final class VoiceAgentAppUITests: XCTestCase {
 
     private func revealAppearanceSection(in app: XCUIApplication) {
         for _ in 0..<5 where !app.buttons["System"].exists {
+            app.swipeUp()
+        }
+    }
+
+    private func revealRuntimeSection(in app: XCUIApplication) {
+        let codexModel = element(in: app, identifier: "settings.runtime.codexModel")
+        let codexEffort = element(in: app, identifier: "settings.runtime.codexEffort")
+
+        for _ in 0..<5 where !(codexModel.exists && codexEffort.exists) {
             app.swipeUp()
         }
     }

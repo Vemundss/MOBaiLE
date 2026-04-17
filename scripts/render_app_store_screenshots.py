@@ -8,24 +8,24 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 COPY = {
     "01-configured-empty": {
-        "headline": "Run tasks on\nyour computer",
-        "body": "Pair your Mac or Linux machine once, then send the next task from iPhone.",
+        "headline": "Your own computer,\nin your pocket",
+        "body": "Start the task from iPhone. Your paired Mac or Linux machine does the work.",
     },
     "02-live-conversation": {
-        "headline": "See live progress\nin one chat",
-        "body": "Follow the run, the next step, and the final result without leaving the conversation.",
+        "headline": "Follow every step\nin one thread",
+        "body": "Live progress, next actions, and the final result stay in the same chat.",
     },
     "03-voice-recording": {
-        "headline": "Send voice tasks\nhands-free",
-        "body": "Speak the request, add context, and auto-send after a short pause.",
+        "headline": "Send voice tasks\nwithout typing",
+        "body": "Speak the request, review the transcript, and send it from the current thread.",
     },
     "04-settings": {
-        "headline": "Pair once.\nTune it in-app.",
-        "body": "Backend, runtime, voice, and appearance controls stay in one native settings sheet.",
+        "headline": "Keep runtime\nand context clear",
+        "body": "Review backend, executor, and saved personal context in one native settings sheet.",
     },
     "05-threads": {
-        "headline": "Keep work split\nby chat",
-        "body": "Switch between active tasks without losing workspace context or follow-ups.",
+        "headline": "Keep each task\nin the right thread",
+        "body": "Split work by chat so repo context, follow-ups, and summaries stay easy to scan.",
     },
 }
 
@@ -127,12 +127,14 @@ def compose(source: Path, destination: Path) -> None:
     body_y = title_box[3] + 28
     draw.multiline_text((88, body_y), wrapped_body, font=body_font, fill="#665B50", spacing=8)
 
-    target_width = int(width * 0.68)
+    target_width_ratio = 0.63 if slug == "04-settings" else 0.68
+    target_width = int(width * target_width_ratio)
     target_height = int(raw.size[1] * (target_width / raw.size[0]))
     screenshot = raw.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
     screen_x = (width - screenshot.width) // 2
-    screen_y = height - screenshot.height - 86
+    bottom_margin = 120 if slug == "04-settings" else 86
+    screen_y = height - screenshot.height - bottom_margin
 
     canvas.alpha_composite(rounded_shadow(screenshot.size, 46), dest=(screen_x, screen_y + 24))
     panel = Image.new("RGBA", screenshot.size, (255, 255, 255, 255))

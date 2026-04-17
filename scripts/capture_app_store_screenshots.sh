@@ -20,7 +20,7 @@ SCENARIOS=(
   "configured-empty|main|01-configured-empty"
   "conversation|main|02-live-conversation"
   "recording|main|03-voice-recording"
-  "configured-empty|settings|04-settings"
+  "configured-empty|settings-runtime|04-settings"
   "conversation|threads|05-threads"
 )
 

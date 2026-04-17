@@ -69,6 +69,9 @@ enum VoiceAgentPreviewFactory {
         draftAttachmentDirectory: URL,
         codexReasoningEffortOptions: [String]
     ) -> VoiceAgentPreviewData {
+        let previewPresentation = ProcessInfo.processInfo.environment["MOBAILE_PREVIEW_PRESENTATION"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         let workspace = "/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE"
         let now = Date()
         let primaryThreadID = UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID()
@@ -150,6 +153,47 @@ enum VoiceAgentPreviewFactory {
 
         let codexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
         let claudeModelOptions = ["claude-sonnet-4-5"]
+        let profileContextSettings = [
+            RuntimeSettingDescriptor(
+                id: "profile_agents",
+                title: "Profile Instructions",
+                kind: "enum",
+                allowCustom: false,
+                value: "enabled",
+                options: ["enabled", "disabled"]
+            ),
+            RuntimeSettingDescriptor(
+                id: "profile_memory",
+                title: "Profile Memory",
+                kind: "enum",
+                allowCustom: false,
+                value: "disabled",
+                options: ["enabled", "disabled"]
+            ),
+        ]
+        let codexPreviewSettings: [RuntimeSettingDescriptor]
+        if previewPresentation == "settings-runtime" {
+            codexPreviewSettings = profileContextSettings
+        } else {
+            codexPreviewSettings = [
+                RuntimeSettingDescriptor(
+                    id: "model",
+                    title: "Model",
+                    kind: "enum",
+                    allowCustom: true,
+                    value: codexModelOptions[0],
+                    options: codexModelOptions
+                ),
+                RuntimeSettingDescriptor(
+                    id: "reasoning_effort",
+                    title: "Reasoning Effort",
+                    kind: "enum",
+                    allowCustom: false,
+                    value: "high",
+                    options: codexReasoningEffortOptions
+                ),
+            ] + profileContextSettings
+        }
         let previewExecutors = [
             RuntimeExecutorDescriptor(
                 id: "codex",
@@ -159,24 +203,7 @@ enum VoiceAgentPreviewFactory {
                 isDefault: true,
                 internalOnly: false,
                 model: codexModelOptions[0],
-                settings: [
-                    RuntimeSettingDescriptor(
-                        id: "model",
-                        title: "Model",
-                        kind: "enum",
-                        allowCustom: true,
-                        value: codexModelOptions[0],
-                        options: codexModelOptions
-                    ),
-                    RuntimeSettingDescriptor(
-                        id: "reasoning_effort",
-                        title: "Reasoning Effort",
-                        kind: "enum",
-                        allowCustom: false,
-                        value: "high",
-                        options: codexReasoningEffortOptions
-                    ),
-                ]
+                settings: codexPreviewSettings
             ),
             RuntimeExecutorDescriptor(
                 id: "claude",

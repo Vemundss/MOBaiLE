@@ -1,12 +1,12 @@
-MOBaiLE lets you start and follow developer tasks on a paired Mac or Linux machine from your iPhone.
+MOBaiLE is the iPhone control surface for your own Mac or Linux machine.
 
-Send a text or voice request, keep it tied to the right workspace, and see live progress, results, and follow-ups in one chat.
+Start a task from your phone, run it on your paired computer, and keep the whole thread visible while you are away from the keyboard.
 
-What you can do:
-- Kick off repo checks and smoke tests when you are away from the keyboard
-- Watch live activity and final output in the same conversation
-- Send voice tasks hands-free and auto-send after a short pause
-- Keep separate chats anchored to the right workspace
-- Reconnect, retry, or inspect run details when something needs attention
+What MOBaiLE helps you do:
+- Start repo, terminal, and workspace tasks on the computer you already use
+- Follow live progress, logs, and final results in one thread
+- Send typed requests or quick voice prompts when you cannot stop to type
+- Keep separate chats anchored to the right workspace and session context
+- Tune backend, runtime, and personal context settings without leaving the app
 
-MOBaiLE is a client for a backend you configure and control. The app does not execute code on-device. It sends your prompts, audio, attachments, and related metadata to the backend you pair with.
+MOBaiLE is not a cloud IDE and it does not execute code on-device. The phone starts and follows the run. Your Mac or Linux machine does the work. Prompts, audio, attachments, and related metadata are sent only to the backend you choose to pair.
