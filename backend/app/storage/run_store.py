@@ -1,229 +1,38 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
 from app.models.schemas import (
-    ActionPlan,
     ExecutionEvent,
     HumanUnblockRequest,
     RunRecord,
 )
 
-LEGACY_CODEX_THREAD_MAP_COMPAT_REMOVE_AFTER = "2026-07-01"
-RUN_COLUMNS = """
-run_id,
-session_id,
-executor,
-utterance_text,
-working_directory,
-status,
-pending_human_unblock_json,
-plan_json,
-summary,
-created_at,
-updated_at
-"""
-RUN_EVENT_COLUMNS = """
-run_id,
-seq,
-event_id,
-type,
-action_index,
-message,
-created_at
-"""
-SESSION_CONTEXT_COLUMNS = """
-session_id,
-executor,
-working_directory,
-runtime_settings_json,
-codex_model,
-codex_reasoning_effort,
-claude_model,
-latest_run_id,
-latest_run_status,
-latest_run_summary,
-latest_run_pending_human_unblock_json,
-latest_run_updated_at,
-updated_at
-"""
-SESSION_CONTEXT_MUTABLE_COLUMNS = """
-session_id,
-executor,
-working_directory,
-runtime_settings_json,
-codex_model,
-codex_reasoning_effort,
-claude_model
-"""
-SESSION_CONTEXT_MUTABLE_COLUMNS_WITH_UPDATED_AT = SESSION_CONTEXT_MUTABLE_COLUMNS + ",\nupdated_at"
+from .run_store_runs import RunRecordStore
+from .run_store_schema import initialize_run_store_schema
+from .run_store_session_context import SessionContextStore
 
 
 class RunStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self._runs = RunRecordStore(self._connect)
+        self._session_context = SessionContextStore(self._connect)
+        legacy_rows = initialize_run_store_schema(self._connect)
+        self._runs.migrate_legacy_rows(legacy_rows)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _init_schema(self) -> None:
-        legacy_rows: list[sqlite3.Row] = []
-        with self._connect() as conn:
-            existing_runs = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='runs'"
-            ).fetchone()
-            if existing_runs is not None:
-                columns = conn.execute("PRAGMA table_info(runs)").fetchall()
-                column_names = {row["name"] for row in columns}
-                if "payload_json" in column_names:
-                    legacy_rows = conn.execute("SELECT run_id, payload_json FROM runs").fetchall()
-                    conn.execute("DROP TABLE runs")
-
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS runs (
-                    run_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    executor TEXT NOT NULL DEFAULT 'local',
-                    utterance_text TEXT NOT NULL,
-                    working_directory TEXT,
-                    status TEXT NOT NULL,
-                    pending_human_unblock_json TEXT,
-                    plan_json TEXT,
-                    summary TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            columns = conn.execute("PRAGMA table_info(runs)").fetchall()
-            column_names = {row["name"] for row in columns}
-            if "executor" not in column_names:
-                conn.execute(
-                    "ALTER TABLE runs ADD COLUMN executor TEXT NOT NULL DEFAULT 'local'"
-                )
-            if "pending_human_unblock_json" not in column_names:
-                conn.execute("ALTER TABLE runs ADD COLUMN pending_human_unblock_json TEXT")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS run_events (
-                    run_id TEXT NOT NULL,
-                    seq INTEGER NOT NULL,
-                    event_id TEXT,
-                    type TEXT NOT NULL,
-                    action_index INTEGER,
-                    message TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (run_id, seq),
-                    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
-                )
-                """
-            )
-            columns = conn.execute("PRAGMA table_info(run_events)").fetchall()
-            column_names = {row["name"] for row in columns}
-            if "event_id" not in column_names:
-                conn.execute("ALTER TABLE run_events ADD COLUMN event_id TEXT")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_run_events_run_id_seq ON run_events(run_id, seq)"
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS session_context (
-                    session_id TEXT PRIMARY KEY,
-                    executor TEXT,
-                    working_directory TEXT,
-                    runtime_settings_json TEXT,
-                    codex_model TEXT,
-                    codex_reasoning_effort TEXT,
-                    claude_model TEXT,
-                    latest_run_id TEXT,
-                    latest_run_status TEXT,
-                    latest_run_summary TEXT,
-                    latest_run_pending_human_unblock_json TEXT,
-                    latest_run_updated_at TEXT,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            columns = conn.execute("PRAGMA table_info(session_context)").fetchall()
-            column_names = {row["name"] for row in columns}
-            if "runtime_settings_json" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN runtime_settings_json TEXT")
-            if "codex_model" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN codex_model TEXT")
-            if "codex_reasoning_effort" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN codex_reasoning_effort TEXT")
-            if "claude_model" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN claude_model TEXT")
-            if "latest_run_id" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_id TEXT")
-            if "latest_run_status" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_status TEXT")
-            if "latest_run_summary" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_summary TEXT")
-            if "latest_run_pending_human_unblock_json" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_pending_human_unblock_json TEXT")
-            if "latest_run_updated_at" not in column_names:
-                conn.execute("ALTER TABLE session_context ADD COLUMN latest_run_updated_at TEXT")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS agent_session_map (
-                    executor TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    client_thread_id TEXT NOT NULL,
-                    agent_session_id TEXT NOT NULL,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (executor, session_id, client_thread_id)
-                )
-                """
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_agent_session_map_updated_at ON agent_session_map(updated_at)"
-            )
-            legacy_thread_map = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='codex_thread_map'"
-            ).fetchone()
-            if legacy_thread_map is not None:
-                # Remove after 2026-07-01 once installs have migrated to agent_session_map.
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO agent_session_map (
-                        executor, session_id, client_thread_id, agent_session_id, updated_at
-                    )
-                    SELECT 'codex', session_id, client_thread_id, codex_thread_id, updated_at
-                    FROM codex_thread_map
-                    """
-                )
-
-            if legacy_rows:
-                for row in legacy_rows:
-                    try:
-                        payload = json.loads(row["payload_json"])
-                        run = RunRecord.model_validate(payload)
-                    except Exception:
-                        continue
-                    self._upsert_run_conn(conn, run)
-                    for seq, event in enumerate(run.events):
-                        self._append_event_conn(conn, run.run_id, seq, event)
-
     def upsert_run(self, run: RunRecord) -> None:
-        with self._connect() as conn:
-            self._upsert_run_conn(conn, run)
+        self._runs.upsert_run(run)
 
     def append_event(self, run_id: str, event: ExecutionEvent) -> None:
-        with self._connect() as conn:
-            next_seq_row = conn.execute(
-                "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM run_events WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
-            next_seq = int(next_seq_row["next_seq"]) if next_seq_row is not None else 0
-            self._append_event_conn(conn, run_id, next_seq, event)
+        self._runs.append_event(run_id, event)
 
     def update_run_status(
         self,
@@ -233,96 +42,24 @@ class RunStore:
         *,
         pending_human_unblock: HumanUnblockRequest | None = None,
     ) -> None:
-        pending_human_unblock_json = (
-            pending_human_unblock.model_dump_json() if pending_human_unblock is not None else None
+        self._runs.update_run_status(
+            run_id,
+            status,
+            summary,
+            pending_human_unblock=pending_human_unblock,
         )
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE runs
-                SET status = ?, summary = ?, pending_human_unblock_json = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE run_id = ?
-                """,
-                (status, summary, pending_human_unblock_json, run_id),
-            )
 
     def load_run(self, run_id: str) -> RunRecord | None:
-        with self._connect() as conn:
-            run_row = conn.execute(
-                """
-                SELECT
-                    """
-                + RUN_COLUMNS
-                + """
-                FROM runs
-                WHERE run_id = ?
-                """,
-                (run_id,),
-            ).fetchone()
-            if run_row is None:
-                return None
-            event_rows = self._load_event_rows_for_run_ids(conn, [run_id]).get(run_id, [])
-        return self._hydrate_run(run_row, event_rows)
+        return self._runs.load_run(run_id)
 
     def load_all(self) -> dict[str, RunRecord]:
-        runs: dict[str, RunRecord] = {}
-        with self._connect() as conn:
-            run_rows = conn.execute(
-                """
-                SELECT
-                    """
-                + RUN_COLUMNS
-                + """
-                FROM runs
-                """
-            ).fetchall()
-            event_rows_by_run = self._load_event_rows_for_run_ids(
-                conn,
-                [str(row["run_id"]) for row in run_rows],
-            )
-
-        for row in run_rows:
-            run_id = str(row["run_id"])
-            runs[run_id] = self._hydrate_run(row, event_rows_by_run.get(run_id, []))
-        return runs
+        return self._runs.load_all()
 
     def list_runs_for_session(self, session_id: str, limit: int = 20) -> list[RunRecord]:
-        with self._connect() as conn:
-            run_rows = conn.execute(
-                """
-                SELECT
-                    """
-                + RUN_COLUMNS
-                + """
-                FROM runs
-                WHERE session_id = ?
-                ORDER BY datetime(updated_at) DESC
-                LIMIT ?
-                """,
-                (session_id, limit),
-            ).fetchall()
-            run_ids = [str(row["run_id"]) for row in run_rows]
-            event_rows_by_run = self._load_event_rows_for_run_ids(conn, run_ids)
-
-        results: list[RunRecord] = []
-        for row in run_rows:
-            run_id = str(row["run_id"])
-            results.append(self._hydrate_run(row, event_rows_by_run.get(run_id, [])))
-        return results
+        return self._runs.list_runs_for_session(session_id, limit=limit)
 
     def get_session_context(self, session_id: str) -> sqlite3.Row | None:
-        with self._connect() as conn:
-            return conn.execute(
-                """
-                SELECT
-                    """
-                + SESSION_CONTEXT_COLUMNS
-                + """
-                FROM session_context
-                WHERE session_id = ?
-                """,
-                (session_id,),
-            ).fetchone()
+        return self._session_context.get_session_context(session_id)
 
     def upsert_session_context(
         self,
@@ -335,47 +72,15 @@ class RunStore:
         codex_reasoning_effort: str | None,
         claude_model: str | None,
     ) -> sqlite3.Row:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO session_context (
-                    """
-                + SESSION_CONTEXT_MUTABLE_COLUMNS_WITH_UPDATED_AT
-                + """
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    executor=excluded.executor,
-                    working_directory=excluded.working_directory,
-                    runtime_settings_json=excluded.runtime_settings_json,
-                    codex_model=excluded.codex_model,
-                    codex_reasoning_effort=excluded.codex_reasoning_effort,
-                    claude_model=excluded.claude_model,
-                    updated_at=CURRENT_TIMESTAMP
-                """,
-                (
-                    session_id,
-                    executor,
-                    working_directory,
-                    runtime_settings_json,
-                    codex_model,
-                    codex_reasoning_effort,
-                    claude_model,
-                ),
-            )
-            row = conn.execute(
-                """
-                SELECT
-                    """
-                + SESSION_CONTEXT_MUTABLE_COLUMNS_WITH_UPDATED_AT
-                + """
-                FROM session_context
-                WHERE session_id = ?
-                """,
-                (session_id,),
-            ).fetchone()
-        assert row is not None
-        return row
+        return self._session_context.upsert_session_context(
+            session_id,
+            executor=executor,
+            working_directory=working_directory,
+            runtime_settings_json=runtime_settings_json,
+            codex_model=codex_model,
+            codex_reasoning_effort=codex_reasoning_effort,
+            claude_model=claude_model,
+        )
 
     def update_session_latest_run(
         self,
@@ -386,53 +91,16 @@ class RunStore:
         summary: str,
         pending_human_unblock: HumanUnblockRequest | None = None,
     ) -> None:
-        pending_human_unblock_json = (
-            pending_human_unblock.model_dump_json() if pending_human_unblock is not None else None
+        self._session_context.update_session_latest_run(
+            session_id,
+            run_id=run_id,
+            status=status,
+            summary=summary,
+            pending_human_unblock=pending_human_unblock,
         )
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO session_context (
-                    session_id,
-                    latest_run_id,
-                    latest_run_status,
-                    latest_run_summary,
-                    latest_run_pending_human_unblock_json,
-                    latest_run_updated_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    latest_run_id=excluded.latest_run_id,
-                    latest_run_status=excluded.latest_run_status,
-                    latest_run_summary=excluded.latest_run_summary,
-                    latest_run_pending_human_unblock_json=excluded.latest_run_pending_human_unblock_json,
-                    latest_run_updated_at=CURRENT_TIMESTAMP,
-                    updated_at=CURRENT_TIMESTAMP
-                """,
-                (
-                    session_id,
-                    run_id,
-                    status,
-                    summary,
-                    pending_human_unblock_json,
-                ),
-            )
 
     def get_agent_session_id(self, executor: str, session_id: str, client_thread_id: str) -> str | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT agent_session_id
-                FROM agent_session_map
-                WHERE executor = ? AND session_id = ? AND client_thread_id = ?
-                """,
-                (executor, session_id, client_thread_id),
-            ).fetchone()
-        if row is None:
-            return None
-        value = str(row["agent_session_id"]).strip()
-        return value or None
+        return self._session_context.get_agent_session_id(executor, session_id, client_thread_id)
 
     def set_agent_session_id(
         self,
@@ -441,160 +109,12 @@ class RunStore:
         client_thread_id: str,
         agent_session_id: str,
     ) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO agent_session_map (
-                    executor, session_id, client_thread_id, agent_session_id, updated_at
-                )
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(executor, session_id, client_thread_id) DO UPDATE SET
-                    agent_session_id=excluded.agent_session_id,
-                    updated_at=CURRENT_TIMESTAMP
-                """,
-                (executor, session_id, client_thread_id, agent_session_id),
-            )
+        self._session_context.set_agent_session_id(
+            executor,
+            session_id,
+            client_thread_id,
+            agent_session_id,
+        )
 
     def delete_agent_session_id(self, executor: str, session_id: str, client_thread_id: str) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                DELETE FROM agent_session_map
-                WHERE executor = ? AND session_id = ? AND client_thread_id = ?
-                """,
-                (executor, session_id, client_thread_id),
-            )
-
-    def _upsert_run_conn(self, conn: sqlite3.Connection, run: RunRecord) -> None:
-        plan_json = run.plan.model_dump_json() if run.plan is not None else None
-        pending_human_unblock_json = (
-            run.pending_human_unblock.model_dump_json() if run.pending_human_unblock is not None else None
-        )
-        conn.execute(
-            """
-            INSERT INTO runs (
-                run_id, session_id, executor, utterance_text, working_directory, status, pending_human_unblock_json, plan_json, summary, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(run_id) DO UPDATE SET
-                session_id=excluded.session_id,
-                executor=excluded.executor,
-                utterance_text=excluded.utterance_text,
-                working_directory=excluded.working_directory,
-                status=excluded.status,
-                pending_human_unblock_json=excluded.pending_human_unblock_json,
-                plan_json=excluded.plan_json,
-                summary=excluded.summary,
-                updated_at=CURRENT_TIMESTAMP
-            """,
-            (
-                run.run_id,
-                run.session_id,
-                run.executor,
-                run.utterance_text,
-                run.working_directory,
-                run.status,
-                pending_human_unblock_json,
-                plan_json,
-                run.summary,
-            ),
-        )
-
-    def _append_event_conn(
-        self,
-        conn: sqlite3.Connection,
-        run_id: str,
-        seq: int,
-        event: ExecutionEvent,
-    ) -> None:
-        conn.execute(
-            """
-            INSERT INTO run_events (run_id, seq, event_id, type, action_index, message, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
-            """,
-            (
-                run_id,
-                seq,
-                event.event_id,
-                event.type,
-                event.action_index,
-                event.message,
-                event.created_at,
-            ),
-        )
-
-    def _load_event_rows_for_run_ids(
-        self,
-        conn: sqlite3.Connection,
-        run_ids: list[str],
-    ) -> dict[str, list[sqlite3.Row]]:
-        if not run_ids:
-            return {}
-        placeholders = ",".join(["?"] * len(run_ids))
-        event_rows = conn.execute(
-            f"""
-            SELECT
-                {RUN_EVENT_COLUMNS}
-            FROM run_events
-            WHERE run_id IN ({placeholders})
-            ORDER BY run_id, seq
-            """,
-            run_ids,
-        ).fetchall()
-        return self._group_event_rows_by_run_id(event_rows)
-
-    @staticmethod
-    def _group_event_rows_by_run_id(
-        event_rows: list[sqlite3.Row],
-    ) -> dict[str, list[sqlite3.Row]]:
-        grouped: dict[str, list[sqlite3.Row]] = {}
-        for row in event_rows:
-            grouped.setdefault(str(row["run_id"]), []).append(row)
-        return grouped
-
-    def _hydrate_run(
-        self,
-        run_row: sqlite3.Row,
-        event_rows: list[sqlite3.Row],
-    ) -> RunRecord:
-        plan: ActionPlan | None = None
-        pending_human_unblock: HumanUnblockRequest | None = None
-        plan_json = run_row["plan_json"]
-        if plan_json:
-            try:
-                plan = ActionPlan.model_validate_json(plan_json)
-            except Exception:
-                plan = None
-        pending_human_unblock_json = run_row["pending_human_unblock_json"]
-        if pending_human_unblock_json:
-            try:
-                pending_human_unblock = HumanUnblockRequest.model_validate_json(pending_human_unblock_json)
-            except Exception:
-                pending_human_unblock = None
-
-        events = [
-            ExecutionEvent(
-                seq=row["seq"],
-                event_id=row["event_id"],
-                type=row["type"],
-                action_index=row["action_index"],
-                message=row["message"],
-                created_at=row["created_at"],
-            )
-            for row in event_rows
-        ]
-
-        return RunRecord(
-            run_id=run_row["run_id"],
-            session_id=run_row["session_id"],
-            executor=run_row["executor"] or "local",
-            utterance_text=run_row["utterance_text"],
-            working_directory=run_row["working_directory"],
-            status=run_row["status"],
-            pending_human_unblock=pending_human_unblock,
-            plan=plan,
-            events=events,
-            summary=run_row["summary"],
-            created_at=run_row["created_at"],
-            updated_at=run_row["updated_at"],
-        )
+        self._session_context.delete_agent_session_id(executor, session_id, client_thread_id)

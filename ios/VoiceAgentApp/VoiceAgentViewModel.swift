@@ -47,12 +47,6 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         let message: String
     }
 
-    struct DirectoryBreadcrumb: Identifiable, Equatable {
-        let id: String
-        let title: String
-        let path: String
-    }
-
     private struct ObservedRunContext {
         let runID: String
         let threadID: UUID
@@ -1331,51 +1325,22 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     var directoryBreadcrumbs: [DirectoryBreadcrumb] {
-        let current = directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !current.isEmpty else { return [] }
-        if current == "/" {
-            return [DirectoryBreadcrumb(id: "/", title: "/", path: "/")]
-        }
-
-        let isAbsolute = current.hasPrefix("/")
-        let parts = current.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-        var crumbs: [DirectoryBreadcrumb] = []
-        var running = isAbsolute ? "/" : ""
-        if isAbsolute {
-            crumbs.append(DirectoryBreadcrumb(id: "/", title: "/", path: "/"))
-        }
-        for part in parts {
-            if running.isEmpty {
-                running = part
-            } else if running == "/" {
-                running = "/" + part
-            } else {
-                running += "/" + part
-            }
-            crumbs.append(DirectoryBreadcrumb(id: running, title: part, path: running))
-        }
-        return crumbs
+        VoiceAgentDirectoryBrowser.breadcrumbs(for: directoryBrowserPath)
     }
 
     var canNavigateDirectoryUp: Bool {
-        let current = directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !current.isEmpty && current != "/"
+        VoiceAgentDirectoryBrowser.canNavigateUp(from: directoryBrowserPath)
     }
 
     var filteredDirectoryBrowserEntries: [DirectoryEntry] {
-        guard hideDotFoldersInBrowser else { return directoryBrowserEntries }
-        return directoryBrowserEntries.filter { entry in
-            !(entry.isDirectory && entry.name.hasPrefix("."))
-        }
+        VoiceAgentDirectoryBrowser.filteredEntries(
+            directoryBrowserEntries,
+            hideDotFolders: hideDotFoldersInBrowser
+        )
     }
 
     var hiddenDotFolderCount: Int {
-        directoryBrowserEntries.reduce(0) { partial, entry in
-            if entry.isDirectory && entry.name.hasPrefix(".") {
-                return partial + 1
-            }
-            return partial
-        }
+        VoiceAgentDirectoryBrowser.hiddenDotFolderCount(in: directoryBrowserEntries)
     }
 
     var canRetryLastPrompt: Bool {

@@ -63,6 +63,9 @@ def test_load_service_environment_settings_computes_byte_limits(monkeypatch, tmp
     monkeypatch.setenv("VOICE_AGENT_MAX_UPLOAD_MB", "0.25")
     monkeypatch.setenv("VOICE_AGENT_PAIR_CODE_TTL_MIN", "45")
     monkeypatch.setenv("VOICE_AGENT_PAIR_ATTEMPT_LIMIT_PER_MIN", "7")
+    monkeypatch.delenv("VOICE_AGENT_CAPABILITIES_REPORT_PATH", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_DB_PATH", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_PAIRING_FILE", raising=False)
 
     settings = load_service_environment_settings(tmp_path)
 

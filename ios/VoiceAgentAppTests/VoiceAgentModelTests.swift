@@ -192,6 +192,34 @@ final class VoiceAgentModelTests: XCTestCase {
         }
     }
 
+    func testDirectoryBrowserBuildsBreadcrumbsForAbsolutePath() {
+        let breadcrumbs = VoiceAgentDirectoryBrowser.breadcrumbs(for: "/Users/demo/project")
+
+        XCTAssertEqual(
+            breadcrumbs.map(\.path),
+            ["/", "/Users", "/Users/demo", "/Users/demo/project"]
+        )
+        XCTAssertEqual(
+            breadcrumbs.map(\.title),
+            ["/", "Users", "demo", "project"]
+        )
+    }
+
+    func testDirectoryBrowserFiltersHiddenDirectoriesButKeepsFilesVisible() {
+        let entries = [
+            DirectoryEntry(name: ".git", path: "/repo/.git", isDirectory: true),
+            DirectoryEntry(name: ".env", path: "/repo/.env", isDirectory: false),
+            DirectoryEntry(name: "Sources", path: "/repo/Sources", isDirectory: true),
+        ]
+
+        let filtered = VoiceAgentDirectoryBrowser.filteredEntries(entries, hideDotFolders: true)
+
+        XCTAssertEqual(filtered.map(\.name), [".env", "Sources"])
+        XCTAssertEqual(VoiceAgentDirectoryBrowser.hiddenDotFolderCount(in: entries), 1)
+        XCTAssertTrue(VoiceAgentDirectoryBrowser.canNavigateUp(from: "/repo"))
+        XCTAssertFalse(VoiceAgentDirectoryBrowser.canNavigateUp(from: "/"))
+    }
+
     func testRunRecordDecoding() throws {
         let json = """
         {
