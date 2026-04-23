@@ -149,12 +149,101 @@ class AgentRunService:
             client_thread_id=normalized_client_thread_id,
             resume_session_id=resume_session_id,
         )
+        if self._should_retry_without_resume(
+            run_id,
+            executor=executor,
+            session_id=session_id,
+            client_thread_id=normalized_client_thread_id,
+            resume_session_id=resume_session_id,
+            outcome=outcome,
+        ):
+            self.run_state.append_activity_event(
+                run_id,
+                stage="executing",
+                title="Executing",
+                display_message=f"Saved {executor} session could not be resumed. Starting a fresh session.",
+            )
+            self.run_state.append_log_message(
+                run_id,
+                f"Saved {executor} session {resume_session_id} could not be resumed; retrying without session resume.",
+                action_index=0,
+            )
+            self.run_state.append_event(
+                run_id,
+                ExecutionEvent(
+                    type="action.started",
+                    action_index=0,
+                    message=f"retrying {executor} exec without saved session",
+                ),
+            )
+            try:
+                proc = self._start_process(
+                    agent_executor=agent_executor,
+                    executor=executor,
+                    agent_prompt=agent_prompt,
+                    resume_session_id=None,
+                    codex_model_override=codex_model_override,
+                    codex_reasoning_effort_override=codex_reasoning_effort_override,
+                    claude_model_override=claude_model_override,
+                )
+            except FileNotFoundError:
+                self._finalizer.record_missing_binary(
+                    run_id,
+                    executor=executor,
+                    workdir_memory_path=workdir_memory_path,
+                )
+                return
+            outcome = self._monitor_process(
+                proc,
+                run_id=run_id,
+                prompt=prompt,
+                session_id=session_id,
+                executor=executor,
+                client_thread_id=normalized_client_thread_id,
+                resume_session_id=None,
+            )
         self._finalize_run(
             run_id,
             executor=executor,
             outcome=outcome,
             workdir_memory_path=workdir_memory_path,
         )
+
+    def _should_retry_without_resume(
+        self,
+        run_id: str,
+        *,
+        executor: AgentExecutorName,
+        session_id: str,
+        client_thread_id: str | None,
+        resume_session_id: str | None,
+        outcome: AgentRunOutcome,
+    ) -> bool:
+        if executor != "codex":
+            return False
+        if not resume_session_id or not client_thread_id:
+            return False
+        if outcome.cancelled or outcome.timed_out or outcome.blocked or outcome.exit_code == 0:
+            return False
+
+        if not self._run_contains_stale_resume_error(run_id):
+            return False
+
+        self.run_state.run_store.delete_agent_session_id(executor, session_id, client_thread_id)
+        return True
+
+    def _run_contains_stale_resume_error(self, run_id: str) -> bool:
+        run = self.run_state.get_run(run_id)
+        if run is None:
+            return False
+
+        for event in reversed(run.events):
+            if event.type != "log.message":
+                continue
+            message = event.message.strip().lower()
+            if "thread/resume" in message and "no rollout found" in message:
+                return True
+        return False
 
     def _start_process(
         self,

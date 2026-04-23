@@ -455,6 +455,16 @@ class RunStore:
                 (executor, session_id, client_thread_id, agent_session_id),
             )
 
+    def delete_agent_session_id(self, executor: str, session_id: str, client_thread_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM agent_session_map
+                WHERE executor = ? AND session_id = ? AND client_thread_id = ?
+                """,
+                (executor, session_id, client_thread_id),
+            )
+
     def _upsert_run_conn(self, conn: sqlite3.Connection, run: RunRecord) -> None:
         plan_json = run.plan.model_dump_json() if run.plan is not None else None
         pending_human_unblock_json = (
