@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import heapq
 import mimetypes
+import os
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -16,6 +19,14 @@ from app.models.schemas import (
     UploadResponse,
 )
 from app.runtime_environment import RuntimeEnvironment
+
+
+@dataclass(frozen=True)
+class _SortableDirectoryEntry:
+    sort_key: tuple[int, str, str]
+    name: str
+    path: str
+    is_directory: bool
 
 
 class WorkspaceService:
@@ -33,25 +44,40 @@ class WorkspaceService:
         if not target.exists() or not target.is_dir():
             raise HTTPException(status_code=404, detail="directory not found")
 
+        limit = max(self.environment.max_directory_entries, 0)
         try:
-            children = sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+            with os.scandir(target) as children:
+                visible_children = heapq.nsmallest(
+                    limit + 1,
+                    (self._sortable_directory_entry(child) for child in children),
+                    key=lambda item: item.sort_key,
+                )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail="permission denied for directory path") from exc
 
-        entries: list[DirectoryEntry] = []
-        truncated = False
-        for idx, child in enumerate(children):
-            if idx >= self.environment.max_directory_entries:
-                truncated = True
-                break
-            entries.append(
-                DirectoryEntry(
-                    name=child.name,
-                    path=str(child),
-                    is_directory=child.is_dir(),
-                )
+        truncated = len(visible_children) > limit
+        entries = [
+            DirectoryEntry(
+                name=child.name,
+                path=child.path,
+                is_directory=child.is_directory,
             )
+            for child in visible_children[:limit]
+        ]
         return DirectoryListingResponse(path=str(target), entries=entries, truncated=truncated)
+
+    def _sortable_directory_entry(self, child: os.DirEntry[str]) -> _SortableDirectoryEntry:
+        try:
+            is_directory = child.is_dir()
+        except OSError:
+            is_directory = False
+
+        return _SortableDirectoryEntry(
+            sort_key=(0 if is_directory else 1, child.name.lower(), child.name),
+            name=child.name,
+            path=child.path,
+            is_directory=is_directory,
+        )
 
     def create_directory(self, raw_path: str) -> DirectoryCreateResponse:
         target = self._resolve_workspace_path(raw_path)

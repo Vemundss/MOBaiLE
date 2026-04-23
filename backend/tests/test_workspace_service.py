@@ -41,6 +41,19 @@ def test_workspace_service_lists_directories_before_files(monkeypatch, tmp_path:
     assert listing.truncated is False
 
 
+def test_workspace_service_truncates_after_sorted_prefix(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path, VOICE_AGENT_MAX_DIRECTORY_ENTRIES="2")
+    service = WorkspaceService(env)
+    (env.default_workdir / "b-dir").mkdir(parents=True, exist_ok=True)
+    (env.default_workdir / "a-dir").mkdir(parents=True, exist_ok=True)
+    (env.default_workdir / "c-file.txt").write_text("hello", encoding="utf-8")
+
+    listing = service.list_directory(str(env.default_workdir))
+
+    assert [entry.name for entry in listing.entries] == ["a-dir", "b-dir"]
+    assert listing.truncated is True
+
+
 def test_workspace_service_create_directory_uses_default_workdir_for_relative_paths(
     monkeypatch,
     tmp_path: Path,
