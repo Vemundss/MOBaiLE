@@ -42,6 +42,7 @@
 		E099E5B8514C396442564C87 /* VoiceAgentDirectoryBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A0365BB957F4449C2A171A2 /* VoiceAgentDirectoryBrowser.swift */; };
 		E0CEBC57FFB67BDCCAF370CA /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F46E28C5030E56744250A3B /* KeychainStore.swift */; };
 		E9CFE8DB6DD69AB7A997DDAD /* VoiceAgentSlashCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBE2064188F1152E0098E8D /* VoiceAgentSlashCommands.swift */; };
+		EB967E83C700AF637541263D /* VoiceAgentConnectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C3B93CDB10258D6BA77B613 /* VoiceAgentConnectionState.swift */; };
 		ECF54C131C5583F7116AA87A /* RuntimeInfoBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58403D1414C58DC0E8F2BF29 /* RuntimeInfoBar.swift */; };
 		F1CF503505B19E2BD17DE7C4 /* VoiceThreadResumeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA66A9DEB601906DD5FE8B0 /* VoiceThreadResumeResolver.swift */; };
 		F93F690F4929529AA9138114 /* MediaAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D63F53093311E4F4CEF7978 /* MediaAttachments.swift */; };
@@ -102,6 +103,7 @@
 		3887269D3C8BA28BB2DAB59B /* VoiceAgentModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentModelTests.swift; sourceTree = "<group>"; };
 		3A0365BB957F4449C2A171A2 /* VoiceAgentDirectoryBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentDirectoryBrowser.swift; sourceTree = "<group>"; };
 		3AA8B32BD6EF877DC0ACE40C /* Info-Debug.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Info-Debug.plist"; sourceTree = "<group>"; };
+		3C3B93CDB10258D6BA77B613 /* VoiceAgentConnectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentConnectionState.swift; sourceTree = "<group>"; };
 		41B36A206F87ACAE5318E912 /* VoiceAgentAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentAppUITests.swift; sourceTree = "<group>"; };
 		4A0B8133F4E92508F5E5D340 /* ConnectionSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSettingsSheet.swift; sourceTree = "<group>"; };
 		5488792FB914150E65389186 /* VoiceAgentDirectoryBrowserState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentDirectoryBrowserState.swift; sourceTree = "<group>"; };
@@ -218,6 +220,7 @@
 				EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */,
 				AFB87F32B46B087DBF769104 /* URLSchemeConfiguration.swift */,
 				BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */,
+				3C3B93CDB10258D6BA77B613 /* VoiceAgentConnectionState.swift */,
 				3A0365BB957F4449C2A171A2 /* VoiceAgentDirectoryBrowser.swift */,
 				5488792FB914150E65389186 /* VoiceAgentDirectoryBrowserState.swift */,
 				5AE181C29769FD42498D7162 /* VoiceAgentPreviewFixtures.swift */,
@@ -390,6 +393,7 @@
 				A1862D9871A32EF06B8E9B46 /* SpeechTranscriptionService.swift in Sources */,
 				02F1E8C0D81003A451563293 /* URLSchemeConfiguration.swift in Sources */,
 				059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */,
+				EB967E83C700AF637541263D /* VoiceAgentConnectionState.swift in Sources */,
 				E099E5B8514C396442564C87 /* VoiceAgentDirectoryBrowser.swift in Sources */,
 				626994299B2A734CE87838F5 /* VoiceAgentDirectoryBrowserState.swift in Sources */,
 				C358D7797037A55F784F3591 /* VoiceAgentPreviewFixtures.swift in Sources */,
