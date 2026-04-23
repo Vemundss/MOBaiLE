@@ -288,7 +288,6 @@ class AgentRunService:
     ) -> AgentRunOutcome:
         resume_failure_classifier = self._resume_failure_classifier(
             agent_executor=agent_executor,
-            executor=executor,
             resume_session_id=resume_session_id,
         )
         with self._active_procs_lock:

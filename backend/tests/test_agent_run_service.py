@@ -152,3 +152,55 @@ def test_agent_run_service_retries_stale_codex_resume_with_fresh_session(monkeyp
     assert any(event.type == "action.completed" and "resume failed" in event.message for event in run.events)
     assert any(event.type == "action.started" and event.action_index == 1 for event in run.events)
     assert profile_store.synced_paths == [tmp_path / ".mobaile" / "MEMORY.md"]
+
+
+def test_agent_run_service_monitor_process_builds_resume_failure_classifier(tmp_path: Path) -> None:
+    run_state = _run_state(tmp_path)
+    service = AgentRunService(
+        environment=_FakeEnvironment(),  # type: ignore[arg-type]
+        run_state=run_state,
+        profile_store=_FakeProfileStore(),  # type: ignore[arg-type]
+    )
+
+    class _FakeExecutor:
+        @staticmethod
+        def classify_resume_failure(message: str) -> str | None:
+            return "stale_session" if "thread/resume failed" in message else None
+
+    captured: dict[str, object] = {}
+
+    class _FakeProcessMonitor:
+        def monitor(
+            self,
+            proc,
+            *,
+            run_id,
+            prompt,
+            session_id,
+            executor,
+            client_thread_id,
+            resume_session_id,
+            resume_failure_classifier,
+        ) -> AgentRunOutcome:
+            captured["classifier_result"] = (
+                resume_failure_classifier("thread/resume failed")
+                if resume_failure_classifier is not None
+                else None
+            )
+            return AgentRunOutcome(exit_code=0)
+
+    service._process_monitor = _FakeProcessMonitor()  # type: ignore[assignment]
+
+    outcome = service._monitor_process(
+        object(),  # type: ignore[arg-type]
+        run_id="run-1",
+        prompt="Test",
+        session_id="session-1",
+        agent_executor=_FakeExecutor(),  # type: ignore[arg-type]
+        executor="codex",
+        client_thread_id="thread-1",
+        resume_session_id="resume-1",
+    )
+
+    assert outcome.exit_code == 0
+    assert captured["classifier_result"] == "stale_session"
