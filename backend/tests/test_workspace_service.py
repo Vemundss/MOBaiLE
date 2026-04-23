@@ -54,6 +54,20 @@ def test_workspace_service_truncates_after_sorted_prefix(monkeypatch, tmp_path: 
     assert listing.truncated is True
 
 
+def test_workspace_service_hides_internal_uploads_root_from_parent_listing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+    (env.default_workdir / "src").mkdir(parents=True, exist_ok=True)
+
+    listing = service.list_directory(str(env.default_workdir))
+
+    assert [entry.name for entry in listing.entries] == ["src"]
+    assert listing.truncated is False
+
+
 def test_workspace_service_create_directory_uses_default_workdir_for_relative_paths(
     monkeypatch,
     tmp_path: Path,

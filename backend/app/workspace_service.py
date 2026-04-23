@@ -49,7 +49,10 @@ class WorkspaceService:
             with os.scandir(target) as children:
                 visible_children = heapq.nsmallest(
                     limit + 1,
-                    (self._sortable_directory_entry(child) for child in children),
+                    filter(
+                        None,
+                        (self._sortable_directory_entry(target, child) for child in children),
+                    ),
                     key=lambda item: item.sort_key,
                 )
         except PermissionError as exc:
@@ -66,7 +69,14 @@ class WorkspaceService:
         ]
         return DirectoryListingResponse(path=str(target), entries=entries, truncated=truncated)
 
-    def _sortable_directory_entry(self, child: os.DirEntry[str]) -> _SortableDirectoryEntry:
+    def _sortable_directory_entry(
+        self,
+        parent: Path,
+        child: os.DirEntry[str],
+    ) -> _SortableDirectoryEntry | None:
+        if self._is_internal_uploads_directory(parent, child):
+            return None
+
         try:
             is_directory = child.is_dir()
         except OSError:
@@ -77,6 +87,12 @@ class WorkspaceService:
             name=child.name,
             path=child.path,
             is_directory=is_directory,
+        )
+
+    def _is_internal_uploads_directory(self, parent: Path, child: os.DirEntry[str]) -> bool:
+        return (
+            parent == self.environment.uploads_root.parent
+            and child.name == self.environment.uploads_root.name
         )
 
     def create_directory(self, raw_path: str) -> DirectoryCreateResponse:
