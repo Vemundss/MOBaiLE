@@ -17,6 +17,7 @@
 		31FA65E68D46BC9327B6EFE0 /* PairingScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18728D4EF5C801CB2F70F8A0 /* PairingScannerView.swift */; };
 		3C6E2ED1F5586882D85BFBF9 /* ConversationComposerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCED4808EDE3C590E926F59E /* ConversationComposerBar.swift */; };
 		3D1DC632A5EF8251A764491E /* ChatRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968552A59D7CC89642B2EFFB /* ChatRenderers.swift */; };
+		4D7C414110B02F0B4C3E56F2 /* ChatArtifactResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27511806DC91658C4F5CEE0 /* ChatArtifactResolution.swift */; };
 		5EE819CEF34CF2C74AD1F76B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D91AF3EDBB51ECC1F494AC /* Models.swift */; };
 		60CA8106724593E7295EC968 /* MOBaiLEShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */; };
 		626994299B2A734CE87838F5 /* VoiceAgentDirectoryBrowserState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5488792FB914150E65389186 /* VoiceAgentDirectoryBrowserState.swift */; };
@@ -128,6 +129,7 @@
 		D76C6B8E01B639BDDA79423E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DDB2A756CCFBDA2CE09FF0A5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		DFA3B4A90004DC6B1E9ED267 /* VoiceAgentRuntimeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentRuntimeSettings.swift; sourceTree = "<group>"; };
+		E27511806DC91658C4F5CEE0 /* ChatArtifactResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatArtifactResolution.swift; sourceTree = "<group>"; };
 		EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTranscriptionService.swift; sourceTree = "<group>"; };
 		EDF33E49DD9EEF0442C7A3B1 /* RuntimeConfigurationCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConfigurationCatalog.swift; sourceTree = "<group>"; };
 		EF1631014831DFC49F63734C /* VoiceAgentApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VoiceAgentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -192,6 +194,7 @@
 				087BA601BAADAF3708DE7220 /* APIClient.swift */,
 				9252A15BA709EE17F97318A3 /* Assets.xcassets */,
 				8B0B20BE8199AE0125A236D9 /* AudioRecorderService.swift */,
+				E27511806DC91658C4F5CEE0 /* ChatArtifactResolution.swift */,
 				968552A59D7CC89642B2EFFB /* ChatRenderers.swift */,
 				14543222250EAE3887C38275 /* ChatScaffoldViews.swift */,
 				2F921FA3DE0D828EC5A1C6C6 /* ChatThreadStore.swift */,
@@ -368,6 +371,7 @@
 			files = (
 				D0D6E84323A42B05D9E06AD0 /* APIClient.swift in Sources */,
 				B120A06EEC64BEA0F9DE734A /* AudioRecorderService.swift in Sources */,
+				4D7C414110B02F0B4C3E56F2 /* ChatArtifactResolution.swift in Sources */,
 				3D1DC632A5EF8251A764491E /* ChatRenderers.swift in Sources */,
 				B747B93FEBD761493C3D4C69 /* ChatScaffoldViews.swift in Sources */,
 				B9014AC6C4B7150E13FA67BA /* ChatThreadStore.swift in Sources */,
