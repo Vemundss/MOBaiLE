@@ -114,17 +114,14 @@ def test_agent_run_service_retries_stale_codex_resume_with_fresh_session(monkeyp
         run_id,
         prompt,
         session_id,
+        agent_executor,
         executor,
         client_thread_id,
         resume_session_id,
     ):
         monitor_calls.append(resume_session_id)
         if resume_session_id == "stale-thread":
-            run_state.append_log_message(
-                run_id,
-                "Error: thread/resume: thread/resume failed: no rollout found for thread id stale-thread",
-            )
-            return AgentRunOutcome(exit_code=1)
+            return AgentRunOutcome(exit_code=1, resume_failure_reason="stale_session")
 
         assert client_thread_id is not None
         assert run_state.run_store.get_agent_session_id(executor, session_id, client_thread_id) is None
@@ -152,9 +149,6 @@ def test_agent_run_service_retries_stale_codex_resume_with_fresh_session(monkeyp
     assert run.status == "completed"
     assert run.summary == "Run completed successfully"
     assert run_state.run_store.get_agent_session_id("codex", "session-1", client_thread_id) == "fresh-thread"
-    assert any(
-        event.type == "log.message"
-        and "retrying without session resume" in event.message
-        for event in run.events
-    )
+    assert any(event.type == "action.completed" and "resume failed" in event.message for event in run.events)
+    assert any(event.type == "action.started" and event.action_index == 1 for event in run.events)
     assert profile_store.synced_paths == [tmp_path / ".mobaile" / "MEMORY.md"]

@@ -54,3 +54,7 @@ class ClaudeExecutor:
             text=True,
             env=env,
         )
+
+    @staticmethod
+    def classify_resume_failure(message: str) -> None:
+        return None

@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Callable
 
+from .run_store_session_context import prune_stale_agent_sessions
+
 ConnectionFactory = Callable[[], sqlite3.Connection]
 LegacyRunPayloadRow = tuple[str, str]
 
@@ -126,6 +128,7 @@ def initialize_run_store_schema(connect: ConnectionFactory) -> list[LegacyRunPay
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_session_map_updated_at ON agent_session_map(updated_at)"
         )
+        prune_stale_agent_sessions(conn)
         legacy_thread_map = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='codex_thread_map'"
         ).fetchone()
@@ -140,5 +143,6 @@ def initialize_run_store_schema(connect: ConnectionFactory) -> list[LegacyRunPay
                 FROM codex_thread_map
                 """
             )
+            prune_stale_agent_sessions(conn)
 
     return legacy_rows

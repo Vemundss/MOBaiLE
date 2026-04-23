@@ -37,6 +37,7 @@ class AgentProcessMonitor:
         executor: AgentExecutorName,
         client_thread_id: str | None,
         resume_session_id: str | None,
+        resume_failure_classifier: Callable[[str], str | None] | None = None,
     ) -> AgentRunOutcome:
         assert proc.stdout is not None
         line_queue: Queue[str | None] = Queue()
@@ -54,6 +55,7 @@ class AgentProcessMonitor:
         cancelled = False
         timed_out = False
         blocked = False
+        resume_failure_reason: str | None = None
         timeout_sec = self.timeout_resolver(executor)
         deadline = time.monotonic() + timeout_sec if timeout_sec > 0 else None
         chat_extractor = self._chat_extractor(prompt=prompt, executor=executor)
@@ -65,6 +67,8 @@ class AgentProcessMonitor:
                 line = None
 
             if line is not None:
+                if resume_failure_reason is None and resume_failure_classifier is not None:
+                    resume_failure_reason = resume_failure_classifier(line)
                 blocked, linked_session_id = self.stream_handler.consume_message(
                     line,
                     run_id=run_id,
@@ -104,6 +108,7 @@ class AgentProcessMonitor:
             cancelled=cancelled,
             timed_out=timed_out,
             blocked=blocked,
+            resume_failure_reason=resume_failure_reason,
         )
 
     def _chat_extractor(self, *, prompt: str, executor: AgentExecutorName) -> CodexAssistantExtractor | None:

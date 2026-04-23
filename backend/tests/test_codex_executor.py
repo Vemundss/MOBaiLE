@@ -67,3 +67,13 @@ def test_build_command_allows_per_run_reasoning_effort_override(monkeypatch) -> 
         'model_reasoning_effort="xhigh"',
         "Use the higher setting",
     ]
+
+
+def test_classify_resume_failure_detects_stale_codex_sessions() -> None:
+    assert (
+        CodexExecutor.classify_resume_failure(
+            "Error: thread/resume: thread/resume failed: no rollout found for thread id stale-thread"
+        )
+        == "stale_session"
+    )
+    assert CodexExecutor.classify_resume_failure("unrelated output") is None

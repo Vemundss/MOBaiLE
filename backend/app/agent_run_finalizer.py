@@ -15,6 +15,7 @@ class AgentRunOutcome:
     cancelled: bool = False
     timed_out: bool = False
     blocked: bool = False
+    resume_failure_reason: str | None = None
 
 
 class AgentRunFinalizer:
@@ -55,13 +56,14 @@ class AgentRunFinalizer:
         executor: AgentExecutorName,
         outcome: AgentRunOutcome,
         workdir_memory_path: Path | None,
+        action_index: int = 0,
     ) -> None:
         if not outcome.blocked:
             self.run_state.append_event(
                 run_id,
                 ExecutionEvent(
                     type="action.completed",
-                    action_index=0,
+                    action_index=action_index,
                     message=f"{executor} exec finished (exit={outcome.exit_code})",
                 ),
             )
@@ -79,7 +81,7 @@ class AgentRunFinalizer:
                 run_id,
                 ExecutionEvent(
                     type="action.completed",
-                    action_index=0,
+                    action_index=action_index,
                     message=f"{executor} exec blocked awaiting user input",
                 ),
             )

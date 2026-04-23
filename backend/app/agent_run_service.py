@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import threading
 from pathlib import Path
+from typing import Callable
 
 from app.agent_process_monitor import AgentProcessMonitor
 from app.agent_run_finalizer import AgentRunFinalizer, AgentRunOutcome
@@ -116,6 +117,7 @@ class AgentRunService:
                 summary=guardrail_message,
                 sections=[ChatSection(title="Safety", body=guardrail_message)],
             )
+        final_action_index = 0
         try:
             proc = self._start_process(
                 agent_executor=agent_executor,
@@ -145,34 +147,51 @@ class AgentRunService:
             run_id=run_id,
             prompt=prompt,
             session_id=session_id,
+            agent_executor=agent_executor,
             executor=executor,
             client_thread_id=normalized_client_thread_id,
             resume_session_id=resume_session_id,
         )
         if self._should_retry_without_resume(
-            run_id,
+            outcome=outcome,
             executor=executor,
             session_id=session_id,
             client_thread_id=normalized_client_thread_id,
-            resume_session_id=resume_session_id,
-            outcome=outcome,
         ):
+            final_action_index = 1
+            self.run_state.append_event(
+                run_id,
+                ExecutionEvent(
+                    type="action.stderr",
+                    action_index=0,
+                    message=f"Saved {executor} session could not be resumed. Retrying with a fresh session.",
+                ),
+            )
+            self.run_state.append_event(
+                run_id,
+                ExecutionEvent(
+                    type="action.completed",
+                    action_index=0,
+                    message=f"{executor} exec resume failed (exit={outcome.exit_code})",
+                ),
+            )
             self.run_state.append_activity_event(
                 run_id,
                 stage="executing",
                 title="Executing",
                 display_message=f"Saved {executor} session could not be resumed. Starting a fresh session.",
+                level="warning",
             )
             self.run_state.append_log_message(
                 run_id,
-                f"Saved {executor} session {resume_session_id} could not be resumed; retrying without session resume.",
+                f"Saved {executor} session could not be resumed; retrying without session resume.",
                 action_index=0,
             )
             self.run_state.append_event(
                 run_id,
                 ExecutionEvent(
                     type="action.started",
-                    action_index=0,
+                    action_index=1,
                     message=f"retrying {executor} exec without saved session",
                 ),
             )
@@ -198,6 +217,7 @@ class AgentRunService:
                 run_id=run_id,
                 prompt=prompt,
                 session_id=session_id,
+                agent_executor=agent_executor,
                 executor=executor,
                 client_thread_id=normalized_client_thread_id,
                 resume_session_id=None,
@@ -207,43 +227,28 @@ class AgentRunService:
             executor=executor,
             outcome=outcome,
             workdir_memory_path=workdir_memory_path,
+            action_index=final_action_index,
         )
 
     def _should_retry_without_resume(
         self,
-        run_id: str,
         *,
+        outcome: AgentRunOutcome,
         executor: AgentExecutorName,
         session_id: str,
         client_thread_id: str | None,
-        resume_session_id: str | None,
-        outcome: AgentRunOutcome,
     ) -> bool:
         if executor != "codex":
             return False
-        if not resume_session_id or not client_thread_id:
+        if not client_thread_id:
             return False
         if outcome.cancelled or outcome.timed_out or outcome.blocked or outcome.exit_code == 0:
             return False
-
-        if not self._run_contains_stale_resume_error(run_id):
+        if outcome.resume_failure_reason != "stale_session":
             return False
 
         self.run_state.run_store.delete_agent_session_id(executor, session_id, client_thread_id)
         return True
-
-    def _run_contains_stale_resume_error(self, run_id: str) -> bool:
-        run = self.run_state.get_run(run_id)
-        if run is None:
-            return False
-
-        for event in reversed(run.events):
-            if event.type != "log.message":
-                continue
-            message = event.message.strip().lower()
-            if "thread/resume" in message and "no rollout found" in message:
-                return True
-        return False
 
     def _start_process(
         self,
@@ -276,10 +281,16 @@ class AgentRunService:
         run_id: str,
         prompt: str,
         session_id: str,
+        agent_executor: CodexExecutor | ClaudeExecutor,
         executor: AgentExecutorName,
         client_thread_id: str | None,
         resume_session_id: str | None,
     ) -> AgentRunOutcome:
+        resume_failure_classifier = self._resume_failure_classifier(
+            agent_executor=agent_executor,
+            executor=executor,
+            resume_session_id=resume_session_id,
+        )
         with self._active_procs_lock:
             self._active_procs[run_id] = proc
         try:
@@ -291,6 +302,7 @@ class AgentRunService:
                 executor=executor,
                 client_thread_id=client_thread_id,
                 resume_session_id=resume_session_id,
+                resume_failure_classifier=resume_failure_classifier,
             )
         finally:
             with self._active_procs_lock:
@@ -303,6 +315,7 @@ class AgentRunService:
         executor: AgentExecutorName,
         outcome: AgentRunOutcome,
         workdir_memory_path: Path,
+        action_index: int = 0,
     ) -> None:
         if not outcome.blocked and not outcome.cancelled:
             self.run_state.append_activity_event(
@@ -317,6 +330,7 @@ class AgentRunService:
             executor=executor,
             outcome=outcome,
             workdir_memory_path=workdir_memory_path,
+            action_index=action_index,
         )
 
     def _make_agent_executor(self, executor: AgentExecutorName, workdir: Path) -> CodexExecutor | ClaudeExecutor:
@@ -335,3 +349,13 @@ class AgentRunService:
         if executor == "claude":
             return self.environment.claude_timeout_sec
         return self.environment.codex_timeout_sec
+
+    @staticmethod
+    def _resume_failure_classifier(
+        *,
+        agent_executor: CodexExecutor | ClaudeExecutor,
+        resume_session_id: str | None,
+    ) -> Callable[[str], str | None] | None:
+        if not resume_session_id:
+            return None
+        return agent_executor.classify_resume_failure

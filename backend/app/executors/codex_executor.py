@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Literal
+
+CodexResumeFailureReason = Literal["stale_session"]
 
 
 class CodexExecutor:
@@ -83,3 +86,10 @@ class CodexExecutor:
             cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
         cmd.append(prompt)
         return cmd
+
+    @staticmethod
+    def classify_resume_failure(message: str) -> CodexResumeFailureReason | None:
+        normalized = message.strip().lower()
+        if "thread/resume" in normalized and "no rollout found" in normalized:
+            return "stale_session"
+        return None

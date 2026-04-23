@@ -11,6 +11,20 @@ from .run_store_sql import (
 )
 
 ConnectionFactory = Callable[[], sqlite3.Connection]
+AGENT_SESSION_RETENTION_DAYS = 90
+
+
+def prune_stale_agent_sessions(conn: sqlite3.Connection, *, executor: str | None = None) -> None:
+    if executor is not None and executor != "codex":
+        return
+    conn.execute(
+        """
+        DELETE FROM agent_session_map
+        WHERE executor = 'codex'
+          AND datetime(updated_at) < datetime('now', ?)
+        """,
+        (f"-{AGENT_SESSION_RETENTION_DAYS} days",),
+    )
 
 
 class SessionContextStore:
@@ -128,6 +142,7 @@ class SessionContextStore:
 
     def get_agent_session_id(self, executor: str, session_id: str, client_thread_id: str) -> str | None:
         with self._connect() as conn:
+            prune_stale_agent_sessions(conn, executor=executor)
             row = conn.execute(
                 """
                 SELECT agent_session_id
@@ -149,6 +164,7 @@ class SessionContextStore:
         agent_session_id: str,
     ) -> None:
         with self._connect() as conn:
+            prune_stale_agent_sessions(conn, executor=executor)
             conn.execute(
                 """
                 INSERT INTO agent_session_map (

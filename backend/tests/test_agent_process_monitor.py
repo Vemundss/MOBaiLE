@@ -138,3 +138,32 @@ def test_agent_process_monitor_stops_cancelled_runs(tmp_path: Path) -> None:
 
     assert outcome.cancelled is True
     assert proc._terminated is True
+
+
+def test_agent_process_monitor_classifies_stale_resume_failures(tmp_path: Path) -> None:
+    run_state = _run_state(tmp_path)
+    handler = AgentStreamHandler(run_state=run_state)
+    monitor = AgentProcessMonitor(
+        run_state=run_state,
+        stream_handler=handler,
+        timeout_resolver=lambda executor: 60,
+        leak_marker_provider=lambda: [],
+    )
+    proc = _FakeProcess(
+        ["Error: thread/resume: thread/resume failed: no rollout found for thread id stale-thread\n"],
+        exit_code=1,
+    )
+
+    outcome = monitor.monitor(
+        proc,  # type: ignore[arg-type]
+        run_id="run-1",
+        prompt="hello",
+        session_id="session-1",
+        executor="codex",
+        client_thread_id="chat-1",
+        resume_session_id="stale-thread",
+        resume_failure_classifier=lambda line: "stale_session" if "no rollout found" in line else None,
+    )
+
+    assert outcome.exit_code == 1
+    assert outcome.resume_failure_reason == "stale_session"

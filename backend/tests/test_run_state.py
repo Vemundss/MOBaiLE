@@ -179,3 +179,54 @@ def test_run_store_persists_session_context(tmp_path) -> None:
     assert loaded is not None
     assert loaded["executor"] == "local"
     assert loaded["working_directory"] == str(tmp_path / "workspace")
+
+
+def test_run_store_prunes_stale_agent_sessions_on_access(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+
+    with run_store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO agent_session_map (
+                executor, session_id, client_thread_id, agent_session_id, updated_at
+            )
+            VALUES (?, ?, ?, ?, datetime('now', '-120 days'))
+            """,
+            ("codex", "session-1", "thread-stale", "stale-thread"),
+        )
+        conn.execute(
+            """
+            INSERT INTO agent_session_map (
+                executor, session_id, client_thread_id, agent_session_id, updated_at
+            )
+            VALUES (?, ?, ?, ?, datetime('now'))
+            """,
+            ("codex", "session-1", "thread-fresh", "fresh-thread"),
+        )
+        conn.execute(
+            """
+            INSERT INTO agent_session_map (
+                executor, session_id, client_thread_id, agent_session_id, updated_at
+            )
+            VALUES (?, ?, ?, ?, datetime('now', '-120 days'))
+            """,
+            ("claude", "session-1", "thread-claude", "claude-thread"),
+        )
+
+    assert run_store.get_agent_session_id("codex", "session-1", "thread-stale") is None
+    assert run_store.get_agent_session_id("codex", "session-1", "thread-fresh") == "fresh-thread"
+    assert run_store.get_agent_session_id("claude", "session-1", "thread-claude") == "claude-thread"
+
+    with run_store._connect() as conn:
+        remaining = conn.execute(
+            """
+            SELECT executor, client_thread_id
+            FROM agent_session_map
+            ORDER BY executor, client_thread_id
+            """
+        ).fetchall()
+
+    assert [(row["executor"], row["client_thread_id"]) for row in remaining] == [
+        ("claude", "thread-claude"),
+        ("codex", "thread-fresh"),
+    ]
