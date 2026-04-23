@@ -296,7 +296,7 @@ service_state_label() {
   printf "Stopped\n"
 }
 
-pairing_status_label() {
+pairing_state_code() {
   local pairing_file="$1"
 
   python3 - "${pairing_file}" << 'PY'
@@ -307,13 +307,13 @@ import sys
 
 pairing_path = Path(sys.argv[1])
 if not pairing_path.exists():
-    print("Not ready")
+    print("missing")
     raise SystemExit(0)
 
 try:
     payload = json.loads(pairing_path.read_text(encoding="utf-8"))
 except json.JSONDecodeError:
-    print("Not ready")
+    print("missing")
     raise SystemExit(0)
 
 server_url = str(payload.get("server_url", "")).strip()
@@ -321,19 +321,20 @@ pair_code = str(payload.get("pair_code", "")).strip()
 expires_at = str(payload.get("pair_code_expires_at", "")).strip()
 
 if not server_url or not pair_code:
-    print("Not ready")
+    print("missing")
     raise SystemExit(0)
 
 if expires_at:
     try:
         parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
     except ValueError:
-        parsed = None
-    if parsed is not None and parsed <= datetime.now(timezone.utc):
-        print("Not ready")
+        print("missing")
+        raise SystemExit(0)
+    if parsed <= datetime.now(timezone.utc):
+        print("expired")
         raise SystemExit(0)
 
-print("Ready")
+print("ready")
 PY
 }
 
@@ -342,19 +343,37 @@ pairing_qr_path() {
   printf "%s\n" "${MOBAILE_TEST_PAIRING_QR:-${backend_dir}/pairing-qr.png}"
 }
 
+pairing_status_label() {
+  local pairing_file="$1"
+  local pairing_state
+  pairing_state="$(pairing_state_code "${pairing_file}")"
+
+  case "${pairing_state}" in
+    ready) printf "Ready\n" ;;
+    expired) printf "Expired; run mobaile pair\n" ;;
+    *) printf "Not ready\n" ;;
+  esac
+}
+
 pairing_qr_label() {
   local backend_dir="$1"
   local pairing_file="${backend_dir}/pairing.json"
   local qr_path
+  local pairing_state
   qr_path="$(pairing_qr_path "${backend_dir}")"
+  pairing_state="$(pairing_state_code "${pairing_file}")"
 
-  if [[ -f "${qr_path}" ]]; then
-    printf "Ready (%s)\n" "${qr_path}"
-  elif [[ "$(pairing_status_label "${pairing_file}")" == "Ready" ]]; then
-    printf "Available via mobaile pair\n"
-  else
-    printf "Not ready\n"
-  fi
+  case "${pairing_state}" in
+    ready)
+      if [[ -f "${qr_path}" ]]; then
+        printf "Ready (%s)\n" "${qr_path}"
+      else
+        printf "Available via mobaile pair\n"
+      fi
+      ;;
+    expired) printf "Expired; run mobaile pair\n" ;;
+    *) printf "Not ready\n" ;;
+  esac
 }
 
 open_file_if_possible() {

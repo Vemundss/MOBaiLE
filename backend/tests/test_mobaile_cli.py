@@ -228,7 +228,36 @@ def test_mobaile_status_does_not_report_ready_for_expired_pairing(tmp_path: Path
     )
 
     assert result.returncode == 0
-    assert "Phone pairing: Not ready" in result.stdout
+    assert "Phone pairing: Expired; run mobaile pair" in result.stdout
+    assert "Pairing QR: Expired; run mobaile pair" in result.stdout
+
+
+def test_mobaile_status_does_not_report_existing_qr_as_ready_when_pairing_expired(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://127.0.0.1:8000","session_id":"iphone-app","pair_code":"pair-1234","pair_code_expires_at":"2000-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("stale-qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "status"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_SKIP_OPEN": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Pairing QR: Expired; run mobaile pair" in result.stdout
 
 
 def test_mobaile_status_reports_pairing_qr_can_be_regenerated(tmp_path: Path):
