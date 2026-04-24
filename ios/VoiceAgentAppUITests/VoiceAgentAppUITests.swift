@@ -110,7 +110,7 @@ final class VoiceAgentAppUITests: XCTestCase {
         let app = launchApp(previewScenario: "repair")
 
         XCTAssertTrue(app.staticTexts["Reconnect this phone"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Scan QR Again"].exists)
+        XCTAssertTrue(app.buttons["Scan pairing QR again"].exists)
     }
 
     func testTimeoutPreviewShowsRetryAndRunLogsActions() {

@@ -119,6 +119,7 @@ struct EmptyStateRuntimeContext {
 }
 
 struct ConversationEmptyStateView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let isConfigured: Bool
     let needsConnectionRepair: Bool
     let statusText: String
@@ -151,6 +152,28 @@ struct ConversationEmptyStateView: View {
             detail: "Tighten the current screen."
         )
     ]
+
+    private var setupHeaderTitle: String {
+        needsConnectionRepair ? "Reconnect this phone" : "Pair your computer"
+    }
+
+    private var setupHeaderDetail: String {
+        needsConnectionRepair
+            ? "Open the latest pairing QR on your computer, then scan it here to replace the saved connection."
+            : "Run MOBaiLE on your Mac or Linux machine, keep the pairing QR visible, then scan it here."
+    }
+
+    private var setupPrimaryActionTitle: String {
+        needsConnectionRepair ? "Scan New QR" : "Scan Pairing QR"
+    }
+
+    private var setupPrimaryActionAccessibilityLabel: String {
+        needsConnectionRepair ? "Scan pairing QR again" : "Scan pairing QR"
+    }
+
+    private var setupGuideActionTitle: String {
+        needsConnectionRepair ? "Repair Steps" : "Setup Guide"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -253,25 +276,7 @@ struct ConversationEmptyStateView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .center, spacing: 12) {
-                        MobaileLogoMark()
-                            .frame(width: 44, height: 44)
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(needsConnectionRepair ? "Reconnect this phone" : "Set up your computer first")
-                                .font(.title3.weight(.semibold))
-                            Text(
-                                needsConnectionRepair
-                                    ? "The saved connection on this phone is no longer valid. Open the latest pairing QR on your computer, then scan it again here."
-                                    : "MOBaiLE is the remote control. Start the backend on your Mac or Linux machine, then scan one pairing QR in the app."
-                            )
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Spacer(minLength: 0)
-                    }
+                    setupHeader
 
                     ConnectionBadge(
                         isConnected: isConfigured,
@@ -280,77 +285,57 @@ struct ConversationEmptyStateView: View {
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("The fastest path")
+                        Text("Two quick steps")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
                         SetupStepRow(
                             stepNumber: 1,
                             systemImage: "laptopcomputer",
-                            title: needsConnectionRepair ? "Open a fresh pairing QR on your computer" : "Run one install command on your computer",
+                            title: needsConnectionRepair ? "Refresh the QR on your computer" : "Run the installer on your computer",
                             detail: needsConnectionRepair
-                                ? "Run `mobaile pair` on the computer if you need a new QR, then keep it visible on screen."
-                                : "Use the guided bootstrap flow to install the backend, start it, and prepare pairing."
+                                ? "Run `mobaile pair` if you need a new QR, then keep it visible on screen."
+                                : "The guided setup installs the backend and leaves the pairing QR ready to scan."
                         )
                         SetupStepRow(
                             stepNumber: 2,
                             systemImage: "qrcode.viewfinder",
-                            title: needsConnectionRepair ? "Scan the QR again in MOBaiLE" : "Scan the pairing QR in MOBaiLE",
-                            detail: "Open `backend/pairing-qr.png` on your computer, then tap Scan Pairing QR here and point the phone at the screen."
-                        )
-                        SetupStepRow(
-                            stepNumber: 3,
-                            systemImage: "slider.horizontal.3",
-                            title: needsConnectionRepair ? "Use manual fields only if the QR is not practical" : "Use manual fields only as a fallback",
-                            detail: "If you already have a server URL and token, you can enter them yourself in Settings."
+                            title: needsConnectionRepair ? "Scan the new QR in MOBaiLE" : "Scan the QR in MOBaiLE",
+                            detail: "Tap the button below, point the phone at the screen, and confirm the host."
                         )
                     }
 
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 10) {
-                            Button {
-                                onOpenSetupGuide()
-                            } label: {
-                                Label(needsConnectionRepair ? "Show Repair Steps" : "Show Setup Steps", systemImage: "list.number")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Button {
-                                onOpenPairingScanner()
-                            } label: {
-                                Label(needsConnectionRepair ? "Scan Pairing QR Again" : "Scan Pairing QR", systemImage: "qrcode.viewfinder")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-
-                        VStack(spacing: 10) {
-                            Button {
-                                onOpenSetupGuide()
-                            } label: {
-                                Label(needsConnectionRepair ? "Show Repair Steps" : "Show Setup Steps", systemImage: "list.number")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Button {
-                                onOpenPairingScanner()
-                            } label: {
-                                Label(needsConnectionRepair ? "Scan Pairing QR Again" : "Scan Pairing QR", systemImage: "qrcode.viewfinder")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                        }
+                    Button {
+                        onOpenPairingScanner()
+                    } label: {
+                        Label(setupPrimaryActionTitle, systemImage: "qrcode.viewfinder")
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .accessibilityLabel(setupPrimaryActionAccessibilityLabel)
+
+                    Button {
+                        onOpenSetupGuide()
+                    } label: {
+                        Label(setupGuideActionTitle, systemImage: "list.number")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Divider()
+                        .padding(.top, 2)
 
                     Button {
                         onOpenSettings()
                     } label: {
-                        Label("Enter Manually", systemImage: "slider.horizontal.3")
-                            .frame(maxWidth: .infinity)
+                        Label("Enter URL and token manually", systemImage: "slider.horizontal.3")
+                            .font(.footnote.weight(.medium))
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Enter the server URL and token manually")
                 }
             }
         }
@@ -369,7 +354,56 @@ struct ConversationEmptyStateView: View {
                     lineWidth: 1
                 )
         )
-        .shadow(color: Color.black.opacity(0.03), radius: 14, y: 6)
+        .shadow(color: Color.black.opacity(0.03), radius: 10, y: 4)
+    }
+
+    @ViewBuilder
+    private var setupHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 14) {
+                setupHeaderBadge
+                setupHeaderText
+            }
+        } else {
+            HStack(alignment: .top, spacing: 14) {
+                setupHeaderBadge
+                setupHeaderText
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var setupHeaderBadge: some View {
+        if needsConnectionRepair {
+            Image(systemName: "qrcode.viewfinder")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 56, height: 56)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.orange.opacity(0.12))
+                )
+        } else {
+            MobaileLogoMark()
+                .frame(width: 44, height: 44)
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color(.systemBackground))
+                )
+        }
+    }
+
+    private var setupHeaderText: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(setupHeaderTitle)
+                .font(.title3.weight(.semibold))
+            Text(setupHeaderDetail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder
@@ -519,33 +553,34 @@ private struct SetupStepRow: View {
     let detail: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.12))
-                    .frame(width: 30, height: 30)
-                Text("\(stepNumber)")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color.accentColor)
-            }
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(stepNumber)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 30, height: 30)
+                .background(
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.12))
+                )
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: systemImage)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: 16)
 
                     Text(title)
                         .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Text(detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer(minLength: 0)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RuntimeInfoBar: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var vm: VoiceAgentViewModel
     let activeNavigationTitle: String
     let runtimeDirectorySummary: String
@@ -37,36 +38,24 @@ struct RuntimeInfoBar: View {
     }
 
     private var setupRuntimeInfoBar: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: vm.needsConnectionRepair ? "qrcode.viewfinder" : "slider.horizontal.3")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(vm.needsConnectionRepair ? .orange : .accentColor)
-                .frame(width: 34, height: 34)
-                .background((vm.needsConnectionRepair ? Color.orange : Color.accentColor).opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        setupRuntimeInfoIcon
+                        setupRuntimeInfoText
+                    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(vm.needsConnectionRepair ? "Reconnect this phone" : "Finish setup to start a run")
-                    .font(.subheadline.weight(.semibold))
-                Text(
-                    vm.needsConnectionRepair
-                        ? "Open the latest pairing QR on your computer, then scan it again here."
-                        : "Run one install command on your computer, then scan the pairing QR here."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
+                    setupRuntimeInfoAction
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    setupRuntimeInfoIcon
+                    setupRuntimeInfoText
 
-            Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
-            Group {
-                if vm.needsConnectionRepair {
-                    Button("Scan QR Again", action: onOpenPairingScanner)
-                        .buttonStyle(.borderedProminent)
-                } else {
-                    Button("Setup Guide", action: onOpenSetupGuide)
-                        .buttonStyle(.bordered)
+                    setupRuntimeInfoAction
                 }
             }
         }
@@ -84,6 +73,51 @@ struct RuntimeInfoBar: View {
                     lineWidth: 1
                 )
         )
+    }
+
+    private var setupRuntimeInfoIcon: some View {
+        Image(systemName: vm.needsConnectionRepair ? "qrcode.viewfinder" : "slider.horizontal.3")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(vm.needsConnectionRepair ? .orange : .accentColor)
+            .frame(width: 34, height: 34)
+            .background((vm.needsConnectionRepair ? Color.orange : Color.accentColor).opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var setupRuntimeInfoText: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(vm.needsConnectionRepair ? "Reconnect this phone" : "Finish setup to start a run")
+                .font(.subheadline.weight(.semibold))
+            Text(
+                vm.needsConnectionRepair
+                    ? "Open the latest pairing QR on your computer, then scan it again here."
+                    : "Run one install command on your computer, then scan the pairing QR here."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var setupRuntimeInfoAction: some View {
+        Group {
+            if vm.needsConnectionRepair {
+                Button(action: onOpenPairingScanner) {
+                    Label("Scan QR", systemImage: "qrcode.viewfinder")
+                        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Scan pairing QR again")
+            } else {
+                Button(action: onOpenSetupGuide) {
+                    Label("Setup Guide", systemImage: "list.number")
+                        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Open setup guide")
+            }
+        }
+        .controlSize(dynamicTypeSize.isAccessibilitySize ? .large : .regular)
     }
 
     private var compactRuntimeInfoBar: some View {
