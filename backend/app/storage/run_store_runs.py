@@ -8,6 +8,7 @@ from app.models.schemas import (
     ActionPlan,
     ExecutionEvent,
     HumanUnblockRequest,
+    RunEventsPage,
     RunRecord,
 )
 
@@ -86,6 +87,87 @@ class RunRecordStore:
                 return None
             event_rows = self._load_event_rows_for_run_ids(conn, [run_id]).get(run_id, [])
         return self._hydrate_run(run_row, event_rows)
+
+    def event_page(
+        self,
+        run_id: str,
+        *,
+        limit: int,
+        before_seq: int | None = None,
+        after_seq: int | None = None,
+    ) -> RunEventsPage | None:
+        if before_seq is not None and after_seq is not None:
+            raise ValueError("before_seq and after_seq cannot both be set")
+        with self._connect() as conn:
+            run_row = conn.execute("SELECT run_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+            if run_row is None:
+                return None
+
+            stats_row = conn.execute(
+                "SELECT COUNT(*) AS event_count, MIN(seq) AS first_seq, MAX(seq) AS latest_seq FROM run_events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            event_count = int(stats_row["event_count"]) if stats_row is not None else 0
+            first_available_seq = stats_row["first_seq"] if stats_row is not None else None
+            latest_seq = stats_row["latest_seq"] if stats_row is not None else None
+
+            if after_seq is not None:
+                event_rows = conn.execute(
+                    f"""
+                    SELECT
+                        {RUN_EVENT_COLUMNS}
+                    FROM run_events
+                    WHERE run_id = ? AND seq > ?
+                    ORDER BY seq ASC
+                    LIMIT ?
+                    """,
+                    (run_id, after_seq, limit + 1),
+                ).fetchall()
+                page_rows = event_rows[:limit]
+            elif before_seq is not None:
+                event_rows = conn.execute(
+                    f"""
+                    SELECT
+                        {RUN_EVENT_COLUMNS}
+                    FROM run_events
+                    WHERE run_id = ? AND seq < ?
+                    ORDER BY seq DESC
+                    LIMIT ?
+                    """,
+                    (run_id, before_seq, limit + 1),
+                ).fetchall()
+                page_rows = list(reversed(event_rows[:limit]))
+            else:
+                event_rows = conn.execute(
+                    f"""
+                    SELECT
+                        {RUN_EVENT_COLUMNS}
+                    FROM run_events
+                    WHERE run_id = ?
+                    ORDER BY seq DESC
+                    LIMIT ?
+                    """,
+                    (run_id, limit + 1),
+                ).fetchall()
+                page_rows = list(reversed(event_rows[:limit]))
+
+        events = [self._hydrate_event(row) for row in page_rows]
+        first_page_seq = self._first_event_seq(events)
+        last_page_seq = self._last_event_seq(events)
+        return RunEventsPage(
+            run_id=run_id,
+            events=events,
+            limit=limit,
+            total_count=event_count,
+            has_more_before=(
+                first_page_seq is not None
+                and first_available_seq is not None
+                and int(first_page_seq) > int(first_available_seq)
+            ),
+            has_more_after=last_page_seq is not None and latest_seq is not None and int(last_page_seq) < int(latest_seq),
+            next_before_seq=first_page_seq,
+            next_after_seq=last_page_seq,
+        )
 
     def load_all(self) -> dict[str, RunRecord]:
         runs: dict[str, RunRecord] = {}
@@ -281,3 +363,15 @@ class RunRecordStore:
             message=row["message"],
             created_at=row["created_at"],
         )
+
+    @staticmethod
+    def _first_event_seq(events: list[ExecutionEvent]) -> int | None:
+        if not events:
+            return None
+        return events[0].seq
+
+    @staticmethod
+    def _last_event_seq(events: list[ExecutionEvent]) -> int | None:
+        if not events:
+            return None
+        return events[-1].seq

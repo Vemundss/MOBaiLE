@@ -12,6 +12,10 @@ struct WorkspaceBrowserSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    workspaceSummaryPanel
+                    if !recentWorkspacePaths.isEmpty {
+                        recentWorkspacesPanel
+                    }
                     directoryBrowserPanel
                 }
                 .padding()
@@ -36,19 +40,38 @@ struct WorkspaceBrowserSheet: View {
 
     private var directoryBrowserPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 10) {
-                Text(vm.directoryBrowserPath.isEmpty ? runtimeDirectoryLabel : vm.directoryBrowserPath)
-                    .font(.footnote.monospaced())
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Browsing")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                Text(browsedDirectoryLabel)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(.primary)
                     .lineLimit(2)
-                Spacer(minLength: 0)
-                Button("Use Folder") {
+                    .truncationMode(.middle)
+
+                Button {
                     Task { await vm.useCurrentBrowserDirectoryAsWorkingDirectory() }
+                } label: {
+                    Label(
+                        canUseBrowsedDirectory ? "Use for Future Runs" : "Already Selected",
+                        systemImage: canUseBrowsedDirectory ? "checkmark.circle" : "checkmark.circle.fill"
+                    )
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(!canUseBrowsedDirectory || vm.isLoadingDirectoryBrowser)
+                .accessibilityLabel("Use for Future Runs")
             }
+
+            Text(useFolderHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -158,7 +181,7 @@ struct WorkspaceBrowserSheet: View {
 
             if !canUseBrowsedDirectory,
                !vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("Current working directory.")
+                Text("This folder is already selected for future runs.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -166,6 +189,166 @@ struct WorkspaceBrowserSheet: View {
         .padding(10)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var workspaceSummaryPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "folder.badge.gearshape")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Future runs")
+                        .font(.subheadline.weight(.semibold))
+                    Text("New prompts in this session will run from the selected workspace unless you change it here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            workspacePathRow(
+                title: "Selected workspace",
+                path: selectedWorkspacePath,
+                systemImage: "checkmark.circle.fill",
+                tint: .green,
+                actionTitle: "Show"
+            ) {
+                Task { await vm.openDirectory(path: selectedWorkspacePath) }
+            }
+
+            if !backendRootPath.isEmpty, backendRootPath != selectedWorkspacePath {
+                workspacePathRow(
+                    title: "Current root",
+                    path: backendRootPath,
+                    systemImage: "externaldrive.fill",
+                    tint: .secondary,
+                    actionTitle: "Go"
+                ) {
+                    Task { await vm.openDirectory(path: backendRootPath) }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var recentWorkspacesPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Recent workspaces", systemImage: "clock.arrow.circlepath")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(recentWorkspacePaths, id: \.self) { path in
+                workspacePathRow(
+                    title: path == selectedWorkspacePath ? "Selected recently" : shortPathLabel(path),
+                    path: path,
+                    systemImage: path == selectedWorkspacePath ? "checkmark.circle.fill" : "folder.fill",
+                    tint: path == selectedWorkspacePath ? .green : .blue,
+                    actionTitle: "Open"
+                ) {
+                    Task { await vm.openDirectory(path: path) }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func workspacePathRow(
+        title: String,
+        path: String,
+        systemImage: String,
+        tint: Color,
+        actionTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 18)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button(action: action) {
+                    Image(systemName: "arrow.forward.circle")
+                        .imageScale(.medium)
+                        .frame(width: 34, height: 34)
+                }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel(actionTitle)
+            }
+            Text(path)
+                .font(.footnote.monospaced())
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 26)
+        }
+        .padding(.vertical, 7)
+    }
+
+    private var browsedDirectoryLabel: String {
+        let browsed = vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return browsed.isEmpty ? runtimeDirectoryLabel : browsed
+    }
+
+    private var selectedWorkspacePath: String {
+        let selected = runtimeDirectoryLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return selected.isEmpty ? "~" : selected
+    }
+
+    private var backendRootPath: String {
+        vm.backendWorkdirRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var useFolderHint: String {
+        guard !vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Open a folder to choose where future runs will work."
+        }
+        if canUseBrowsedDirectory {
+            return "Tap Use for Future Runs to make this folder the workspace for new prompts in this session."
+        }
+        return "This folder is already the workspace for new prompts in this session."
+    }
+
+    private var recentWorkspacePaths: [String] {
+        var seen = Set<String>()
+        let paths = vm.threads
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .map { $0.resolvedWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return paths.compactMap { path in
+            guard path != backendRootPath, !seen.contains(path) else { return nil }
+            seen.insert(path)
+            return path
+        }
+        .prefix(4)
+        .map { $0 }
+    }
+
+    private func shortPathLabel(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Workspace" }
+        if trimmed == "/" { return "/" }
+        let url = URL(fileURLWithPath: trimmed)
+        let last = url.lastPathComponent
+        guard !last.isEmpty else { return trimmed }
+        return last
     }
 
     @ViewBuilder

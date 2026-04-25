@@ -247,6 +247,35 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.pendingHumanUnblock?.suggestedReply, "I completed the unblock step.")
     }
 
+    func testRunEventsPageDecoding() throws {
+        let json = """
+        {
+          "run_id":"run-123",
+          "events":[
+            {"seq":4,"type":"log.message","message":"event 4"},
+            {"seq":5,"type":"run.completed","message":"done"}
+          ],
+          "limit":2,
+          "total_count":6,
+          "has_more_before":true,
+          "has_more_after":false,
+          "next_before_seq":4,
+          "next_after_seq":5
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(RunEventsPage.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.runId, "run-123")
+        XCTAssertEqual(decoded.events.map(\.seq), [4, 5])
+        XCTAssertEqual(decoded.limit, 2)
+        XCTAssertEqual(decoded.totalCount, 6)
+        XCTAssertTrue(decoded.hasMoreBefore)
+        XCTAssertFalse(decoded.hasMoreAfter)
+        XCTAssertEqual(decoded.nextBeforeSeq, 4)
+        XCTAssertEqual(decoded.nextAfterSeq, 5)
+    }
+
     func testExecutionEventDecodingSupportsTypedActivityFields() throws {
         let json = #"{"type":"activity.updated","message":"Running commands.","stage":"executing","title":"Executing","display_message":"Running commands.","level":"info"}"#
 
@@ -318,6 +347,32 @@ final class VoiceAgentModelTests: XCTestCase {
             serverURL: "https://relay.example.com"
         )
         XCTAssertEqual(resolved, "https://relay.example.com/v1/files?path=%2FUsers%2Ftest%2Fplot.png")
+    }
+
+    func testAssistantHeadingNormalizationKeepsOutputTitleSeparateFromBody() {
+        let massaged = _test_massagedAssistantTextForDisplay("OutputHello from the script.")
+
+        XCTAssertEqual(massaged, "## Output\n\nHello from the script.")
+    }
+
+    func testMessageSegmentsUseStableUniqueIdentities() {
+        let text = """
+        Result: Done
+
+        ```swift
+        print("hello")
+        ```
+
+        ```swift
+        print("hello")
+        ```
+        """
+
+        let firstIDs = _test_messageSegmentIDs(text, serverURL: "http://127.0.0.1:8000")
+        let secondIDs = _test_messageSegmentIDs(text, serverURL: "http://127.0.0.1:8000")
+
+        XCTAssertEqual(firstIDs, secondIDs)
+        XCTAssertEqual(Set(firstIDs).count, firstIDs.count)
     }
 
     func testPendingPairingWarnsForRFC1918HTTP() {
@@ -1275,6 +1330,50 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded, [attachment])
     }
 
+    func testAttachmentDraftServiceRejectsOversizedAttachmentBeforeStaging() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let service = AttachmentDraftService(
+            draftDirectory: directory,
+            policy: AttachmentDraftPolicy(maxAttachmentBytes: 8, maxAudioBytes: 8)
+        )
+
+        XCTAssertThrowsError(
+            try service.stageAttachmentData(
+                Data(repeating: 1, count: 9),
+                fileName: "large.txt",
+                mimeType: "text/plain"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AttachmentDraftValidationError,
+                .fileTooLarge(fileName: "large.txt", sizeBytes: 9, maxBytes: 8)
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testAttachmentDraftServiceSummarizesVisibleSizeAndKinds() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let service = AttachmentDraftService(draftDirectory: directory)
+        let image = try service.stageAttachmentData(
+            Data(repeating: 1, count: 1024),
+            fileName: "screen.png",
+            mimeType: "image/png"
+        )
+        let note = try service.stageAttachmentData(
+            Data("hello".utf8),
+            fileName: "note.md",
+            mimeType: "text/markdown"
+        )
+
+        let summary = try XCTUnwrap(service.summaryText(for: [image, note]))
+
+        XCTAssertTrue(summary.contains("2 files"))
+        XCTAssertTrue(summary.contains("Mixed"))
+    }
+
     func testExtractInlineArtifactTitlesFindsMarkdownFileLinks() {
         let text = """
         Review these attachments.
@@ -1802,6 +1901,21 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertFalse(vm.canCancelActiveOperation)
         XCTAssertFalse(vm._test_isRunActivelyObserved(runID))
+    }
+
+    @MainActor
+    func testVoiceInputPreparationIsCancellableBeforeRunIDExists() {
+        let vm = VoiceAgentViewModel()
+        vm.isLoading = true
+        vm._test_setActiveVoiceInputPhase(.transcribing)
+
+        XCTAssertTrue(vm.canCancelActiveOperation)
+        XCTAssertEqual(vm.activeOperationCancelAccessibilityLabel, "Cancel transcription")
+
+        vm.cancelActiveOperation()
+
+        XCTAssertEqual(vm.statusText, "Cancelling voice input...")
+        XCTAssertFalse(vm.isPreparingVoiceInput)
     }
 
     @MainActor

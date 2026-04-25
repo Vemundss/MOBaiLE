@@ -186,6 +186,53 @@ def test_run_events_endpoint_replays_from_after_seq(make_client):
     assert [event["seq"] for event in replayed_events] == [event["seq"] for event in all_events[1:]]
 
 
+def test_run_events_page_endpoint_returns_bounded_event_windows(make_client):
+    client, token = make_client()
+    headers = auth_headers(token)
+    create = client.post(
+        "/v1/utterances",
+        headers=headers,
+        json={
+            "session_id": "sess-events-page",
+            "utterance_text": "create a hello python script and run it",
+            "executor": "local",
+        },
+    )
+    assert create.status_code == 200
+    run_id = create.json()["run_id"]
+
+    final_run = wait_for_run_to_settle(client, token, run_id, attempts=40)
+    all_events = final_run["events"]
+    assert len(all_events) >= 3
+
+    bounded_run = client.get(f"/v1/runs/{run_id}?events_limit=0", headers=headers)
+    assert bounded_run.status_code == 200
+    assert bounded_run.json()["events"] == []
+
+    first = client.get(f"/v1/runs/{run_id}/events-page?limit=2", headers=headers)
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert first_payload["run_id"] == run_id
+    assert first_payload["limit"] == 2
+    assert first_payload["total_count"] == len(all_events)
+    assert len(first_payload["events"]) == 2
+    assert [event["seq"] for event in first_payload["events"]] == [
+        event["seq"] for event in all_events[-2:]
+    ]
+    assert first_payload["has_more_before"] is (len(all_events) > 2)
+    assert first_payload["has_more_after"] is False
+
+    second = client.get(
+        f"/v1/runs/{run_id}/events-page?limit=2&before_seq={first_payload['next_before_seq']}",
+        headers=headers,
+    )
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert second_payload["events"]
+    assert second_payload["events"][-1]["seq"] < first_payload["events"][0]["seq"]
+    assert second_payload["has_more_after"] is True
+
+
 def test_session_context_updates_and_runs_inherit_defaults(make_client, tmp_path: Path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

@@ -123,6 +123,15 @@ class UploadResponse(BaseModel):
     size_bytes: int
 
 
+class ApiErrorDetail(BaseModel):
+    code: str
+    message: str
+    field: str | None = None
+    limit_bytes: int | None = None
+    limit_mb: float | None = None
+    received_bytes: int | None = None
+
+
 class ActionResult(BaseModel):
     success: bool
     exit_code: int | None = None
@@ -169,6 +178,17 @@ class RunDiagnostics(BaseModel):
     last_error: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class RunEventsPage(BaseModel):
+    run_id: str
+    events: list[ExecutionEvent] = Field(default_factory=list)
+    limit: int
+    total_count: int
+    has_more_before: bool = False
+    has_more_after: bool = False
+    next_before_seq: int | None = None
+    next_after_seq: int | None = None
 
 
 class DirectoryEntry(BaseModel):

@@ -12,6 +12,7 @@ from app.chat_envelope import (
     parse_chat_envelope_payload,
 )
 from app.models.schemas import (
+    ActionPlan,
     AgendaItem,
     ChatArtifact,
     ChatEnvelope,
@@ -19,6 +20,8 @@ from app.models.schemas import (
     ExecutionEvent,
     HumanUnblockRequest,
     RunDiagnostics,
+    RunEventsPage,
+    RunExecutorName,
     RunRecord,
     RunSummary,
 )
@@ -83,6 +86,34 @@ class RunState:
         )
         for event in initial_events:
             self.append_event(run.run_id, event)
+
+    def update_run_start_metadata(
+        self,
+        run_id: str,
+        *,
+        executor: RunExecutorName,
+        utterance_text: str,
+        working_directory: str | None,
+        summary: str,
+        plan: ActionPlan | None = None,
+    ) -> None:
+        with self._runs_lock:
+            run = self._runs.get(run_id)
+            if run is None:
+                return
+            run.executor = executor
+            run.utterance_text = utterance_text
+            run.working_directory = working_directory
+            run.summary = summary
+            run.plan = plan
+            self.run_store.upsert_run(run)
+            self.run_store.update_session_latest_run(
+                run.session_id,
+                run_id=run.run_id,
+                status=run.status,
+                summary=run.summary,
+                pending_human_unblock=run.pending_human_unblock,
+            )
 
     def append_event(self, run_id: str, event: ExecutionEvent) -> None:
         if not event.event_id:
@@ -275,6 +306,60 @@ class RunState:
             updated_at=run.updated_at,
         )
 
+    def event_page(
+        self,
+        run_id: str,
+        *,
+        limit: int,
+        before_seq: int | None = None,
+        after_seq: int | None = None,
+    ) -> RunEventsPage | None:
+        if before_seq is not None and after_seq is not None:
+            raise ValueError("before_seq and after_seq cannot both be set")
+        with self._runs_lock:
+            run = self._runs.get(run_id)
+            if run is not None:
+                return self._build_event_page(
+                    run_id,
+                    run.events,
+                    limit=limit,
+                    before_seq=before_seq,
+                    after_seq=after_seq,
+                )
+        return self.run_store.event_page(run_id, limit=limit, before_seq=before_seq, after_seq=after_seq)
+
+    def _build_event_page(
+        self,
+        run_id: str,
+        all_events: list[ExecutionEvent],
+        *,
+        limit: int,
+        before_seq: int | None,
+        after_seq: int | None,
+    ) -> RunEventsPage:
+        if after_seq is not None:
+            candidates = [event for event in all_events if self._event_seq(event) > after_seq]
+            events = candidates[:limit]
+        elif before_seq is not None:
+            candidates = [event for event in all_events if self._event_seq(event) < before_seq]
+            events = candidates[-limit:]
+        else:
+            events = all_events[-limit:]
+        first_seq = self._first_event_seq(events)
+        last_seq = self._last_event_seq(events)
+        min_seq = self._first_event_seq(all_events)
+        max_seq = self._last_event_seq(all_events)
+        return RunEventsPage(
+            run_id=run_id,
+            events=events,
+            limit=limit,
+            total_count=len(all_events),
+            has_more_before=first_seq is not None and min_seq is not None and first_seq > min_seq,
+            has_more_after=last_seq is not None and max_seq is not None and last_seq < max_seq,
+            next_before_seq=first_seq,
+            next_after_seq=last_seq,
+        )
+
     def event_stream(self, run_id: str, *, after_seq: int = -1) -> Iterator[str]:
         if self.get_run(run_id) is None:
             return
@@ -306,3 +391,15 @@ class RunState:
     @staticmethod
     def _event_seq(event: ExecutionEvent) -> int:
         return event.seq if event.seq is not None else -1
+
+    @staticmethod
+    def _first_event_seq(events: list[ExecutionEvent]) -> int | None:
+        if not events:
+            return None
+        return RunState._event_seq(events[0])
+
+    @staticmethod
+    def _last_event_seq(events: list[ExecutionEvent]) -> int | None:
+        if not events:
+            return None
+        return RunState._event_seq(events[-1])

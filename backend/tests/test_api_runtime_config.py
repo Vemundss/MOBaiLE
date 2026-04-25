@@ -130,12 +130,22 @@ def test_utterance_and_audio_omit_executor_use_resolved_default(make_client, tmp
     assert audio_resp.status_code == 200
     audio_run_id = audio_resp.json()["run_id"]
 
-    for run_id in (text_run_id, audio_run_id):
-        final_payload = wait_for_run_to_settle(client, token, run_id)
-        assert final_payload["status"] == "completed"
-        assert final_payload["executor"] == "codex"
-        activity_stages = [e["stage"] for e in final_payload["events"] if e["type"].startswith("activity.")]
-        assert activity_stages == ["planning", "executing", "summarizing"]
+    text_payload = wait_for_run_to_settle(client, token, text_run_id)
+    assert text_payload["status"] == "completed"
+    assert text_payload["executor"] == "codex"
+    text_activity_stages = [
+        e["stage"] for e in text_payload["events"] if e["type"].startswith("activity.")
+    ]
+    assert text_activity_stages == ["planning", "executing", "summarizing"]
+
+    audio_payload = wait_for_run_to_settle(client, token, audio_run_id)
+    assert audio_payload["status"] == "completed"
+    assert audio_payload["executor"] == "codex"
+    audio_activity_stages = [
+        e["stage"] for e in audio_payload["events"] if e["type"].startswith("activity.")
+    ]
+    assert audio_activity_stages[:2] == ["transcribing", "transcribing"]
+    assert audio_activity_stages[-3:] == ["planning", "executing", "summarizing"]
 
 
 def test_capabilities_endpoint_returns_report(make_client, tmp_path: Path):

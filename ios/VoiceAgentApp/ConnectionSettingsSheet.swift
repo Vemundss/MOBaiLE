@@ -186,8 +186,8 @@ struct ConnectionSettingsSheet: View {
                         }
                     } footer: {
                         Text(vm.developerMode
-                            ? "Advanced Runtime overrides backend defaults and exposes the internal local fallback."
-                            : "Advanced Runtime overrides backend defaults when you need them.")
+                            ? "Advanced Runtime overrides backend defaults and exposes the internal local fallback. Starting directory controls the workspace for future runs in this session."
+                            : "Advanced Runtime overrides backend defaults when you need them. Starting directory controls the workspace for future runs in this session.")
                     }
                 }
 
@@ -585,7 +585,7 @@ struct ConnectionSettingsSheet: View {
                 return vm.connectionRepairMessage
             }
             return vm.hasConfiguredConnection
-                ? "Saved on this phone. Pair again if you want to replace this connection."
+                ? "Saved on this phone. Pair again to replace this connection; workspace changes apply to future runs in this session."
                 : "Use the installer and QR pairing for the fastest setup, or expand the manual fallback section if you already have connection details."
         case .checking:
             return "Checking the current backend session."

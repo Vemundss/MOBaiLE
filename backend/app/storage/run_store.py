@@ -6,6 +6,7 @@ from pathlib import Path
 from app.models.schemas import (
     ExecutionEvent,
     HumanUnblockRequest,
+    RunEventsPage,
     RunRecord,
 )
 
@@ -51,6 +52,21 @@ class RunStore:
 
     def load_run(self, run_id: str) -> RunRecord | None:
         return self._runs.load_run(run_id)
+
+    def event_page(
+        self,
+        run_id: str,
+        *,
+        limit: int,
+        before_seq: int | None = None,
+        after_seq: int | None = None,
+    ) -> RunEventsPage | None:
+        return self._runs.event_page(
+            run_id,
+            limit=limit,
+            before_seq=before_seq,
+            after_seq=after_seq,
+        )
 
     def load_all(self) -> dict[str, RunRecord]:
         return self._runs.load_all()

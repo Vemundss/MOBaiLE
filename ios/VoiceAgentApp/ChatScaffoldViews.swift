@@ -443,11 +443,16 @@ struct ConversationEmptyStateView: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
 
-                Text(context.workspace)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Workspace for future runs")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(context.workspace)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
@@ -720,8 +725,28 @@ private struct SheetIntroCard: View {
 struct LogsView: View {
     let events: [ExecutionEvent]
     let diagnostics: RunDiagnostics?
+    let canLoadOlderEvents: Bool
+    let isLoadingOlderEvents: Bool
+    let errorText: String
+    let onLoadOlderEvents: () async -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var scope: LogScope = .highlights
+
+    init(
+        events: [ExecutionEvent],
+        diagnostics: RunDiagnostics?,
+        canLoadOlderEvents: Bool = false,
+        isLoadingOlderEvents: Bool = false,
+        errorText: String = "",
+        onLoadOlderEvents: @escaping () async -> Void = {}
+    ) {
+        self.events = events
+        self.diagnostics = diagnostics
+        self.canLoadOlderEvents = canLoadOlderEvents
+        self.isLoadingOlderEvents = isLoadingOlderEvents
+        self.errorText = errorText
+        self.onLoadOlderEvents = onLoadOlderEvents
+    }
 
     private enum LogScope: String, CaseIterable, Identifiable {
         case all
@@ -814,8 +839,39 @@ struct LogsView: View {
                                     }
                                 }
                                 .pickerStyle(.segmented)
+
+                                if !errorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Label(errorText, systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+
+                        if canLoadOlderEvents || isLoadingOlderEvents {
+                            Section {
+                                Button {
+                                    Task { await onLoadOlderEvents() }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        if isLoadingOlderEvents {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Image(systemName: "clock.arrow.circlepath")
+                                        }
+                                        Text(isLoadingOlderEvents ? "Loading older events..." : "Load older events")
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .disabled(isLoadingOlderEvents)
+                            }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }
@@ -878,16 +934,18 @@ private struct LogEventRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(descriptor.title)
                         .font(.subheadline.weight(.semibold))
-
-                    Spacer(minLength: 0)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
 
                     if let metadata = logEventMetadata(for: event) {
                         Text(metadata)
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                 }
 
@@ -1059,9 +1117,16 @@ private struct LogSummaryPill: View {
     let tint: Color
 
     var body: some View {
-        Label(text, systemImage: systemImage)
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .imageScale(.medium)
+            Text(text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
             .font(.caption.weight(.semibold))
             .foregroundStyle(tint)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(tint.opacity(0.12))
@@ -1132,7 +1197,7 @@ private func logEventDescriptor(for event: ExecutionEvent) -> LogEventDescriptor
 
 private func logEventMetadata(for event: ExecutionEvent) -> String? {
     var parts: [String] = []
-    if let stage = normalizedLogSummaryText(event.stage) {
+    if !event.type.hasPrefix("activity."), let stage = normalizedLogSummaryText(event.stage) {
         parts.append(logStageTitle(for: stage))
     }
     parts.append(event.type)

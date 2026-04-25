@@ -68,6 +68,12 @@ class PreparedUtterance:
     effective_text: str
 
 
+@dataclass(frozen=True)
+class PrecreatedRun:
+    run_id: str
+    session_id: str
+
+
 class UtteranceService:
     def __init__(
         self,
@@ -94,11 +100,49 @@ class UtteranceService:
 
     def submit(self, request: UtteranceRequest) -> UtteranceResponse:
         prepared = self._prepare(request)
-        if self.environment.is_agent_executor(prepared.executor):
-            return self._submit_agent_request(prepared, request)
-        return self._submit_local_request(prepared)
+        return self._submit_prepared(prepared, request, precreated=False)
 
-    def _prepare(self, request: UtteranceRequest) -> PreparedUtterance:
+    def submit_precreated(self, request: UtteranceRequest, *, run_id: str) -> UtteranceResponse:
+        prepared = self._prepare(request, run_id=run_id)
+        return self._submit_prepared(prepared, request, precreated=True)
+
+    def create_transcribing_run(self, request: UtteranceRequest, *, run_id: str) -> PrecreatedRun:
+        if self.run_state.get_run(run_id) is not None:
+            raise HTTPException(status_code=409, detail="run_id already exists")
+        prepared = self._prepare(request, run_id=run_id)
+        self.run_state.store_run(
+            RunRecord(
+                run_id=prepared.run_id,
+                session_id=prepared.session_context.session_id,
+                executor=prepared.executor,
+                utterance_text=prepared.display_text,
+                working_directory=str(prepared.workdir),
+                status="running",
+                events=[],
+                summary="Transcribing audio",
+            )
+        )
+        self.run_state.append_activity_event(
+            prepared.run_id,
+            stage="transcribing",
+            title="Transcribing",
+            display_message="Transcribing the audio message.",
+            event_type="activity.started",
+        )
+        return PrecreatedRun(run_id=prepared.run_id, session_id=prepared.session_context.session_id)
+
+    def _submit_prepared(
+        self,
+        prepared: PreparedUtterance,
+        request: UtteranceRequest,
+        *,
+        precreated: bool,
+    ) -> UtteranceResponse:
+        if self.environment.is_agent_executor(prepared.executor):
+            return self._submit_agent_request(prepared, request, precreated=precreated)
+        return self._submit_local_request(prepared, precreated=precreated)
+
+    def _prepare(self, request: UtteranceRequest, *, run_id: str | None = None) -> PreparedUtterance:
         session_context = self.session_context_loader(request.session_id)
         executor = self.environment.resolve_request_executor(
             request.executor if request.executor is not None else session_context.executor
@@ -111,7 +155,7 @@ class UtteranceService:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return PreparedUtterance(
-            run_id=self.run_id_factory(),
+            run_id=run_id or self.run_id_factory(),
             session_context=session_context,
             executor=executor,
             workdir=workdir,
@@ -119,7 +163,13 @@ class UtteranceService:
             effective_text=render_utterance_for_executor(request.utterance_text, request.attachments),
         )
 
-    def _submit_agent_request(self, prepared: PreparedUtterance, request: UtteranceRequest) -> UtteranceResponse:
+    def _submit_agent_request(
+        self,
+        prepared: PreparedUtterance,
+        request: UtteranceRequest,
+        *,
+        precreated: bool,
+    ) -> UtteranceResponse:
         agent_executor = prepared.executor
         assert self.environment.is_agent_executor(agent_executor)
         include_profile_agents = self._profile_context_enabled(
@@ -134,7 +184,7 @@ class UtteranceService:
         )
 
         if self.calendar_request_detector(prepared.effective_text):
-            self.run_state.store_run(self._running_run_record(prepared))
+            self._record_running_run(prepared, precreated=precreated)
             self.background_launcher(
                 self.execution_service.run_calendar_adapter,
                 (prepared.run_id, prepared.effective_text),
@@ -143,17 +193,16 @@ class UtteranceService:
 
         guardrail_status, guardrail_message = self.environment.evaluate_runtime_guardrails(prepared.effective_text)
         if guardrail_status == "reject":
-            self.run_state.store_run(
-                self._rejected_run_record(
-                    prepared,
-                    summary=guardrail_message,
-                    message=guardrail_message,
-                    plan=None,
-                )
+            self._record_rejected_run(
+                prepared,
+                summary=guardrail_message,
+                message=guardrail_message,
+                plan=None,
+                precreated=precreated,
             )
             return self._rejected_response(prepared.run_id, guardrail_message)
 
-        self.run_state.store_run(self._running_run_record(prepared))
+        self._record_running_run(prepared, precreated=precreated)
         self.background_launcher(
             self.execution_service.run_agent,
             (
@@ -199,21 +248,20 @@ class UtteranceService:
             return None
         return context.codex_model or self.environment.codex_model_override or None
 
-    def _submit_local_request(self, prepared: PreparedUtterance) -> UtteranceResponse:
+    def _submit_local_request(self, prepared: PreparedUtterance, *, precreated: bool) -> UtteranceResponse:
         plan = self.plan_builder(prepared.effective_text)
         allowed, message = self.plan_validator(plan)
         if not allowed:
-            self.run_state.store_run(
-                self._rejected_run_record(
-                    prepared,
-                    summary=f"Rejected by policy: {message}",
-                    message=message,
-                    plan=plan,
-                )
+            self._record_rejected_run(
+                prepared,
+                summary=f"Rejected by policy: {message}",
+                message=message,
+                plan=plan,
+                precreated=precreated,
             )
             return self._rejected_response(prepared.run_id, message)
 
-        self.run_state.store_run(self._running_run_record(prepared, plan=plan))
+        self._record_running_run(prepared, plan=plan, precreated=precreated)
         self.background_launcher(
             self.execution_service.run_local_plan,
             (prepared.run_id, plan, prepared.workdir),
@@ -241,6 +289,62 @@ class UtteranceService:
             events=[],
             summary="Run started",
         )
+
+    def _record_running_run(
+        self,
+        prepared: PreparedUtterance,
+        *,
+        plan: ActionPlan | None = None,
+        precreated: bool,
+    ) -> None:
+        if not precreated:
+            self.run_state.store_run(self._running_run_record(prepared, plan=plan))
+            return
+        self.run_state.append_activity_event(
+            prepared.run_id,
+            stage="transcribing",
+            title="Transcribed",
+            display_message="Audio transcription complete.",
+            event_type="activity.completed",
+        )
+        self.run_state.update_run_start_metadata(
+            prepared.run_id,
+            executor=prepared.executor,
+            utterance_text=prepared.display_text,
+            working_directory=str(prepared.workdir),
+            plan=plan,
+            summary="Run started",
+        )
+
+    def _record_rejected_run(
+        self,
+        prepared: PreparedUtterance,
+        *,
+        summary: str,
+        message: str,
+        plan: ActionPlan | None,
+        precreated: bool,
+    ) -> None:
+        if not precreated:
+            self.run_state.store_run(
+                self._rejected_run_record(
+                    prepared,
+                    summary=summary,
+                    message=message,
+                    plan=plan,
+                )
+            )
+            return
+        self.run_state.update_run_start_metadata(
+            prepared.run_id,
+            executor=prepared.executor,
+            utterance_text=prepared.display_text,
+            working_directory=str(prepared.workdir),
+            plan=plan,
+            summary=summary,
+        )
+        self.run_state.append_event(prepared.run_id, ExecutionEvent(type="run.failed", message=message))
+        self.run_state.set_run_status(prepared.run_id, "rejected", summary)
 
     @staticmethod
     def _rejected_run_record(

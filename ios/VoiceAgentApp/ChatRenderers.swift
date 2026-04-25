@@ -61,7 +61,7 @@ struct MessageBubble: View {
         if isLiveActivity {
             LiveActivityCard(text: message.text)
         } else {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(segments) { segment in
                     switch segment.kind {
                     case .markdown:
@@ -202,7 +202,7 @@ private struct ExpandableMarkdownBlock: View {
     var body: some View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if Self.shouldCollapse(trimmed, isUser: isUser) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 if expanded {
                     MarkdownText(text: trimmed, isUser: isUser)
                 } else {
@@ -342,7 +342,7 @@ private struct SectionCard: View {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         let isLong = trimmed.count > 280 || trimmed.contains("\n\n")
         let style = sectionStyle
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: style.icon)
                     .font(.caption2.weight(.semibold))
@@ -628,13 +628,51 @@ struct MessageSegment: Identifiable {
         case emailDigest(items: [EmailDigestItem])
     }
 
-    let id = UUID()
+    let id: String
     let kind: Kind
     let content: String
+
+    init(kind: Kind, content: String, id: String? = nil) {
+        self.kind = kind
+        self.content = content
+        self.id = id ?? Self.stableIdentity(for: kind, content: content)
+    }
+
+    private static func stableIdentity(for kind: Kind, content: String) -> String {
+        let kindSeed: String
+        switch kind {
+        case .markdown:
+            kindSeed = "markdown"
+        case let .code(language):
+            kindSeed = "code:\(language ?? "")"
+        case .status:
+            kindSeed = "status"
+        case let .image(url):
+            kindSeed = "image:\(url)"
+        case let .section(title, _):
+            kindSeed = "section:\(title)"
+        case let .artifact(item):
+            kindSeed = "artifact:\(item.id)"
+        case let .agenda(items):
+            kindSeed = "agenda:\(items.map(\.id).joined(separator: "|"))"
+        case let .emailDigest(items):
+            kindSeed = "email:\(items.map(\.id).joined(separator: "|"))"
+        }
+        return "\(kindSeed):\(stableHash(content))"
+    }
+
+    private static func stableHash(_ value: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
+    }
 }
 
 struct EmailDigestItem: Identifiable {
-    let id = UUID()
+    var id: String { "\(receivedAt)|\(subject)|\(sender ?? "")" }
     let receivedAt: String
     let subject: String
     let sender: String?
@@ -685,7 +723,7 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
         if !envelope.agendaItems.isEmpty {
             segments.append(MessageSegment(kind: .agenda(items: envelope.agendaItems), content: "agenda"))
         }
-        return segments
+        return segmentsWithUniqueStableIDs(segments)
     }
 
     var remaining = massageForDisplay ? massageAssistantTextForDisplay(text) : text
@@ -708,7 +746,7 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
         }
         segments.append(MessageSegment(kind: .agenda(items: agendaItems), content: "agenda"))
         segments.append(contentsOf: inlineMediaSegments)
-        return segments
+        return segmentsWithUniqueStableIDs(segments)
     }
 
     if let emails = parseEmailDigestItems(from: remaining), !emails.isEmpty {
@@ -722,7 +760,7 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
         }
         segments.append(MessageSegment(kind: .emailDigest(items: emails), content: "emails"))
         segments.append(contentsOf: inlineMediaSegments)
-        return segments
+        return segmentsWithUniqueStableIDs(segments)
     }
 
     var remainingSlice = remaining[...]
@@ -740,7 +778,7 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
                 segments.append(MessageSegment(kind: .markdown, content: tail))
             }
             segments.append(contentsOf: inlineMediaSegments)
-            return segments
+            return segmentsWithUniqueStableIDs(segments)
         }
 
         var code = String(afterOpen[..<close.lowerBound])
@@ -765,7 +803,17 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
         segments.append(MessageSegment(kind: .markdown, content: tail))
     }
     segments.append(contentsOf: inlineMediaSegments)
-    return segments
+    return segmentsWithUniqueStableIDs(segments)
+}
+
+private func segmentsWithUniqueStableIDs(_ segments: [MessageSegment]) -> [MessageSegment] {
+    var occurrences: [String: Int] = [:]
+    return segments.map { segment in
+        let seen = occurrences[segment.id, default: 0]
+        occurrences[segment.id] = seen + 1
+        guard seen > 0 else { return segment }
+        return MessageSegment(kind: segment.kind, content: segment.content, id: "\(segment.id).\(seen + 1)")
+    }
 }
 
 private func parseSpecializedSectionSegments(title: String, body: String) -> [MessageSegment] {
@@ -1211,18 +1259,28 @@ private func normalizeCommonSectionHeadings(_ text: String) -> String {
     var out = text
     out = regexReplace(
         out,
-        pattern: #"(?m)(What I Did|Result|Next Step|Output)\s*:?\s*([A-Z])"#,
-        with: "$1\n$2"
+        pattern: #"(?m)^\s*(What I Did|Result|Next Step|Output)\s*:\s*(\S.+)$"#,
+        with: "## $1\n\n$2"
     )
     out = regexReplace(
         out,
-        pattern: #"(?m)^(What I Did|Result|Next Step|Output)\s*:\s*(.+)$"#,
-        with: "## $1\n$2"
+        pattern: #"(?m)^\s*(What I Did|Result|Next Step|Output)\s+([A-Z][^\n]*)$"#,
+        with: "## $1\n\n$2"
     )
     out = regexReplace(
         out,
-        pattern: #"(?m)^(What I Did|Result|Next Step|Output)\s*:?\s*$"#,
+        pattern: #"(?m)^\s*(What I Did|Result|Next Step|Output)([A-Z][^\n]*)$"#,
+        with: "## $1\n\n$2"
+    )
+    out = regexReplace(
+        out,
+        pattern: #"(?m)^\s*(What I Did|Result|Next Step|Output)\s*:?\s*$"#,
         with: "## $1"
+    )
+    out = regexReplace(
+        out,
+        pattern: #"(?m)^(## (?:What I Did|Result|Next Step|Output))\n(?!\n)"#,
+        with: "$1\n\n"
     )
     return out
 }
@@ -1276,4 +1334,16 @@ private func regexReplace(
     }
     let range = NSRange(input.startIndex..., in: input)
     return regex.stringByReplacingMatches(in: input, options: [], range: range, withTemplate: template)
+}
+
+func _test_massagedAssistantTextForDisplay(_ text: String) -> String {
+    massageAssistantTextForDisplay(text)
+}
+
+func _test_messageSegmentIDs(_ text: String, serverURL: String) -> [String] {
+    parseSegments(from: text, serverURL: serverURL).map(\.id)
+}
+
+func _test_messageSegmentContents(_ text: String, serverURL: String) -> [String] {
+    parseSegments(from: text, serverURL: serverURL).map(\.content)
 }

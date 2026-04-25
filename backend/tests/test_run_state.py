@@ -55,6 +55,66 @@ def test_run_state_assigns_monotonic_event_sequences(tmp_path) -> None:
     assert [event.seq for event in loaded.events] == [0, 1]
 
 
+def test_run_state_returns_paginated_event_windows(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    state = RunState(run_store, max_event_message_chars=16000)
+    state.store_run(
+        RunRecord(
+            run_id="run-page",
+            session_id="session-1",
+            executor="local",
+            utterance_text="hello",
+            status="running",
+            summary="running",
+            events=[],
+        )
+    )
+    for index in range(6):
+        state.append_event("run-page", ExecutionEvent(type="log.message", message=f"event {index}"))
+
+    first = state.event_page("run-page", limit=2)
+
+    assert first is not None
+    assert first.total_count == 6
+    assert first.has_more_before is True
+    assert first.has_more_after is False
+    assert first.next_before_seq == 4
+    assert first.next_after_seq == 5
+    assert [event.message for event in first.events] == ["event 4", "event 5"]
+
+    second = state.event_page("run-page", limit=2, before_seq=first.next_before_seq)
+
+    assert second is not None
+    assert second.has_more_before is True
+    assert second.has_more_after is True
+    assert second.next_before_seq == 2
+    assert second.next_after_seq == 3
+    assert [event.message for event in second.events] == ["event 2", "event 3"]
+
+    final = state.event_page("run-page", limit=2, before_seq=second.next_before_seq)
+
+    assert final is not None
+    assert final.has_more_before is False
+    assert final.has_more_after is True
+    assert final.next_before_seq == 0
+    assert final.next_after_seq == 1
+    assert [event.message for event in final.events] == ["event 0", "event 1"]
+
+    forward = state.event_page("run-page", limit=2, after_seq=1)
+
+    assert forward is not None
+    assert forward.has_more_before is True
+    assert forward.has_more_after is True
+    assert [event.message for event in forward.events] == ["event 2", "event 3"]
+
+    reloaded = RunState(run_store, max_event_message_chars=16000)
+    persisted = reloaded.event_page("run-page", limit=3, before_seq=4)
+
+    assert persisted is not None
+    assert persisted.total_count == 6
+    assert [event.message for event in persisted.events] == ["event 1", "event 2", "event 3"]
+
+
 def test_store_run_persists_initial_events(tmp_path) -> None:
     run_store = RunStore(tmp_path / "runs.db")
     state = RunState(run_store, max_event_message_chars=16000)

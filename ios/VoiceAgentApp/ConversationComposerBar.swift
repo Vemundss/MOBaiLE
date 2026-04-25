@@ -51,7 +51,7 @@ struct ConversationComposerBar: View {
 
             if let attachmentFailureNotice = vm.draftAttachmentFailureNotice, !vm.isLoading {
                 InlineNoticeCard(
-                    title: "Attachment upload failed",
+                    title: "Attachment needs attention",
                     message: attachmentFailureNotice,
                     tint: .red,
                     systemImage: "exclamationmark.triangle.fill",
@@ -71,6 +71,17 @@ struct ConversationComposerBar: View {
                 }
 
                 if !vm.draftAttachments.isEmpty && !vm.isRecording {
+                    if let attachmentSummary = vm.draftAttachmentSummaryText {
+                        HStack {
+                            ComposerMetaPill(
+                                text: attachmentSummary,
+                                systemImage: "paperclip",
+                                tint: vm.hasInvalidDraftAttachments ? .red : .secondary
+                            )
+                            Spacer(minLength: 0)
+                        }
+                    }
+
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(vm.draftAttachments) { attachment in
@@ -277,7 +288,7 @@ struct ConversationComposerBar: View {
                 size: 46,
                 iconSize: 13,
                 weight: .semibold,
-                accessibilityLabel: vm.isUploadingAttachments ? "Cancel upload" : "Cancel run",
+                accessibilityLabel: vm.activeOperationCancelAccessibilityLabel,
                 isDisabled: false,
                 opacity: 1
             ) {

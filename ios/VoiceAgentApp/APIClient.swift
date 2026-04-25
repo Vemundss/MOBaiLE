@@ -156,10 +156,19 @@ final class APIClient {
     func fetchRun(
         serverURL: String,
         token: String,
-        runID: String
+        runID: String,
+        eventsLimit: Int? = nil
     ) async throws -> RunRecord {
         try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
-            guard let url = URL(string: baseURL + "/v1/runs/\(runID)") else {
+            guard var components = URLComponents(string: baseURL + "/v1/runs/\(runID)") else {
+                throw APIError.invalidURL
+            }
+            if let eventsLimit {
+                components.queryItems = [
+                    URLQueryItem(name: "events_limit", value: String(max(0, eventsLimit)))
+                ]
+            }
+            guard let url = components.url else {
                 throw APIError.invalidURL
             }
 
@@ -171,6 +180,43 @@ final class APIClient {
             let (data, response) = try await URLSession.shared.data(for: request)
             try validate(response: response, data: data)
             return try jsonDecoder.decode(RunRecord.self, from: data)
+        }
+    }
+
+    func fetchRunEventsPage(
+        serverURL: String,
+        token: String,
+        runID: String,
+        limit: Int = 100,
+        beforeSeq: Int? = nil,
+        afterSeq: Int? = nil
+    ) async throws -> RunEventsPage {
+        try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
+            guard var components = URLComponents(string: baseURL + "/v1/runs/\(runID)/events-page") else {
+                throw APIError.invalidURL
+            }
+            var queryItems = [
+                URLQueryItem(name: "limit", value: String(limit))
+            ]
+            if let beforeSeq {
+                queryItems.append(URLQueryItem(name: "before_seq", value: String(beforeSeq)))
+            }
+            if let afterSeq {
+                queryItems.append(URLQueryItem(name: "after_seq", value: String(afterSeq)))
+            }
+            components.queryItems = queryItems
+            guard let url = components.url else {
+                throw APIError.invalidURL
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = 10
+            request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try jsonDecoder.decode(RunEventsPage.self, from: data)
         }
     }
 
@@ -387,6 +433,7 @@ final class APIClient {
         draftText: String,
         attachments: [ChatArtifact],
         audioFileURL: URL,
+        runID: String? = nil,
         registerCancellation: ((@escaping () -> Void) -> Void)? = nil
     ) async throws -> AudioRunResponse {
         try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
@@ -418,6 +465,10 @@ final class APIClient {
             let trimmedThreadID = (threadID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedThreadID.isEmpty {
                 fields["thread_id"] = trimmedThreadID
+            }
+            let trimmedRunID = (runID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedRunID.isEmpty {
+                fields["run_id"] = trimmedRunID
             }
             let trimmedDraftText = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedDraftText.isEmpty {

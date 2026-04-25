@@ -72,6 +72,16 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Highlights"].exists)
     }
 
+    func testConversationPreviewOpensWorkspaceBrowser() {
+        let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace")
+
+        XCTAssertTrue(app.navigationBars.staticTexts["Workspace"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Future runs"].exists)
+        XCTAssertTrue(app.staticTexts["Selected workspace"].exists)
+        XCTAssertTrue(app.staticTexts["Browsing"].exists)
+        XCTAssertTrue(app.buttons["Use for Future Runs"].exists)
+    }
+
     func testLiveActivityPreviewShowsStreamingCard() {
         let app = launchApp(previewScenario: "live-activity")
 

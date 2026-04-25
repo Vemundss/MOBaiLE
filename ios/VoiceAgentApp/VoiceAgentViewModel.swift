@@ -60,6 +60,27 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         var shouldSpeakReply = false
     }
 
+    enum VoiceInputPhase: Equatable {
+        case idle
+        case transcribing
+        case uploadingAudio
+
+        var isActive: Bool {
+            self != .idle
+        }
+
+        var cancelAccessibilityLabel: String {
+            switch self {
+            case .idle:
+                return "Cancel run"
+            case .transcribing:
+                return "Cancel transcription"
+            case .uploadingAudio:
+                return "Cancel audio upload"
+            }
+        }
+    }
+
     @Published var serverURL: String = ""
     @Published var apiToken: String = ""
     @Published var sessionID: String = "iphone-app"
@@ -89,6 +110,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var errorText: String = ""
     @Published var events: [ExecutionEvent] = []
     @Published private(set) var fetchedRunDiagnostics: RunDiagnostics?
+    @Published private(set) var pagedRunLogEvents: [ExecutionEvent] = []
+    @Published private(set) var canLoadOlderRunLogEvents = false
+    @Published private(set) var isLoadingRunLogEvents = false
+    @Published private(set) var runLogErrorText: String = ""
     @Published var conversation: [ConversationMessage] = []
     @Published var resolvedWorkingDirectory: String = ""
     @Published var isRecording: Bool = false
@@ -135,6 +160,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var autoSendAfterSilenceEnabled: Bool = false
     @Published var autoSendAfterSilenceSeconds: String = "1.2"
     @Published private(set) var voiceInteractionNoticeText: String?
+    @Published private(set) var activeVoiceInputPhase: VoiceInputPhase = .idle
 
     let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
@@ -153,11 +179,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var isRestoringThreadState = false
     private var activeAttachmentUploadCancellation: (() -> Void)?
     private var activeVoiceInputCancellation: (() -> Void)?
+    private var activeVoiceInputRunID: String?
+    private var didCancelAttachmentUpload = false
     private var didCancelVoiceInputPreparation = false
     private var pendingDraftPersistenceTask: Task<Void, Never>?
     private var backendTranscribeProvider: String = "unknown"
     private var backendTranscribeReady = false
     private var observedRunContexts: [String: ObservedRunContext] = [:]
+    private var pagedRunLogRunID: String?
+    private var nextRunLogBeforeSeq: Int?
     var lastHydratedSessionContextID: String?
     var lastHydratedSessionContextServerURL: String?
     private var voiceModeThreadID: UUID?
@@ -170,6 +200,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     static let defaultCodexModelOptions = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.1"]
     static let defaultClaudeModelOptions = ["claude-sonnet-4-5"]
     static let globalAgentRuntimeSettingIDs: Set<String> = ["profile_agents", "profile_memory"]
+
+    private var attachmentDraftService: AttachmentDraftService {
+        AttachmentDraftService(draftDirectory: draftAttachmentDirectory)
+    }
 
     var currentRunDiagnostics: RunDiagnostics? {
         let activeRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -192,6 +226,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             summary: summaryText,
             events: events
         )
+    }
+
+    var visibleRunLogEvents: [ExecutionEvent] {
+        let activeRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if pagedRunLogRunID == activeRunID, !pagedRunLogEvents.isEmpty || canLoadOlderRunLogEvents {
+            return pagedRunLogEvents
+        }
+        return events
     }
 
     deinit {
@@ -383,6 +425,86 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
+    func refreshRunLogsIfPossible() async {
+        await refreshRunDiagnosticsIfPossible()
+        let activeRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !activeRunID.isEmpty else {
+            resetRunLogPagination()
+            return
+        }
+        guard PreviewScenario.current == nil else {
+            resetRunLogPagination()
+            return
+        }
+        let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedServerURL.isEmpty, !token.isEmpty else {
+            resetRunLogPagination()
+            return
+        }
+
+        isLoadingRunLogEvents = true
+        defer { isLoadingRunLogEvents = false }
+        runLogErrorText = ""
+        do {
+            let page = try await client.fetchRunEventsPage(
+                serverURL: normalizedServerURL,
+                token: token,
+                runID: activeRunID,
+                limit: 100
+            )
+            guard runID.trimmingCharacters(in: .whitespacesAndNewlines) == activeRunID else { return }
+            pagedRunLogRunID = activeRunID
+            pagedRunLogEvents = page.events
+            canLoadOlderRunLogEvents = page.hasMoreBefore
+            nextRunLogBeforeSeq = page.nextBeforeSeq
+        } catch {
+            guard runID.trimmingCharacters(in: .whitespacesAndNewlines) == activeRunID else { return }
+            runLogErrorText = error.localizedDescription
+        }
+    }
+
+    func loadOlderRunLogsIfPossible() async {
+        let activeRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard pagedRunLogRunID == activeRunID,
+              canLoadOlderRunLogEvents,
+              let beforeSeq = nextRunLogBeforeSeq else {
+            return
+        }
+        let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedServerURL.isEmpty, !token.isEmpty else { return }
+
+        isLoadingRunLogEvents = true
+        defer { isLoadingRunLogEvents = false }
+        runLogErrorText = ""
+        do {
+            let page = try await client.fetchRunEventsPage(
+                serverURL: normalizedServerURL,
+                token: token,
+                runID: activeRunID,
+                limit: 100,
+                beforeSeq: beforeSeq
+            )
+            guard runID.trimmingCharacters(in: .whitespacesAndNewlines) == activeRunID else { return }
+            let existingIDs = Set(pagedRunLogEvents.map(\.id))
+            let olderEvents = page.events.filter { !existingIDs.contains($0.id) }
+            pagedRunLogEvents = olderEvents + pagedRunLogEvents
+            canLoadOlderRunLogEvents = page.hasMoreBefore
+            nextRunLogBeforeSeq = page.nextBeforeSeq
+        } catch {
+            guard runID.trimmingCharacters(in: .whitespacesAndNewlines) == activeRunID else { return }
+            runLogErrorText = error.localizedDescription
+        }
+    }
+
+    private func resetRunLogPagination(for runID: String? = nil) {
+        pagedRunLogRunID = runID
+        pagedRunLogEvents = []
+        canLoadOlderRunLogEvents = false
+        nextRunLogBeforeSeq = nil
+        isLoadingRunLogEvents = false
+        runLogErrorText = ""
+    }
+
     func sendPrompt() async {
         guard !needsConnectionRepair else {
             statusText = "Connection needs repair"
@@ -476,7 +598,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         let run = try await client.fetchRun(
                             serverURL: normalizedServerURL,
                             token: apiToken,
-                            runID: activeRun
+                            runID: activeRun,
+                            eventsLimit: 0
                         )
                         if let activeThreadID {
                             applyTerminalRunStateIfNeeded(run, threadID: activeThreadID)
@@ -524,6 +647,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         let originThreadID = activeThreadID
         let stagedDraftText = promptText
         let stagedDraftAttachments = draftAttachments
+        guard validateDraftAttachmentsBeforeSend(stagedDraftAttachments) else {
+            return
+        }
         didCompleteRun = false
         isRecording = false
         recordingStartedAt = nil
@@ -543,7 +669,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         activeVoiceInputCancellation = nil
         defer {
             activeVoiceInputCancellation = nil
+            activeVoiceInputRunID = nil
             didCancelVoiceInputPreparation = false
+            activeVoiceInputPhase = .idle
         }
 
         guard let audioFile = recorder.stop() else {
@@ -556,22 +684,30 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
 
         do {
-            let localTranscription: SpeechTranscriptionResult?
+            var localTranscription: SpeechTranscriptionResult?
             var startedRunID = ""
             do {
+                activeVoiceInputPhase = .transcribing
                 runPhaseText = "Transcribing"
                 statusText = "Transcribing on iPhone..."
                 localTranscription = try await speechTranscriber.transcribeFile(
                     at: audioFile,
                     registerCancellation: { [weak self] cancel in
                         Task { @MainActor in
-                            self?.activeVoiceInputCancellation = cancel
+                            if self?.didCancelVoiceInputPreparation == true {
+                                cancel()
+                            } else {
+                                self?.activeVoiceInputCancellation = cancel
+                            }
                         }
                     }
                 )
                 activeVoiceInputCancellation = nil
+                activeVoiceInputPhase = .idle
+                try checkVoiceInputCancellation()
             } catch {
                 activeVoiceInputCancellation = nil
+                activeVoiceInputPhase = .idle
                 if didCancelVoiceInputPreparation {
                     throw error
                 }
@@ -588,6 +724,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     transcriptText: localTranscription.text
                 )
                 let uploadedAttachments = try await uploadDraftAttachmentsIfNeeded(stagedDraftAttachments)
+                try checkVoiceInputCancellation()
                 let explicitAttachments = uploadedAttachments.map(\.artifact)
                 if let originThreadID {
                     updateThreadMetadata(
@@ -650,6 +787,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 if activeThreadID == originThreadID {
                     runPhaseText = "Uploading"
                 }
+                try attachmentDraftService.validateAudioFileForUpload(audioFile)
                 if let originThreadID {
                     updateThreadMetadata(
                         threadID: originThreadID,
@@ -662,7 +800,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     statusText = "Uploading audio to backend..."
                 }
                 let uploadedAttachments = try await uploadDraftAttachmentsIfNeeded(stagedDraftAttachments)
+                try checkVoiceInputCancellation()
                 let explicitAttachments = uploadedAttachments.map(\.artifact)
+                activeVoiceInputPhase = .uploadingAudio
+                let pendingAudioRunID = UUID().uuidString
+                activeVoiceInputRunID = pendingAudioRunID
                 let response = try await client.createAudioRun(
                     serverURL: normalizedServerURL,
                     token: apiToken,
@@ -675,13 +817,21 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     draftText: stagedDraftText,
                     attachments: explicitAttachments,
                     audioFileURL: audioFile,
+                    runID: pendingAudioRunID,
                     registerCancellation: { [weak self] cancel in
                         Task { @MainActor in
-                            self?.activeVoiceInputCancellation = cancel
+                            if self?.didCancelVoiceInputPreparation == true {
+                                cancel()
+                            } else {
+                                self?.activeVoiceInputCancellation = cancel
+                            }
                         }
                     }
                 )
                 activeVoiceInputCancellation = nil
+                activeVoiceInputRunID = nil
+                activeVoiceInputPhase = .idle
+                try checkVoiceInputCancellation()
                 let utteranceText = composeVoiceUtteranceText(
                     draftText: stagedDraftText,
                     transcriptText: response.transcriptText
@@ -957,14 +1107,30 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
         guard !failedAttachments.isEmpty else { return nil }
         if failedAttachments.count == 1, let attachment = failedAttachments.first {
-            return "\(attachment.fileName) failed to upload. Check the connection and send again, or remove the file."
+            if let failure = draftAttachmentTransferState(for: attachment).failureMessage, !failure.isEmpty {
+                return failure
+            }
+            return "\(attachment.fileName) needs attention. Check the file and send again, or remove it."
         }
-        return "\(failedAttachments.count) attachments failed to upload. Check the connection and send again, or remove the files."
+        return "\(failedAttachments.count) attachments need attention. Check the files and send again, or remove them."
+    }
+
+    var draftAttachmentSummaryText: String? {
+        attachmentDraftService.summaryText(for: draftAttachments)
+    }
+
+    var hasInvalidDraftAttachments: Bool {
+        draftAttachments.contains { attachment in
+            if case .failed = draftAttachmentTransferState(for: attachment) {
+                return true
+            }
+            return false
+        }
     }
 
     func addDraftAttachment(fromImportedFile sourceURL: URL) async {
         do {
-            let attachment = try stageImportedAttachment(from: sourceURL)
+            let attachment = try attachmentDraftService.stageImportedAttachment(from: sourceURL)
             appendDraftAttachment(attachment)
         } catch {
             errorText = "Couldn't add file: \(error.localizedDescription)"
@@ -973,7 +1139,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func addDraftAttachment(data: Data, fileName: String, mimeType: String?) async {
         do {
-            let attachment = try stageAttachmentData(data, fileName: fileName, mimeType: mimeType)
+            let attachment = try attachmentDraftService.stageAttachmentData(data, fileName: fileName, mimeType: mimeType)
             appendDraftAttachment(attachment)
         } catch {
             errorText = "Couldn't add attachment: \(error.localizedDescription)"
@@ -1024,6 +1190,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     func observeRun(runID: String, threadID: UUID?) async throws {
         guard let threadID else { return }
         ensureObservedRunContext(runID: runID, threadID: threadID)
+        resetRunLogPagination(for: runID)
         setThreadPendingHumanUnblock(threadID: threadID, request: nil, persist: false)
         updateThreadMetadata(threadID: threadID, runID: runID, statusText: "Running...", persist: true)
         if activeThreadID == threadID {
@@ -1055,7 +1222,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 let run = try await client.fetchRun(
                     serverURL: normalizedServerURL,
                     token: apiToken,
-                    runID: runID
+                    runID: runID,
+                    eventsLimit: 0
                 )
                 updateThreadMetadata(
                     threadID: threadID,
@@ -1144,7 +1312,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     let run = try await client.fetchRun(
                         serverURL: normalizedServerURL,
                         token: apiToken,
-                        runID: runID
+                        runID: runID,
+                        eventsLimit: 0
                     )
                     applyTerminalRunStateIfNeeded(run, threadID: threadID)
                     return
@@ -1197,12 +1366,28 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     var isUploadingAttachments: Bool {
-        activeAttachmentUploadCancellation != nil
+        activeAttachmentUploadCancellation != nil ||
+            draftAttachmentTransferStates.values.contains { $0.isUploading }
+    }
+
+    var isPreparingVoiceInput: Bool {
+        activeVoiceInputPhase.isActive
+    }
+
+    var activeOperationCancelAccessibilityLabel: String {
+        if isUploadingAttachments {
+            return "Cancel upload"
+        }
+        if activeVoiceInputPhase.isActive {
+            return activeVoiceInputPhase.cancelAccessibilityLabel
+        }
+        return "Cancel run"
     }
 
     var canCancelActiveOperation: Bool {
         isLoading && (
             isUploadingAttachments ||
+            activeVoiceInputPhase.isActive ||
             activeVoiceInputCancellation != nil ||
             isRunActivelyObserved(runID)
         )
@@ -1236,10 +1421,19 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func uploadDraftAttachmentsIfNeeded(_ attachments: [DraftAttachment]) async throws -> [UploadResponse] {
         guard !attachments.isEmpty else { return [] }
+        try attachmentDraftService.validateAttachmentsForSend(attachments)
         activeAttachmentUploadCancellation = nil
+        didCancelAttachmentUpload = false
+        defer {
+            activeAttachmentUploadCancellation = nil
+            didCancelAttachmentUpload = false
+        }
         clearDraftAttachmentTransferStates(for: attachments)
         var uploaded: [UploadResponse] = []
         for (index, attachment) in attachments.enumerated() {
+            if didCancelAttachmentUpload {
+                throw CancellationError()
+            }
             if attachments.count == 1 {
                 statusText = "Uploading attachment..."
             } else {
@@ -1264,7 +1458,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     },
                     registerCancellation: { [weak self] cancel in
                         Task { @MainActor in
-                            self?.activeAttachmentUploadCancellation = cancel
+                            if self?.didCancelAttachmentUpload == true {
+                                cancel()
+                            } else {
+                                self?.activeAttachmentUploadCancellation = cancel
+                            }
                         }
                     }
                 )
@@ -1280,11 +1478,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 )
                 throw error
             }
+            if didCancelAttachmentUpload {
+                clearDraftAttachmentTransferState(for: attachment.id)
+                throw CancellationError()
+            }
             activeAttachmentUploadCancellation = nil
             clearDraftAttachmentTransferState(for: attachment.id)
             uploaded.append(response)
         }
-        activeAttachmentUploadCancellation = nil
         return uploaded
     }
 
@@ -1295,6 +1496,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     ) async {
         let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !stagedAttachments.isEmpty || !existingAttachments.isEmpty else { return }
+        guard validateDraftAttachmentsBeforeSend(stagedAttachments) else {
+            return
+        }
         let originThreadID = activeThreadID
 
         didCompleteRun = false
@@ -1471,40 +1675,6 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         )
     }
 
-    private func stageImportedAttachment(from sourceURL: URL) throws -> DraftAttachment {
-        let startedAccessing = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if startedAccessing {
-                sourceURL.stopAccessingSecurityScopedResource()
-            }
-        }
-        let fileName = sourceURL.lastPathComponent.isEmpty ? "attachment" : sourceURL.lastPathComponent
-        let resourceValues = try? sourceURL.resourceValues(forKeys: [.contentTypeKey])
-        let mimeType = resourceValues?.contentType?.preferredMIMEType
-        let data = try Data(contentsOf: sourceURL)
-        return try stageAttachmentData(data, fileName: fileName, mimeType: mimeType)
-    }
-
-    private func stageAttachmentData(_ data: Data, fileName: String, mimeType: String?) throws -> DraftAttachment {
-        try FileManager.default.createDirectory(
-            at: draftAttachmentDirectory,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
-        let safeName = sanitizeAttachmentFileName(fileName)
-        let targetURL = draftAttachmentDirectory.appendingPathComponent("\(UUID().uuidString)-\(safeName)")
-        try data.write(to: targetURL, options: .atomic)
-        let resolvedMimeType = inferAttachmentMimeType(fileName: safeName, fallback: mimeType)
-        return DraftAttachment(
-            id: UUID(),
-            localFileURL: targetURL,
-            fileName: safeName,
-            mimeType: resolvedMimeType,
-            kind: inferAttachmentKind(fileName: safeName, mimeType: resolvedMimeType),
-            sizeBytes: Int64(data.count)
-        )
-    }
-
     private func appendDraftAttachment(_ attachment: DraftAttachment) {
         if draftAttachments.contains(where: {
             $0.fileName == attachment.fileName && $0.sizeBytes == attachment.sizeBytes
@@ -1545,13 +1715,23 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         persistThreadSnapshot(threadID: threadID)
     }
 
-    private func sanitizeAttachmentFileName(_ rawName: String) -> String {
-        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
-        let cleaned = trimmed.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
-        let collapsed = String(cleaned).replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
-        let final = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
-        return final.isEmpty ? "attachment" : final
+    private func validateDraftAttachmentsBeforeSend(_ attachments: [DraftAttachment]) -> Bool {
+        guard !attachments.isEmpty else { return true }
+        clearDraftAttachmentTransferStates(for: attachments)
+        for attachment in attachments {
+            do {
+                try attachmentDraftService.validateAttachmentsForSend([attachment])
+            } catch {
+                setDraftAttachmentTransferState(
+                    .failed(message: summarizedAttachmentTransferError(error)),
+                    for: attachment.id
+                )
+                errorText = error.localizedDescription
+                statusText = "Attachment needs attention"
+                return false
+            }
+        }
+        return true
     }
 
     private func configureRemoteCommandsIfNeeded() {
@@ -3430,23 +3610,51 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     private func cancelActiveAttachmentUploadIfNeeded() {
-        guard let cancel = activeAttachmentUploadCancellation else { return }
+        guard isUploadingAttachments else { return }
         errorText = ""
         statusText = "Cancelling upload..."
         runPhaseText = "Cancelling"
+        didCancelAttachmentUpload = true
+        let cancel = activeAttachmentUploadCancellation
         activeAttachmentUploadCancellation = nil
-        cancel()
+        cancel?()
     }
 
     private func cancelActiveVoiceInputIfNeeded() -> Bool {
-        guard let cancel = activeVoiceInputCancellation else { return false }
+        guard activeVoiceInputPhase.isActive || activeVoiceInputCancellation != nil else { return false }
         errorText = ""
         statusText = "Cancelling voice input..."
         runPhaseText = "Cancelling"
         didCancelVoiceInputPreparation = true
+        activeVoiceInputPhase = .idle
+        let cancel = activeVoiceInputCancellation
+        let backendRunID = activeVoiceInputRunID?.trimmingCharacters(in: .whitespacesAndNewlines)
         activeVoiceInputCancellation = nil
-        cancel()
+        activeVoiceInputRunID = nil
+        cancel?()
+        if let backendRunID, !backendRunID.isEmpty {
+            cancelBackendVoiceInputRun(runID: backendRunID)
+        }
         return true
+    }
+
+    private func cancelBackendVoiceInputRun(runID: String) {
+        let serverURL = normalizedServerURL
+        let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !serverURL.isEmpty, !token.isEmpty else { return }
+        Task {
+            _ = try? await client.cancelRun(
+                serverURL: serverURL,
+                token: token,
+                runID: runID
+            )
+        }
+    }
+
+    private func checkVoiceInputCancellation() throws {
+        if didCancelVoiceInputPreparation {
+            throw CancellationError()
+        }
     }
 
     private func isAttachmentTransferCancellation(_ error: Error) -> Bool {
@@ -3626,6 +3834,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_composeVoiceUtteranceText(draftText: String, transcriptText: String) -> String {
         composeVoiceUtteranceText(draftText: draftText, transcriptText: transcriptText)
+    }
+
+    func _test_setActiveVoiceInputPhase(_ phase: VoiceInputPhase) {
+        activeVoiceInputPhase = phase
     }
 
     func _test_resolvedSpokenReplyText(runID: String, threadID: UUID, summary: String, status: String) -> String? {

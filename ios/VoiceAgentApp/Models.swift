@@ -493,6 +493,28 @@ struct RunDiagnostics: Decodable {
     }
 }
 
+struct RunEventsPage: Decodable {
+    let runId: String
+    let events: [ExecutionEvent]
+    let limit: Int
+    let totalCount: Int
+    let hasMoreBefore: Bool
+    let hasMoreAfter: Bool
+    let nextBeforeSeq: Int?
+    let nextAfterSeq: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case events
+        case limit
+        case totalCount = "total_count"
+        case hasMoreBefore = "has_more_before"
+        case hasMoreAfter = "has_more_after"
+        case nextBeforeSeq = "next_before_seq"
+        case nextAfterSeq = "next_after_seq"
+    }
+}
+
 extension RunDiagnostics {
     static func derived(
         runId: String,

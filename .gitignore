@@ -12,6 +12,7 @@ backend/data/*
 !backend/data/README.md
 .DS_Store
 backend/logs/
+backend/.mobaile/
 *.xcuserdatad/
 *.xcworkspace/xcuserdata/
 .bundle/

@@ -219,6 +219,51 @@ def test_audio_transcription_runs_outside_event_loop(make_client, monkeypatch):
     assert observed["thread_name"] != threading.current_thread().name
 
 
+def test_audio_run_can_be_cancelled_during_transcription(make_client, monkeypatch):
+    client, token = make_client(provider="mock")
+    module = importlib.import_module("app.main")
+    started = threading.Event()
+    release = threading.Event()
+    observed: dict[str, object] = {}
+
+    def fake_transcribe(**_: object) -> str:
+        started.set()
+        assert release.wait(timeout=5)
+        return "create a hello python script and run it"
+
+    monkeypatch.setattr(module.TRANSCRIBER, "transcribe", fake_transcribe)
+
+    def post_audio() -> None:
+        observed["response"] = client.post(
+            "/v1/audio",
+            headers=auth_headers(token),
+            files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
+            data={"session_id": "audio-cancel", "run_id": "audio-cancel", "executor": "local"},
+        )
+
+    worker = threading.Thread(target=post_audio)
+    worker.start()
+    assert started.wait(timeout=5)
+
+    cancel = client.post("/v1/runs/audio-cancel/cancel", headers=auth_headers(token))
+    assert cancel.status_code == 200
+
+    release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+
+    response = observed["response"]
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "run_cancelled"
+
+    run = client.get("/v1/runs/audio-cancel", headers=auth_headers(token))
+    assert run.status_code == 200
+    payload = run.json()
+    assert payload["status"] == "cancelled"
+    assert "transcribing" in [event["stage"] for event in payload["events"] if event["stage"]]
+    assert "run.cancelled" in [event["type"] for event in payload["events"]]
+
+
 def test_audio_openai_missing_key(make_client):
     client, token = make_client(provider="openai", openai_api_key="")
     resp = client.post(
@@ -228,7 +273,36 @@ def test_audio_openai_missing_key(make_client):
         data={"session_id": "audio2", "executor": "local"},
     )
     assert resp.status_code == 502
-    assert "OPENAI_API_KEY is not set" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "transcription_failed"
+    assert "OPENAI_API_KEY is not set" in detail["message"]
+
+
+def test_audio_unexpected_transcription_failure_marks_precreated_run_failed(make_client, monkeypatch):
+    client, token = make_client(provider="mock")
+    module = importlib.import_module("app.main")
+
+    def fake_transcribe(**_: object) -> str:
+        raise RuntimeError("encoder crashed")
+
+    monkeypatch.setattr(module.TRANSCRIBER, "transcribe", fake_transcribe)
+
+    resp = client.post(
+        "/v1/audio",
+        headers=auth_headers(token),
+        files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
+        data={"session_id": "audio-failed", "run_id": "audio-failed", "executor": "local"},
+    )
+
+    assert resp.status_code == 500
+    detail = resp.json()["detail"]
+    assert detail["code"] == "transcription_failed"
+
+    run = client.get("/v1/runs/audio-failed", headers=auth_headers(token))
+    assert run.status_code == 200
+    payload = run.json()
+    assert payload["status"] == "failed"
+    assert "run.failed" in [event["type"] for event in payload["events"]]
 
 
 def test_audio_rejects_large_payload(make_client):
@@ -240,10 +314,15 @@ def test_audio_rejects_large_payload(make_client):
         "/v1/audio",
         headers=auth_headers(token),
         files={"audio": ("sample.wav", BytesIO(b"more-than-one-byte"), "audio/wav")},
-        data={"session_id": "audio3", "executor": "local"},
+        data={"session_id": "audio3", "run_id": "audio3", "executor": "local"},
     )
     assert resp.status_code == 413
-    assert "audio payload too large" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "audio_too_large"
+    assert "audio payload too large" in detail["message"]
+    run = client.get("/v1/runs/audio3", headers=auth_headers(token))
+    assert run.status_code == 200
+    assert run.json()["status"] == "failed"
 
 
 def test_file_fetch_endpoint(make_client, tmp_path: Path):
@@ -415,7 +494,9 @@ def test_upload_endpoint_rejects_large_file(make_client, tmp_path: Path):
         data={"session_id": "ios-session"},
     )
     assert resp.status_code == 413
-    assert "file payload too large" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "file_too_large"
+    assert "file payload too large" in detail["message"]
 
 
 def test_directory_listing_rejects_outside_allowed_roots(make_client, tmp_path: Path):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -18,15 +19,18 @@ from app.codex_text import (
 )
 from app.execution_service import ExecutionService
 from app.models.schemas import (
+    ApiErrorDetail,
     AudioRunResponse,
     CapabilitiesResponse,
     DirectoryCreateRequest,
     DirectoryCreateResponse,
     DirectoryListingResponse,
+    ExecutionEvent,
     PairExchangeRequest,
     PairExchangeResponse,
     PairRefreshRequest,
     RunDiagnostics,
+    RunEventsPage,
     RunExecutorName,
     RunRecord,
     RunSummary,
@@ -48,6 +52,7 @@ from app.runtime_environment import RuntimeEnvironment, load_env_defaults
 from app.runtime_session_service import RuntimeSessionService
 from app.storage import RunStore
 from app.transcription import Transcriber, TranscriptionError
+from app.upload_limits import read_upload_bytes_limited, validate_upload_content_length
 from app.utterance_service import UtteranceService
 from app.workspace_service import WorkspaceService
 
@@ -150,6 +155,7 @@ def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
 async def create_audio_run(
     session_id: str = Form(...),
     thread_id: str | None = Form(None),
+    run_id: str | None = Form(None),
     audio: UploadFile = File(...),
     executor: RunExecutorName | None = Form(None),
     mode: Literal["assistant", "execute"] = Form("execute"),
@@ -161,22 +167,54 @@ async def create_audio_run(
     response_profile: Literal["guided", "minimal"] = Form("guided"),
 ) -> AudioRunResponse:
     normalized_thread_id = (thread_id or "").strip() or None
+    audio_run_id = (run_id or "").strip() or str(uuid.uuid4())
     attachments = parse_audio_attachments(attachments_json)
-    content_length_header = audio.headers.get("content-length")
-    if content_length_header:
-        try:
-            if int(content_length_header) > ENV.max_audio_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"audio payload too large (max {ENV.max_audio_mb:g} MB)",
-                )
-        except ValueError:
-            pass
-    audio_bytes = await audio.read()
-    if len(audio_bytes) > ENV.max_audio_bytes:
+    lifecycle_request = UtteranceRequest(
+        session_id=session_id,
+        thread_id=normalized_thread_id,
+        utterance_text=(draft_text or "").strip() or "Voice message",
+        attachments=attachments,
+        executor=executor,
+        mode=mode,
+        working_directory=working_directory,
+        response_mode=response_mode,
+        response_profile=response_profile,
+    )
+    UTTERANCE_SERVICE.create_transcribing_run(lifecycle_request, run_id=audio_run_id)
+    try:
+        validate_upload_content_length(
+            audio,
+            field="audio",
+            max_bytes=ENV.max_audio_bytes,
+            max_mb=ENV.max_audio_mb,
+        )
+        audio_bytes = await read_upload_bytes_limited(
+            audio,
+            field="audio",
+            max_bytes=ENV.max_audio_bytes,
+            max_mb=ENV.max_audio_mb,
+        )
+    except HTTPException as exc:
+        if exc.status_code == 413:
+            RUN_STATE.append_activity_event(
+                audio_run_id,
+                stage="transcribing",
+                title="Rejected",
+                display_message="Audio payload is too large.",
+                level="error",
+                event_type="activity.completed",
+            )
+            RUN_STATE.append_event(audio_run_id, ExecutionEvent(type="run.failed", message="Audio payload too large"))
+            RUN_STATE.set_run_status(audio_run_id, "failed", "Audio payload too large")
+        raise
+    if RUN_STATE.is_cancelled(audio_run_id):
+        _mark_cancelled_before_execution(audio_run_id)
         raise HTTPException(
-            status_code=413,
-            detail=f"audio payload too large (max {ENV.max_audio_mb:g} MB)",
+            status_code=409,
+            detail=ApiErrorDetail(
+                code="run_cancelled",
+                message="Audio run was cancelled before transcription started.",
+            ).model_dump(),
         )
     try:
         transcript_text = await asyncio.to_thread(
@@ -186,9 +224,32 @@ async def create_audio_run(
             text_hint=transcript_hint,
         )
     except TranscriptionError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        _mark_audio_transcription_failed(audio_run_id, str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail=ApiErrorDetail(code="transcription_failed", message=str(exc), field="audio").model_dump(),
+        ) from exc
+    except Exception as exc:
+        _mark_audio_transcription_failed(audio_run_id, "Audio transcription failed")
+        raise HTTPException(
+            status_code=500,
+            detail=ApiErrorDetail(
+                code="transcription_failed",
+                message="Audio transcription failed.",
+                field="audio",
+            ).model_dump(),
+        ) from exc
+    if RUN_STATE.is_cancelled(audio_run_id):
+        _mark_cancelled_before_execution(audio_run_id)
+        raise HTTPException(
+            status_code=409,
+            detail=ApiErrorDetail(
+                code="run_cancelled",
+                message="Audio run was cancelled before execution started.",
+            ).model_dump(),
+        )
     utterance_text = merge_voice_utterance(draft_text, transcript_text)
-    result = UTTERANCE_SERVICE.submit(
+    result = UTTERANCE_SERVICE.submit_precreated(
         UtteranceRequest(
             session_id=session_id,
             thread_id=normalized_thread_id,
@@ -199,7 +260,8 @@ async def create_audio_run(
             working_directory=working_directory,
             response_mode=response_mode,
             response_profile=response_profile,
-        )
+        ),
+        run_id=audio_run_id,
     )
     return AudioRunResponse(
         run_id=result.run_id,
@@ -214,23 +276,18 @@ async def upload_file(
     session_id: str = Form(...),
     file: UploadFile = File(...),
 ) -> UploadResponse:
-    content_length_header = file.headers.get("content-length")
-    if content_length_header:
-        try:
-            if int(content_length_header) > ENV.max_upload_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"file payload too large (max {ENV.max_upload_mb:g} MB)",
-                )
-        except ValueError:
-            pass
-
-    file_bytes = await file.read()
-    if len(file_bytes) > ENV.max_upload_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"file payload too large (max {ENV.max_upload_mb:g} MB)",
-        )
+    validate_upload_content_length(
+        file,
+        field="file",
+        max_bytes=ENV.max_upload_bytes,
+        max_mb=ENV.max_upload_mb,
+    )
+    file_bytes = await read_upload_bytes_limited(
+        file,
+        field="file",
+        max_bytes=ENV.max_upload_bytes,
+        max_mb=ENV.max_upload_mb,
+    )
     return WORKSPACE_SERVICE.store_upload(
         session_id=session_id,
         filename=file.filename,
@@ -240,10 +297,13 @@ async def upload_file(
 
 
 @app.get("/v1/runs/{run_id}", response_model=RunRecord)
-def get_run(run_id: str) -> RunRecord:
+def get_run(run_id: str, events_limit: int | None = Query(None, ge=0, le=500)) -> RunRecord:
     run = RUN_STATE.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="run not found")
+    if events_limit is not None:
+        run = run.model_copy(deep=True)
+        run.events = run.events[-events_limit:] if events_limit > 0 else []
     return run
 
 
@@ -347,6 +407,22 @@ def get_run_diagnostics(run_id: str) -> RunDiagnostics:
     return diagnostics
 
 
+@app.get("/v1/runs/{run_id}/events-page", response_model=RunEventsPage)
+def get_run_events_page(
+    run_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    before_seq: int | None = Query(None, ge=0),
+    after_seq: int | None = Query(None, ge=0),
+) -> RunEventsPage:
+    try:
+        page = RUN_STATE.event_page(run_id, limit=limit, before_seq=before_seq, after_seq=after_seq)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return page
+
+
 @app.get("/v1/files")
 def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
     return WORKSPACE_SERVICE.file_response(path)
@@ -374,6 +450,32 @@ def cancel_run(run_id: str) -> dict[str, str]:
     EXECUTION_SERVICE.terminate_active_process(run_id)
 
     return {"run_id": run_id, "status": "cancel_requested"}
+
+
+def _mark_cancelled_before_execution(run_id: str) -> None:
+    RUN_STATE.append_activity_event(
+        run_id,
+        stage="transcribing",
+        title="Cancelled",
+        display_message="Audio run cancelled before execution.",
+        level="warning",
+        event_type="activity.completed",
+    )
+    RUN_STATE.append_event(run_id, ExecutionEvent(type="run.cancelled", message="Run cancelled by user"))
+    RUN_STATE.set_run_status(run_id, "cancelled", "Run cancelled by user")
+
+
+def _mark_audio_transcription_failed(run_id: str, message: str) -> None:
+    RUN_STATE.append_activity_event(
+        run_id,
+        stage="transcribing",
+        title="Failed",
+        display_message="Audio transcription failed.",
+        level="error",
+        event_type="activity.completed",
+    )
+    RUN_STATE.append_event(run_id, ExecutionEvent(type="run.failed", message=message))
+    RUN_STATE.set_run_status(run_id, "failed", "Audio transcription failed")
 
 
 @app.get("/v1/runs/{run_id}/events")

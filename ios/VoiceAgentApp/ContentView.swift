@@ -113,11 +113,17 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showLogs) {
                 LogsView(
-                    events: vm.events,
-                    diagnostics: vm.currentRunDiagnostics
+                    events: vm.visibleRunLogEvents,
+                    diagnostics: vm.currentRunDiagnostics,
+                    canLoadOlderEvents: vm.canLoadOlderRunLogEvents,
+                    isLoadingOlderEvents: vm.isLoadingRunLogEvents,
+                    errorText: vm.runLogErrorText,
+                    onLoadOlderEvents: {
+                        await vm.loadOlderRunLogsIfPossible()
+                    }
                 )
                 .task {
-                    await vm.refreshRunDiagnosticsIfPossible()
+                    await vm.refreshRunLogsIfPossible()
                 }
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
@@ -808,6 +814,8 @@ struct ContentView: View {
             showThreads = true
         case "logs":
             showLogs = true
+        case "workspace":
+            showWorkspaceBrowser = true
         default:
             break
         }
