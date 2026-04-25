@@ -6,7 +6,7 @@ This package contains the FastAPI control plane that the iPhone app talks to.
 
 - `main.py`: API wiring, endpoint handlers, and request-level orchestration.
 - `capabilities.py`: capability-report composition and JSON report persistence.
-- `capability_probes.py`: concrete capability probes for local binaries, Codex integrations, Playwright state, Peekaboo permissions, and Calendar readiness.
+- `capability_probes/`: focused capability probes for local binaries, Codex MCP, Playwright state, Peekaboo permissions, and Calendar readiness.
 - `agent_run_service.py`: Codex/Claude process lifecycle, streaming output parsing, session linking, and timeout/cancel/block handling.
 - `agent_stream_handler.py`: executor stream protocol parsing, agent-session linking, assistant payload capture, and human-unblock detection.
 - `agent_process_monitor.py`: stdout draining, queue polling, cancellation/timeout checks, and process shutdown during agent runs.
@@ -43,4 +43,4 @@ This package contains the FastAPI control plane that the iPhone app talks to.
 
 - Request validation/serialization changes usually stay in `main.py`, `calendar_service.py`, `runtime_session_service.py`, `session_context_service.py`, `runtime_settings_catalog.py`, `runtime_executor_catalog.py`, `session_runtime_state.py`, `utterance_service.py`, `pairing_service.py`, `pairing_state.py`, `pairing_url.py`, `pairing_url_policy.py`, `phone_access_mode.py`, `workspace_service.py`, `chat_attachments.py`, `capabilities.py`, and `models/schemas.py`.
 - Storage changes belong in `storage/run_store.py` with tests in `backend/tests/test_run_state.py` or `backend/tests/test_api.py`.
-- Executor/runtime behavior changes usually involve `agent_run_service.py`, `agent_stream_handler.py`, `agent_process_monitor.py`, `agent_run_finalizer.py`, `execution_service.py`, `runtime_environment.py`, `runtime_environment_loader.py`, `capability_probes.py`, and the executor modules together.
+- Executor/runtime behavior changes usually involve `agent_run_service.py`, `agent_stream_handler.py`, `agent_process_monitor.py`, `agent_run_finalizer.py`, `execution_service.py`, `runtime_environment.py`, `runtime_environment_loader.py`, `capability_probes/`, and the executor modules together.

@@ -30,9 +30,9 @@ def test_probe_transcriber_requires_openai_key(monkeypatch) -> None:
 
 
 def test_probe_calendar_adapter_maps_permission_errors(monkeypatch) -> None:
-    monkeypatch.setattr("app.capability_probes.platform.system", lambda: "Darwin")
-    monkeypatch.setattr("app.capability_probes.shutil.which", lambda _: "/usr/bin/osascript")
-    monkeypatch.setattr("app.capability_probes.is_process_running", lambda _: True)
+    monkeypatch.setattr("app.capability_probes.desktop.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("app.capability_probes.desktop.shutil.which", lambda _: "/usr/bin/osascript")
+    monkeypatch.setattr("app.capability_probes.desktop.is_process_running", lambda _: True)
 
     def fail_fetch() -> list[object]:
         raise RuntimeError("Calendar got an error: Not authorized (-1743)")

@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from app.agent_runtime import load_runtime_context
+from app.host_tools import binary_available
 from app.models.schemas import AgentExecutorName, CodexReasoningEffort, RunExecutorName
 from app.phone_access_mode import PhoneAccessMode, normalize_phone_access_mode
 
@@ -99,15 +99,6 @@ def resolve_path_value(raw_value: str, *, base_dir: Path) -> Path:
     if path.is_absolute():
         return path.resolve()
     return (base_dir / path).resolve()
-
-
-def binary_available(binary: str) -> bool:
-    trimmed = binary.strip()
-    if not trimmed:
-        return False
-    if "/" in trimmed or trimmed.startswith("."):
-        return Path(trimmed).expanduser().exists()
-    return shutil.which(trimmed) is not None
 
 
 def stable_key(raw_value: str) -> str:

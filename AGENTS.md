@@ -139,7 +139,7 @@ These are review signals, not hard gates.
 
 - `backend/app/runtime_session_service.py`: keep slash-command UX separate from session-context persistence and normalization.
 - `backend/app/storage/run_store.py`: avoid adding more mixed storage logic without extracting helpers or focused modules.
-- `backend/app/capability_probes.py`: prefer small probe helpers over expanding one large file.
+- `backend/app/capability_probes/`: keep probe helpers split by host/runtime concern.
 - `backend/tests/test_api.py`: prefer new focused test modules over adding more unrelated coverage to the catch-all file.
 - `ios/VoiceAgentApp/VoiceAgentViewModel.swift`: favor extracting domain-specific helpers/services when touching large behavior areas.
 - `ios/VoiceAgentApp/ContentView.swift`, `ios/VoiceAgentApp/ChatRenderers.swift`, and `ios/VoiceAgentApp/ChatScaffoldViews.swift`: prefer subviews and focused view helpers when adding UI behavior.

@@ -58,7 +58,7 @@ def test_detect_tailscale_dns_name_reads_status_json(monkeypatch):
         returncode = 0
         stdout = '{"Self":{"DNSName":"Vemunds-MacBook-Air.tail6a5903.ts.net.","TailscaleIPs":["100.111.99.51"]}}'
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr(module.subprocess, "run", lambda *_args, **_kwargs: Result())
 
     assert module.detect_tailscale_dns_name() == "vemunds-macbook-air.tail6a5903.ts.net"
 

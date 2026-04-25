@@ -55,6 +55,7 @@ class _FakeProcess:
         self._completed = True
 
     def wait(self, timeout: float | None = None) -> int:
+        _ = timeout
         self._completed = True
         return self._exit_code
 

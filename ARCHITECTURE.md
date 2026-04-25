@@ -23,8 +23,8 @@ There are three execution paths:
 - Used when the host has Claude Code CLI installed and configured.
 
 3. `local`
-- Structured fallback path used mainly for deterministic local execution and testing.
-- Uses a small `ActionPlan` plus policy validation instead of an external coding agent.
+- Internal structured fallback path used mainly for deterministic local execution and tests when no agent executor is available.
+- Uses a small `ActionPlan` plus policy validation; normal user runs should prefer `codex` or `claude`.
 
 A fourth path exists for deterministic calendar requests:
 - backend handles "today" calendar queries with a typed adapter instead of a general-purpose agent run.

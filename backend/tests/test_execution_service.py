@@ -53,7 +53,7 @@ def test_agent_worker_exception_marks_run_failed(monkeypatch, tmp_path: Path) ->
         fetch_calendar_events=lambda: [],
     )
 
-    def crash(*args, **kwargs) -> None:
+    def crash(*_args: object, **_kwargs: object) -> None:
         raise TypeError("bad worker wiring")
 
     monkeypatch.setattr(service.agent_run_service, "run", crash)
