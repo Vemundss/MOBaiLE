@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -119,9 +121,34 @@ class AgentProcessMonitor:
     @staticmethod
     def stop_process(proc: subprocess.Popen[str]) -> None:
         if proc.poll() is None:
-            proc.terminate()
+            AgentProcessMonitor._terminate_process_group(proc)
             try:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                AgentProcessMonitor._kill_process_group(proc)
                 proc.wait()
+
+    @staticmethod
+    def _terminate_process_group(proc: subprocess.Popen[str]) -> None:
+        if AgentProcessMonitor._signal_process_group(proc, signal.SIGTERM):
+            return
+        proc.terminate()
+
+    @staticmethod
+    def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+        if AgentProcessMonitor._signal_process_group(proc, signal.SIGKILL):
+            return
+        proc.kill()
+
+    @staticmethod
+    def _signal_process_group(proc: subprocess.Popen[str], sig: int) -> bool:
+        pid = getattr(proc, "pid", None)
+        if not pid or not hasattr(os, "killpg"):
+            return False
+        try:
+            os.killpg(pid, sig)
+            return True
+        except ProcessLookupError:
+            return True
+        except OSError:
+            return False

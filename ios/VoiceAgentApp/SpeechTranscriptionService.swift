@@ -37,7 +37,10 @@ final class SpeechTranscriptionService {
         _ = await authorizationStatus()
     }
 
-    func transcribeFile(at fileURL: URL) async throws -> SpeechTranscriptionResult {
+    func transcribeFile(
+        at fileURL: URL,
+        registerCancellation: ((@escaping () -> Void) -> Void)? = nil
+    ) async throws -> SpeechTranscriptionResult {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw SpeechTranscriptionError.fileMissing
         }
@@ -65,7 +68,8 @@ final class SpeechTranscriptionService {
                 return try await transcribe(
                     fileURL: fileURL,
                     with: recognizer,
-                    requiresOnDeviceRecognition: true
+                    requiresOnDeviceRecognition: true,
+                    registerCancellation: registerCancellation
                 )
             } catch {
                 // Retry without forcing on-device recognition so Apple's native service
@@ -76,7 +80,8 @@ final class SpeechTranscriptionService {
         return try await transcribe(
             fileURL: fileURL,
             with: recognizer,
-            requiresOnDeviceRecognition: false
+            requiresOnDeviceRecognition: false,
+            registerCancellation: registerCancellation
         )
     }
 
@@ -97,7 +102,8 @@ final class SpeechTranscriptionService {
     private func transcribe(
         fileURL: URL,
         with recognizer: SFSpeechRecognizer,
-        requiresOnDeviceRecognition: Bool
+        requiresOnDeviceRecognition: Bool,
+        registerCancellation: ((@escaping () -> Void) -> Void)?
     ) async throws -> SpeechTranscriptionResult {
         let request = SFSpeechURLRecognitionRequest(url: fileURL)
         request.shouldReportPartialResults = false
@@ -123,7 +129,7 @@ final class SpeechTranscriptionService {
                 continuation.resume(with: result)
             }
 
-            recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+            let task = recognizer.recognitionTask(with: request) { result, error in
                 if let error {
                     resume(with: .failure(error))
                     return
@@ -143,6 +149,10 @@ final class SpeechTranscriptionService {
                         )
                     )
                 )
+            }
+            recognitionTask = task
+            registerCancellation? {
+                task.cancel()
             }
         }
     }

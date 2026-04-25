@@ -345,7 +345,7 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
-    func testPromoteResolvedServerURLDoesNotDemoteTailscaleToLanFallback() {
+    func testPromoteResolvedServerURLMovesWorkingLanFallbackToFront() {
         let vm = VoiceAgentViewModel()
 
         vm.applyPairedClientCredentials(
@@ -366,11 +366,11 @@ final class VoiceAgentModelTests: XCTestCase {
 
         vm.promoteResolvedServerURL("http://192.168.86.122:8000")
 
-        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.serverURL, "http://192.168.86.122:8000")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://192.168.86.122:8000",
             "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://100.111.99.51:8000",
-            "http://192.168.86.122:8000",
         ])
     }
 
@@ -1744,6 +1744,64 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertEqual(vm.conversation.last?.text, "Bound to the origin thread")
         XCTAssertEqual(vm.events.last?.message, "Bound to the origin thread")
+    }
+
+    @MainActor
+    func testCompletedRunKeepsVisibleEventsForLogs() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        let runID = "completed-run-\(UUID().uuidString)"
+        let event = ExecutionEvent(
+            type: "activity.updated",
+            message: "Running backend checks.",
+            stage: "executing",
+            title: "Executing",
+            displayMessage: "Running backend checks.",
+            level: "info",
+            eventID: "evt-\(UUID().uuidString)",
+            createdAt: nil
+        )
+
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Running...",
+            activeRunExecutor: "codex"
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: threadID)
+        vm._test_ingestRunEvents([event], runID: runID, threadID: threadID)
+
+        vm._test_applyTerminalRunState(
+            runID: runID,
+            threadID: threadID,
+            status: "completed",
+            summary: "Done",
+            events: [event]
+        )
+
+        XCTAssertFalse(vm._test_hasObservedRunContext(runID: runID, threadID: threadID))
+        XCTAssertEqual(vm.events.map(\.message), ["Running backend checks."])
+        XCTAssertEqual(vm.currentRunDiagnostics?.eventCount, 1)
+    }
+
+    @MainActor
+    func testCompletedRunIDIsNotCancellableWhileNextRunPrepares() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        let runID = "old-run-\(UUID().uuidString)"
+
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Run status: completed",
+            activeRunExecutor: "codex"
+        )
+        vm.isLoading = true
+
+        XCTAssertFalse(vm.canCancelActiveOperation)
+        XCTAssertFalse(vm._test_isRunActivelyObserved(runID))
     }
 
     @MainActor

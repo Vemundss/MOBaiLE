@@ -51,7 +51,7 @@ class AgentRunService:
         with self._active_procs_lock:
             proc = self._active_procs.get(run_id)
             if proc is not None and proc.poll() is None:
-                proc.terminate()
+                AgentProcessMonitor.stop_process(proc)
 
     def run(
         self,

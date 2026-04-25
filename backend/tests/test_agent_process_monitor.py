@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -138,6 +142,52 @@ def test_agent_process_monitor_stops_cancelled_runs(tmp_path: Path) -> None:
 
     assert outcome.cancelled is True
     assert proc._terminated is True
+
+
+def test_stop_process_terminates_child_process_group() -> None:
+    script = """
+import subprocess
+import time
+
+child = subprocess.Popen(["sleep", "30"])
+print(child.pid, flush=True)
+time.sleep(30)
+"""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    assert proc.stdout is not None
+    child_pid = int(proc.stdout.readline().strip())
+
+    try:
+        AgentProcessMonitor.stop_process(proc)
+        deadline = time.monotonic() + 3
+        while _pid_exists(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        assert proc.poll() is not None
+        assert _pid_exists(child_pid) is False
+    finally:
+        _kill_pid_if_alive(child_pid)
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def _kill_pid_if_alive(pid: int) -> None:
+    try:
+        os.kill(pid, 9)
+    except ProcessLookupError:
+        pass
 
 
 def test_agent_process_monitor_classifies_stale_resume_failures(tmp_path: Path) -> None:

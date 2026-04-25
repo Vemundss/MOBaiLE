@@ -11,6 +11,7 @@ struct ConnectionSettingsSheet: View {
     let onOpenPairingScanner: () -> Void
 
     @AppStorage(AppAppearancePreference.storageKey) private var appearancePreferenceRaw = AppAppearancePreference.system.rawValue
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showAdvancedSettings = false
     @State private var showManualConnectionFields: Bool
     @State private var settingsConnectionState: SettingsConnectionState = .idle
@@ -72,17 +73,7 @@ struct ConnectionSettingsSheet: View {
                                 )
                             }
 
-                            ViewThatFits(in: .horizontal) {
-                                HStack(spacing: 10) {
-                                    primaryScannerButton(fillWidth: true)
-                                    secondaryGuideButton(fillWidth: true)
-                                }
-
-                                VStack(spacing: 10) {
-                                    primaryScannerButton(fillWidth: true)
-                                    secondaryGuideButton(fillWidth: true)
-                                }
-                            }
+                            setupActionButtons
                         }
                         .padding(.vertical, 4)
                     } header: {
@@ -303,44 +294,7 @@ struct ConnectionSettingsSheet: View {
                 .padding(.vertical, 4)
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    if vm.hasConfiguredConnection && !vm.needsConnectionRepair {
-                        Button {
-                            Task { await checkSettingsConnection() }
-                        } label: {
-                            if isCheckingSettingsConnection {
-                                ProgressView()
-                            } else {
-                                Text("Test")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(isCheckingSettingsConnection)
-                    }
-
-                    primaryScannerButton(fillWidth: false)
-
-                    if vm.needsConnectionRepair {
-                        Button("Show Repair Steps") {
-                            onOpenSetupGuide()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-
-                VStack(spacing: 10) {
-                    primaryScannerButton(fillWidth: true)
-
-                    if vm.needsConnectionRepair {
-                        Button("Show Repair Steps") {
-                            onOpenSetupGuide()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-            }
+            settingsConnectionActions
         }
         .padding(.vertical, 4)
     }
@@ -359,31 +313,24 @@ struct ConnectionSettingsSheet: View {
 
     @ViewBuilder
     private func primaryScannerButton(fillWidth: Bool) -> some View {
-        let label = Label(
-            vm.needsConnectionRepair ? "Scan Pairing QR Again" : "Scan New Pairing QR",
-            systemImage: "qrcode.viewfinder"
-        )
+        let title = vm.needsConnectionRepair
+            ? (fillWidth ? "Scan QR Again" : "Scan QR")
+            : (fillWidth ? "Scan New QR" : "Scan QR")
+        let label = SettingsActionButtonLabel(title: title, systemImage: "qrcode.viewfinder")
+            .frame(maxWidth: fillWidth ? .infinity : nil)
 
         if vm.needsConnectionRepair {
             Button {
                 onOpenPairingScanner()
             } label: {
-                if fillWidth {
-                    label.frame(maxWidth: .infinity)
-                } else {
-                    label
-                }
+                label
             }
             .buttonStyle(.borderedProminent)
         } else {
             Button {
                 onOpenPairingScanner()
             } label: {
-                if fillWidth {
-                    label.frame(maxWidth: .infinity)
-                } else {
-                    label
-                }
+                label
             }
             .buttonStyle(.bordered)
         }
@@ -394,15 +341,94 @@ struct ConnectionSettingsSheet: View {
         Button {
             onOpenSetupGuide()
         } label: {
-            let label = Label(
-                vm.needsConnectionRepair ? "Show Repair Guide" : "Show Setup Guide",
+            SettingsActionButtonLabel(
+                title: vm.needsConnectionRepair ? "Repair Guide" : "Setup Guide",
                 systemImage: "arrow.right.circle.fill"
             )
-            if fillWidth {
-                label.frame(maxWidth: .infinity)
-            } else {
-                label
+            .frame(maxWidth: fillWidth ? .infinity : nil)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    @ViewBuilder
+    private var setupActionButtons: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 10) {
+                primaryScannerButton(fillWidth: true)
+                secondaryGuideButton(fillWidth: true)
             }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    primaryScannerButton(fillWidth: true)
+                    secondaryGuideButton(fillWidth: true)
+                }
+
+                VStack(spacing: 10) {
+                    primaryScannerButton(fillWidth: true)
+                    secondaryGuideButton(fillWidth: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var settingsConnectionActions: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 10) {
+                settingsTestButton(fillWidth: true)
+                primaryScannerButton(fillWidth: true)
+                if vm.needsConnectionRepair {
+                    repairStepsButton(fillWidth: true)
+                }
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    settingsTestButton(fillWidth: false)
+                    primaryScannerButton(fillWidth: false)
+                    if vm.needsConnectionRepair {
+                        repairStepsButton(fillWidth: false)
+                    }
+                }
+
+                VStack(spacing: 10) {
+                    settingsTestButton(fillWidth: true)
+                    primaryScannerButton(fillWidth: true)
+                    if vm.needsConnectionRepair {
+                        repairStepsButton(fillWidth: true)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func settingsTestButton(fillWidth: Bool) -> some View {
+        if vm.hasConfiguredConnection && !vm.needsConnectionRepair {
+            Button {
+                Task { await checkSettingsConnection() }
+            } label: {
+                if isCheckingSettingsConnection {
+                    ProgressView()
+                        .frame(maxWidth: fillWidth ? .infinity : nil)
+                } else {
+                    SettingsActionButtonLabel(title: "Test", systemImage: "checkmark.circle")
+                        .frame(maxWidth: fillWidth ? .infinity : nil)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(isCheckingSettingsConnection)
+        }
+    }
+
+    private func repairStepsButton(fillWidth: Bool) -> some View {
+        Button {
+            onOpenSetupGuide()
+        } label: {
+            SettingsActionButtonLabel(title: "Repair Steps", systemImage: "list.number")
+                .frame(maxWidth: fillWidth ? .infinity : nil)
         }
         .buttonStyle(.bordered)
     }
@@ -421,16 +447,27 @@ struct ConnectionSettingsSheet: View {
     }
 
     private func settingsSummaryRow(_ item: SettingsRuntimeDetailItem) -> some View {
-        LabeledContent {
-            Text(item.value)
-                .font(.footnote.monospaced())
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
-        } label: {
+        VStack(alignment: .leading, spacing: 4) {
             Label(item.label, systemImage: item.icon)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
+
+            Text(item.value)
+                .font(settingsSummaryValueFont(for: item))
+                .foregroundStyle(.primary)
+                .lineLimit(item.label == "Runtime" ? 1 : 2)
+                .minimumScaleFactor(item.label == "Runtime" ? 0.86 : 1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func settingsSummaryValueFont(for item: SettingsRuntimeDetailItem) -> Font {
+        switch item.label {
+        case "Server", "Session", "Workspace", "Root":
+            return .footnote.monospaced()
+        default:
+            return .footnote.weight(.medium)
         }
     }
 
@@ -626,7 +663,7 @@ struct ConnectionSettingsSheet: View {
         return components
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && $0 != "Backend default" }
-            .joined(separator: " · ")
+            .joined(separator: " / ")
     }
 
     private func shortPathLabel(_ path: String) -> String {
@@ -649,5 +686,21 @@ struct ConnectionSettingsSheet: View {
         guard !parent.isEmpty, parent != "/", parent != last else { return last }
 
         return "\(parent)/\(last)"
+    }
+}
+
+private struct SettingsActionButtonLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .imageScale(.medium)
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(minHeight: 28)
     }
 }

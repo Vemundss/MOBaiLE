@@ -386,7 +386,8 @@ final class APIClient {
         responseProfile: String?,
         draftText: String,
         attachments: [ChatArtifact],
-        audioFileURL: URL
+        audioFileURL: URL,
+        registerCancellation: ((@escaping () -> Void) -> Void)? = nil
     ) async throws -> AudioRunResponse {
         try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/audio") else {
@@ -436,7 +437,10 @@ final class APIClient {
                 mimeType: "audio/m4a"
             )
 
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await data(
+                for: request,
+                registerCancellation: registerCancellation
+            )
             try validate(response: response, data: data)
             return try jsonDecoder.decode(AudioRunResponse.self, from: data)
         }
@@ -748,6 +752,37 @@ final class APIClient {
         guard (200...299).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw APIError.httpError(http.statusCode, body)
+        }
+    }
+
+    private func data(
+        for request: URLRequest,
+        registerCancellation: ((@escaping () -> Void) -> Void)? = nil
+    ) async throws -> (Data, URLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            var didResume = false
+
+            func resume(with result: Result<(Data, URLResponse), Error>) {
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(with: result)
+            }
+
+            let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error {
+                    resume(with: .failure(error))
+                    return
+                }
+                guard let response else {
+                    resume(with: .failure(APIError.invalidResponse))
+                    return
+                }
+                resume(with: .success((data ?? Data(), response)))
+            }
+            registerCancellation? {
+                task.cancel()
+            }
+            task.resume()
         }
     }
 

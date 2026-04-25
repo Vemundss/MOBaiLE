@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Literal
 
@@ -70,6 +71,7 @@ refresh_pairing_server_url(
 TRANSCRIBER = Transcriber()
 RUN_STORE = RunStore(ENV.db_path)
 RUN_STATE = RunState(RUN_STORE, max_event_message_chars=ENV.max_event_message_chars)
+RUN_STATE.reconcile_interrupted_runs()
 CALENDAR_SERVICE = CalendarService()
 PROFILE_STORE = ProfileStore(
     profile_state_root=ENV.profile_state_root,
@@ -177,7 +179,8 @@ async def create_audio_run(
             detail=f"audio payload too large (max {ENV.max_audio_mb:g} MB)",
         )
     try:
-        transcript_text = TRANSCRIBER.transcribe(
+        transcript_text = await asyncio.to_thread(
+            TRANSCRIBER.transcribe,
             audio_bytes=audio_bytes,
             filename=audio.filename or "audio",
             text_hint=transcript_hint,

@@ -25,7 +25,9 @@ struct WorkspaceBrowserSheet: View {
                 }
             }
             .task {
-                if vm.directoryBrowserEntries.isEmpty && !vm.isLoadingDirectoryBrowser {
+                if vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   vm.directoryBrowserEntries.isEmpty,
+                   !vm.isLoadingDirectoryBrowser {
                     await vm.refreshDirectoryBrowser()
                 }
             }

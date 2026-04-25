@@ -57,6 +57,7 @@ class CodexExecutor:
             stderr=subprocess.STDOUT,
             text=True,
             env=env,
+            start_new_session=True,
         )
 
     def _build_command(

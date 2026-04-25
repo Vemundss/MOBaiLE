@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
+import threading
 from io import BytesIO
 from pathlib import Path
 
@@ -187,6 +189,34 @@ def test_audio_mock_flow_preserves_draft_context_and_attachments(make_client, tm
     assert run_resp.status_code == 200
     payload = run_resp.json()
     assert payload["utterance_text"] == "Run the smoke test again.\n\nCompare it with the last pass too."
+
+
+def test_audio_transcription_runs_outside_event_loop(make_client, monkeypatch):
+    client, token = make_client(provider="mock")
+    module = importlib.import_module("app.main")
+    observed: dict[str, bool | str] = {}
+
+    def fake_transcribe(**_: object) -> str:
+        observed["thread_name"] = threading.current_thread().name
+        try:
+            asyncio.get_running_loop()
+            observed["has_running_loop"] = True
+        except RuntimeError:
+            observed["has_running_loop"] = False
+        return "inspect this repo"
+
+    monkeypatch.setattr(module.TRANSCRIBER, "transcribe", fake_transcribe)
+
+    resp = client.post(
+        "/v1/audio",
+        headers=auth_headers(token),
+        files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
+        data={"session_id": "audio-threaded", "executor": "local"},
+    )
+
+    assert resp.status_code == 200
+    assert observed["has_running_loop"] is False
+    assert observed["thread_name"] != threading.current_thread().name
 
 
 def test_audio_openai_missing_key(make_client):

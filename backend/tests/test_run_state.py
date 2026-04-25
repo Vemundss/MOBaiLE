@@ -55,6 +55,30 @@ def test_run_state_assigns_monotonic_event_sequences(tmp_path) -> None:
     assert [event.seq for event in loaded.events] == [0, 1]
 
 
+def test_store_run_persists_initial_events(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    state = RunState(run_store, max_event_message_chars=16000)
+
+    state.store_run(
+        RunRecord(
+            run_id="run-rejected",
+            session_id="session-1",
+            executor="codex",
+            utterance_text="dangerous",
+            status="rejected",
+            summary="blocked",
+            events=[ExecutionEvent(type="run.failed", message="blocked by policy")],
+        )
+    )
+
+    reloaded = RunState(run_store, max_event_message_chars=16000)
+    loaded = reloaded.get_run("run-rejected")
+
+    assert loaded is not None
+    assert [event.type for event in loaded.events] == ["run.failed"]
+    assert [event.seq for event in loaded.events] == [0]
+
+
 def test_run_state_appends_activity_events_with_typed_metadata(tmp_path) -> None:
     run_store = RunStore(tmp_path / "runs.db")
     state = RunState(run_store, max_event_message_chars=16000)
@@ -77,7 +101,8 @@ def test_run_state_appends_activity_events_with_typed_metadata(tmp_path) -> None
         display_message="Reviewing the request and planning the next steps.",
     )
 
-    loaded = state.get_run("run-activity")
+    reloaded = RunState(run_store, max_event_message_chars=16000)
+    loaded = reloaded.get_run("run-activity")
 
     assert loaded is not None
     event = loaded.events[-1]
@@ -87,6 +112,54 @@ def test_run_state_appends_activity_events_with_typed_metadata(tmp_path) -> None
     assert event.display_message == "Reviewing the request and planning the next steps."
     assert event.level == "info"
     assert event.message == "Reviewing the request and planning the next steps."
+
+
+def test_run_state_reconciles_interrupted_running_runs(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    run_store.upsert_run(
+        RunRecord(
+            run_id="run-interrupted",
+            session_id="session-1",
+            executor="codex",
+            utterance_text="hello",
+            status="running",
+            summary="running",
+            events=[],
+        )
+    )
+
+    state = RunState(run_store, max_event_message_chars=16000)
+    state.reconcile_interrupted_runs()
+
+    loaded = state.get_run("run-interrupted")
+
+    assert loaded is not None
+    assert loaded.status == "failed"
+    assert loaded.summary == "Backend restarted before this run finished."
+    assert [event.type for event in loaded.events[-2:]] == ["activity.completed", "run.failed"]
+    assert loaded.events[-2].stage == "failed"
+    assert loaded.events[-2].level == "error"
+
+
+def test_request_cancel_lazy_loads_persisted_running_run(tmp_path) -> None:
+    run_store = RunStore(tmp_path / "runs.db")
+    run_store.upsert_run(
+        RunRecord(
+            run_id="run-persisted-cancel",
+            session_id="session-1",
+            executor="codex",
+            utterance_text="hello",
+            status="running",
+            summary="running",
+            events=[],
+        )
+    )
+    state = RunState(run_store, max_event_message_chars=16000)
+
+    run = state.request_cancel("run-persisted-cancel")
+
+    assert run.run_id == "run-persisted-cancel"
+    assert state.is_cancelled("run-persisted-cancel") is True
 
 
 def test_run_state_diagnostics_include_activity_stage_counts(tmp_path) -> None:

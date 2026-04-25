@@ -179,7 +179,7 @@ struct ConversationEmptyStateView: View {
         VStack(alignment: .leading, spacing: 16) {
             if isConfigured && !needsConnectionRepair {
                 VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         MobaileLogoMark()
                             .frame(width: 38, height: 38)
                             .padding(5)
@@ -188,16 +188,7 @@ struct ConversationEmptyStateView: View {
                                     .fill(Color(.systemBackground))
                             )
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Start with a focused task")
-                                .font(.title3.weight(.semibold))
-                            Text("Use a quick start or type below. Keeping the first run narrow makes the thread easier to scan.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Spacer(minLength: 0)
+                        setupReadyHeaderText
 
                         Label(statusText, systemImage: "checkmark.circle.fill")
                             .font(.caption.weight(.semibold))
@@ -406,6 +397,17 @@ struct ConversationEmptyStateView: View {
         }
     }
 
+    private var setupReadyHeaderText: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Start with a focused task")
+                .font(.title3.weight(.semibold))
+            Text("Use a quick start or type below. Keeping the first run narrow makes the thread easier to scan.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     @ViewBuilder
     private func configuredRuntimeContextRow(context: EmptyStateRuntimeContext) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -418,25 +420,22 @@ struct ConversationEmptyStateView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    EmptyStateMetaPill(systemImage: "sparkles", text: context.model)
-                    EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
-                    if let effort = context.effort {
-                        EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        EmptyStateMetaPill(systemImage: "sparkles", text: context.model)
-                        EmptyStateMetaPill(systemImage: "bolt.horizontal.circle.fill", text: context.executor)
-                        if let effort = context.effort {
-                            EmptyStateMetaPill(systemImage: "brain.head.profile", text: effort)
-                        }
-                    }
-                }
-            }
+            Text(runtimeSummary(for: context))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.systemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+                )
 
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "folder.fill")
@@ -454,11 +453,11 @@ struct ConversationEmptyStateView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(.systemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
             )
         }
@@ -472,31 +471,13 @@ struct ConversationEmptyStateView: View {
                 .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
         )
     }
-}
 
-private struct EmptyStateMetaPill: View {
-    let systemImage: String
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-            Text(text)
-                .lineLimit(1)
-                .truncationMode(.middle)
+    private func runtimeSummary(for context: EmptyStateRuntimeContext) -> String {
+        var parts = [context.executor.uppercased(), context.model]
+        if let effort = context.effort {
+            parts.append(effort)
         }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(Color(.systemBackground))
-        )
-        .overlay(
-            Capsule()
-                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
-        )
+        return parts.joined(separator: " / ")
     }
 }
 
@@ -547,6 +528,7 @@ private struct CompactStarterPromptButton: View {
 }
 
 private struct SetupStepRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let stepNumber: Int
     let systemImage: String
     let title: String
@@ -564,16 +546,7 @@ private struct SetupStepRow: View {
                 )
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: systemImage)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 16)
-
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                setupStepTitle
                 Text(detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -581,6 +554,30 @@ private struct SetupStepRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var setupStepTitle: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 16)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -786,7 +783,7 @@ struct LogsView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if events.isEmpty {
+                if events.isEmpty && effectiveDiagnostics == nil {
                     ContentUnavailableView(
                         "No Run Logs Yet",
                         systemImage: "doc.text.magnifyingglass",

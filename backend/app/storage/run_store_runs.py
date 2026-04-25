@@ -177,8 +177,8 @@ class RunRecordStore:
     ) -> None:
         conn.execute(
             """
-            INSERT INTO run_events (run_id, seq, event_id, type, action_index, message, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            INSERT INTO run_events (run_id, seq, event_id, type, action_index, message, event_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
             """,
             (
                 run_id,
@@ -187,6 +187,7 @@ class RunRecordStore:
                 event.type,
                 event.action_index,
                 event.message,
+                event.model_dump_json(),
                 event.created_at,
             ),
         )
@@ -240,17 +241,7 @@ class RunRecordStore:
             except Exception:
                 pending_human_unblock = None
 
-        events = [
-            ExecutionEvent(
-                seq=row["seq"],
-                event_id=row["event_id"],
-                type=row["type"],
-                action_index=row["action_index"],
-                message=row["message"],
-                created_at=row["created_at"],
-            )
-            for row in event_rows
-        ]
+        events = [self._hydrate_event(row) for row in event_rows]
 
         return RunRecord(
             run_id=run_row["run_id"],
@@ -265,4 +256,28 @@ class RunRecordStore:
             summary=run_row["summary"],
             created_at=run_row["created_at"],
             updated_at=run_row["updated_at"],
+        )
+
+    @staticmethod
+    def _hydrate_event(row: sqlite3.Row) -> ExecutionEvent:
+        event_json = row["event_json"] if "event_json" in row.keys() else None
+        if event_json:
+            try:
+                event = ExecutionEvent.model_validate_json(event_json)
+                if event.seq is None:
+                    event.seq = row["seq"]
+                if not event.event_id:
+                    event.event_id = row["event_id"]
+                if not event.created_at:
+                    event.created_at = row["created_at"]
+                return event
+            except Exception:
+                pass
+        return ExecutionEvent(
+            seq=row["seq"],
+            event_id=row["event_id"],
+            type=row["type"],
+            action_index=row["action_index"],
+            message=row["message"],
+            created_at=row["created_at"],
         )

@@ -520,8 +520,10 @@ struct PairingConfirmationSheet: View {
     let pending: VoiceAgentViewModel.PendingPairing
     @Binding var trustHost: Bool
     let onCancel: () -> Void
-    let onConfirm: () -> Void
+    let onConfirm: () async -> String?
     @Environment(\.dismiss) private var dismiss
+    @State private var isPairing = false
+    @State private var pairingError: String?
 
     var body: some View {
         NavigationStack {
@@ -559,6 +561,17 @@ struct PairingConfirmationSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                if let pairingError {
+                    Section {
+                        Label("Pairing failed", systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.red)
+                        Text(pairingError)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle("Confirm Pairing")
             .navigationBarTitleDisplayMode(.inline)
@@ -570,11 +583,28 @@ struct PairingConfirmationSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Pair") {
-                        onConfirm()
-                        dismiss()
+                    Button {
+                        guard !isPairing else { return }
+                        isPairing = true
+                        pairingError = nil
+                        Task {
+                            let errorMessage = await onConfirm()
+                            isPairing = false
+                            if let errorMessage {
+                                pairingError = errorMessage
+                                return
+                            }
+                            dismiss()
+                        }
+                    } label: {
+                        if isPairing {
+                            ProgressView()
+                        } else {
+                            Text("Pair")
+                        }
                     }
                     .font(.subheadline.weight(.semibold))
+                    .disabled(isPairing)
                 }
             }
         }

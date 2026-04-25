@@ -59,6 +59,7 @@ def initialize_run_store_schema(connect: ConnectionFactory) -> list[LegacyRunPay
                 type TEXT NOT NULL,
                 action_index INTEGER,
                 message TEXT NOT NULL,
+                event_json TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (run_id, seq),
                 FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
@@ -69,6 +70,8 @@ def initialize_run_store_schema(connect: ConnectionFactory) -> list[LegacyRunPay
         column_names = {row["name"] for row in columns}
         if "event_id" not in column_names:
             conn.execute("ALTER TABLE run_events ADD COLUMN event_id TEXT")
+        if "event_json" not in column_names:
+            conn.execute("ALTER TABLE run_events ADD COLUMN event_json TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_run_events_run_id_seq ON run_events(run_id, seq)"
         )

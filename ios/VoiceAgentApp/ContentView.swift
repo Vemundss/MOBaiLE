@@ -196,7 +196,13 @@ struct ContentView: View {
                     trustHost: $trustPairHost,
                     onCancel: { vm.cancelPendingPairing() },
                     onConfirm: {
-                        vm.confirmPendingPairing(trustHost: trustPairHost)
+                        let didPair = await vm.confirmPendingPairing(trustHost: trustPairHost)
+                        if didPair {
+                            return nil
+                        }
+                        return vm.errorText.isEmpty
+                            ? "Pairing failed. Check that the QR is fresh and the backend is reachable."
+                            : vm.errorText
                     }
                 )
             }
@@ -390,7 +396,9 @@ struct ContentView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                composerBar
+                if shouldShowComposerBar {
+                    composerBar
+                }
             }
         }
     }
@@ -457,6 +465,14 @@ struct ContentView: View {
             onSend: handleComposerSend,
             onSelectSlashCommand: handleSlashCommandSelection
         )
+    }
+
+    private var shouldShowComposerBar: Bool {
+        canUseConnectedFeatures
+            || !vm.conversation.isEmpty
+            || vm.isLoading
+            || vm.isRecording
+            || vm.isVoiceModeActiveForCurrentThread
     }
 
     private var bottomRunStatusText: String {
@@ -711,7 +727,6 @@ struct ContentView: View {
             },
             onOpenWorkspace: {
                 showWorkspaceBrowser = true
-                Task { await vm.refreshDirectoryBrowser() }
             },
             onOpenPairingScanner: {
                 showPairingScanner = true
@@ -946,12 +961,12 @@ struct ContentView: View {
                 vm.errorText = ""
             case .browse:
                 vm.clearComposerText()
-                showWorkspaceBrowser = true
                 if arguments.isEmpty {
-                    await vm.refreshDirectoryBrowser()
+                    showWorkspaceBrowser = true
                     vm.statusText = "Opened the workspace browser."
                 } else {
                     await vm.openDirectory(path: arguments)
+                    showWorkspaceBrowser = true
                     vm.statusText = "Opened \(arguments)."
                 }
             case .retry:

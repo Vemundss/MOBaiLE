@@ -23,6 +23,7 @@ event_id,
 type,
 action_index,
 message,
+event_json,
 created_at
 """
 

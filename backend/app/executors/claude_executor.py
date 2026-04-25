@@ -53,6 +53,7 @@ class ClaudeExecutor:
             stderr=subprocess.STDOUT,
             text=True,
             env=env,
+            start_new_session=True,
         )
 
     @staticmethod

@@ -26,6 +26,8 @@ from app.storage import RunStore
 
 
 class RunState:
+    TERMINAL_STATUSES = {"completed", "failed", "rejected", "blocked", "cancelled"}
+
     def __init__(self, run_store: RunStore, *, max_event_message_chars: int) -> None:
         self.run_store = run_store
         self.max_event_message_chars = max_event_message_chars
@@ -48,7 +50,27 @@ class RunState:
             self._runs[run_id] = loaded
             return loaded
 
+    def reconcile_interrupted_runs(self) -> None:
+        for run in self.run_store.load_all().values():
+            if run.status in self.TERMINAL_STATUSES:
+                continue
+            with self._runs_lock:
+                self._runs[run.run_id] = run
+            message = "Backend restarted before this run finished."
+            self.append_activity_event(
+                run.run_id,
+                stage="failed",
+                title="Interrupted",
+                display_message=message,
+                level="error",
+                event_type="activity.completed",
+            )
+            self.append_event(run.run_id, ExecutionEvent(type="run.failed", message=message))
+            self.set_run_status(run.run_id, "failed", message)
+
     def store_run(self, run: RunRecord) -> None:
+        initial_events = list(run.events)
+        run.events = []
         with self._runs_lock:
             self._runs[run.run_id] = run
         self.run_store.upsert_run(run)
@@ -59,6 +81,8 @@ class RunState:
             summary=run.summary,
             pending_human_unblock=run.pending_human_unblock,
         )
+        for event in initial_events:
+            self.append_event(run.run_id, event)
 
     def append_event(self, run_id: str, event: ExecutionEvent) -> None:
         if not event.event_id:
@@ -167,7 +191,7 @@ class RunState:
             run.status = status
             run.summary = summary
             run.pending_human_unblock = effective_pending_human_unblock
-            if status in {"completed", "failed", "rejected", "blocked", "cancelled"}:
+            if status in self.TERMINAL_STATUSES:
                 self._cancelled.discard(run_id)
             self.run_store.update_run_status(
                 run_id,
@@ -188,11 +212,14 @@ class RunState:
             return run_id in self._cancelled
 
     def request_cancel(self, run_id: str) -> RunRecord:
+        run = self.get_run(run_id)
+        if run is None:
+            raise KeyError("missing")
         with self._runs_lock:
             run = self._runs.get(run_id)
-            if not run:
+            if run is None:
                 raise KeyError("missing")
-            if run.status in {"completed", "failed", "rejected", "blocked", "cancelled"}:
+            if run.status in self.TERMINAL_STATUSES:
                 raise ValueError(run.status)
             self._cancelled.add(run_id)
             return run
@@ -249,6 +276,8 @@ class RunState:
         )
 
     def event_stream(self, run_id: str, *, after_seq: int = -1) -> Iterator[str]:
+        if self.get_run(run_id) is None:
+            return
         cursor_seq = after_seq
         heartbeat_at = time.monotonic()
         while True:
@@ -264,7 +293,7 @@ class RunState:
                 payload = json.dumps(event.model_dump())
                 yield f"id: {cursor_seq}\nevent: {event.type}\ndata: {payload}\n\n"
 
-            done = status in {"completed", "failed", "rejected", "blocked", "cancelled"}
+            done = status in self.TERMINAL_STATUSES
             if done and not pending_events:
                 break
 

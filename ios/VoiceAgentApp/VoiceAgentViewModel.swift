@@ -152,6 +152,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var didConfigureRemoteCommands = false
     private var isRestoringThreadState = false
     private var activeAttachmentUploadCancellation: (() -> Void)?
+    private var activeVoiceInputCancellation: (() -> Void)?
+    private var didCancelVoiceInputPreparation = false
     private var pendingDraftPersistenceTask: Task<Void, Never>?
     private var backendTranscribeProvider: String = "unknown"
     private var backendTranscribeReady = false
@@ -456,6 +458,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             cancelActiveAttachmentUploadIfNeeded()
             return
         }
+        guard isRunActivelyObserved(activeRun) else { return }
         errorText = ""
         runPhaseText = "Cancelling"
         do {
@@ -509,7 +512,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             cancelActiveAttachmentUploadIfNeeded()
             return
         }
-        guard !runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if cancelActiveVoiceInputIfNeeded() {
+            return
+        }
+        guard isRunActivelyObserved(runID) else { return }
         Task { await cancelCurrentRun() }
     }
 
@@ -533,6 +539,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         runPhaseText = "Planning"
         runStartedAt = Date()
         runEndedAt = nil
+        didCancelVoiceInputPreparation = false
+        activeVoiceInputCancellation = nil
+        defer {
+            activeVoiceInputCancellation = nil
+            didCancelVoiceInputPreparation = false
+        }
 
         guard let audioFile = recorder.stop() else {
             isLoading = false
@@ -549,8 +561,20 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             do {
                 runPhaseText = "Transcribing"
                 statusText = "Transcribing on iPhone..."
-                localTranscription = try await speechTranscriber.transcribeFile(at: audioFile)
+                localTranscription = try await speechTranscriber.transcribeFile(
+                    at: audioFile,
+                    registerCancellation: { [weak self] cancel in
+                        Task { @MainActor in
+                            self?.activeVoiceInputCancellation = cancel
+                        }
+                    }
+                )
+                activeVoiceInputCancellation = nil
             } catch {
+                activeVoiceInputCancellation = nil
+                if didCancelVoiceInputPreparation {
+                    throw error
+                }
                 if await backendAudioUploadAvailable(forceRefresh: true) {
                     localTranscription = nil
                 } else {
@@ -650,8 +674,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     responseProfile: effectiveAgentGuidanceMode,
                     draftText: stagedDraftText,
                     attachments: explicitAttachments,
-                    audioFileURL: audioFile
+                    audioFileURL: audioFile,
+                    registerCancellation: { [weak self] cancel in
+                        Task { @MainActor in
+                            self?.activeVoiceInputCancellation = cancel
+                        }
+                    }
                 )
+                activeVoiceInputCancellation = nil
                 let utteranceText = composeVoiceUtteranceText(
                     draftText: stagedDraftText,
                     transcriptText: response.transcriptText
@@ -697,7 +727,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             try await observeRun(runID: startedRunID, threadID: originThreadID)
         } catch {
             activeAttachmentUploadCancellation = nil
-            if error is CancellationError || isAttachmentTransferCancellation(error) {
+            activeVoiceInputCancellation = nil
+            if didCancelVoiceInputPreparation || error is CancellationError || isAttachmentTransferCancellation(error) {
                 if activeThreadID == originThreadID {
                     errorText = ""
                     statusText = "Cancelled"
@@ -1170,7 +1201,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     var canCancelActiveOperation: Bool {
-        isLoading && (isUploadingAttachments || !runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        isLoading && (
+            isUploadingAttachments ||
+            activeVoiceInputCancellation != nil ||
+            isRunActivelyObserved(runID)
+        )
     }
 
     func retryLastPrompt() async {
@@ -2188,7 +2223,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             }
         }
 
-        removeObservedRunContext(runID: run.runId)
+        removeObservedRunContext(runID: run.runId, preserveVisibleEvents: true)
 
         persistThreadSnapshot(threadID: threadID)
     }
@@ -3300,13 +3335,23 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         observedRunContext(for: threadID, runID: runID) != nil
     }
 
-    private func removeObservedRunContext(runID: String) {
+    private func removeObservedRunContext(runID: String, preserveVisibleEvents: Bool = false) {
         let trimmedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedRunID.isEmpty else { return }
         observedRunContexts.removeValue(forKey: trimmedRunID)
-        if self.runID == trimmedRunID {
+        if self.runID == trimmedRunID && !preserveVisibleEvents {
             events = []
         }
+    }
+
+    private func isRunActivelyObserved(_ runID: String) -> Bool {
+        let trimmedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRunID.isEmpty,
+              let context = observedRunContexts[trimmedRunID],
+              let activeThreadID else {
+            return false
+        }
+        return context.threadID == activeThreadID
     }
 
     private func clearObservedRunContext(for threadID: UUID?) {
@@ -3391,6 +3436,17 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         runPhaseText = "Cancelling"
         activeAttachmentUploadCancellation = nil
         cancel()
+    }
+
+    private func cancelActiveVoiceInputIfNeeded() -> Bool {
+        guard let cancel = activeVoiceInputCancellation else { return false }
+        errorText = ""
+        statusText = "Cancelling voice input..."
+        runPhaseText = "Cancelling"
+        didCancelVoiceInputPreparation = true
+        activeVoiceInputCancellation = nil
+        cancel()
+        return true
     }
 
     private func isAttachmentTransferCancellation(_ error: Error) -> Bool {
@@ -3638,6 +3694,35 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_hasObservedRunContext(runID: String, threadID: UUID) -> Bool {
         hasObservedRunContext(runID: runID, threadID: threadID)
+    }
+
+    func _test_isRunActivelyObserved(_ runID: String) -> Bool {
+        isRunActivelyObserved(runID)
+    }
+
+    func _test_applyTerminalRunState(
+        runID: String,
+        threadID: UUID,
+        status: String,
+        summary: String,
+        events: [ExecutionEvent]
+    ) {
+        applyTerminalRunStateIfNeeded(
+            RunRecord(
+                runId: runID,
+                sessionId: "test-session",
+                executor: nil,
+                utteranceText: "",
+                workingDirectory: nil,
+                status: status,
+                pendingHumanUnblock: nil,
+                summary: summary,
+                events: events,
+                createdAt: nil,
+                updatedAt: nil
+            ),
+            threadID: threadID
+        )
     }
 
     func _test_voiceInteractionNoticeText() -> String? {

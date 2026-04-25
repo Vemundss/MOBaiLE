@@ -53,11 +53,6 @@ extension VoiceAgentViewModel {
         if promoted == normalizedServerURL {
             return
         }
-        let currentPriority = PairingHostRules.connectivityPriority(for: normalizedServerURL)
-        let promotedPriority = PairingHostRules.connectivityPriority(for: promoted)
-        if promotedPriority < currentPriority {
-            return
-        }
         let currentCandidates = connectionCandidateServerURLs.isEmpty ? [normalizedServerURL] : connectionCandidateServerURLs
         applyAdvertisedServerURLs(
             primaryServerURL: promoted,
@@ -211,22 +206,20 @@ extension VoiceAgentViewModel {
         persistTrustedPairHosts()
     }
 
-    func confirmPendingPairing(trustHost: Bool) {
-        guard let pending = pendingPairing else { return }
+    @discardableResult
+    func confirmPendingPairing(trustHost: Bool) async -> Bool {
+        guard let pending = pendingPairing else { return false }
 
         if trustHost {
             setTrustedPairHost(pending.serverHost, trusted: true)
         }
 
         if let oneTimeCode = pending.pairCode {
-            Task {
-                await exchangePairCode(
-                    serverURLs: pending.serverURLs,
-                    pairCode: oneTimeCode,
-                    sessionID: pending.sessionID
-                )
-            }
-            return
+            return await exchangePairCode(
+                serverURLs: pending.serverURLs,
+                pairCode: oneTimeCode,
+                sessionID: pending.sessionID
+            )
         }
         if let token = pending.legacyToken {
             pendingPairing = nil
@@ -240,16 +233,19 @@ extension VoiceAgentViewModel {
             }
             apiToken = token
             persistSettings()
-            statusText = "Paired successfully (legacy token)"
+            statusText = "Paired successfully"
             errorText = ""
             persistActiveThreadSnapshot()
-            return
+            return true
         }
         errorText = "Invalid pairing QR. Missing pair code."
+        return false
     }
 
     func confirmPendingPairing() {
-        confirmPendingPairing(trustHost: false)
+        Task {
+            await confirmPendingPairing(trustHost: false)
+        }
     }
 
     var normalizedServerURL: String {
@@ -419,12 +415,12 @@ private extension VoiceAgentViewModel {
         return url
     }
 
-    func exchangePairCode(serverURLs: [String], pairCode: String, sessionID: String?) async {
+    func exchangePairCode(serverURLs: [String], pairCode: String, sessionID: String?) async -> Bool {
         let resolvedServerURLs = normalizedServerURLs(additionalServerURLs: serverURLs)
         guard let primaryServerURL = resolvedServerURLs.first else {
             errorText = "Pairing failed"
             statusText = "Missing pairing server URL"
-            return
+            return false
         }
         let previousFallbacks = client.fallbackServerURLs
         client.fallbackServerURLs = Array(resolvedServerURLs.dropFirst())
@@ -445,12 +441,14 @@ private extension VoiceAgentViewModel {
             )
             _ = try? await refreshRuntimeConfiguration()
             _ = try? await refreshSessionContextFromBackend()
-            statusText = "Paired successfully (\(response.securityMode))"
+            statusText = "Paired successfully"
             pendingPairing = nil
             persistActiveThreadSnapshot()
+            return true
         } catch {
             errorText = error.localizedDescription
             statusText = "Pairing failed"
+            return false
         }
     }
 
