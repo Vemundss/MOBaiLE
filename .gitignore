@@ -17,6 +17,7 @@ backend/logs/
 .bundle/
 vendor/bundle/
 build/
+output/
 error.log
 ios/VoiceAgentApp 2.xcodeproj/
 .mobaile/AGENTS.md
