@@ -85,6 +85,9 @@ Do not collapse `run`, `session`, `thread`, and `profile` into each other when t
   - capture fresh screenshots of the relevant screens or states before handoff when the change is meaningfully visual
   - review spacing, hierarchy, clarity, responsiveness, and overall quality before calling the work done
   - if screenshots show obvious UI problems, iterate before handoff
+- Local availability after verified changes:
+  - iOS UI or client behavior changes: after relevant tests/screenshots pass, rebuild and install MOBaiLE on the connected development iPhone so the current app is ready for evaluation. Use the already-configured Xcode signing/device setup. If no physical device or signing target is available, say so explicitly in the final handoff.
+  - Backend or host-runtime changes: after backend checks pass, update the installed host runtime from the current checkout and restart it. On macOS run `bash ./scripts/service_macos.sh sync` then `bash ./scripts/service_macos.sh restart`; on Linux run `bash ./scripts/service_linux.sh sync` then `bash ./scripts/service_linux.sh restart`. Then run `mobaile status`, the service `status` command, or `/health` to confirm the installed runtime is serving the latest change.
 - When a behavior change is made, prefer at least one automated test unless the repo truly has no reasonable test path for that area.
 - If tooling is missing for a touched area, say so clearly and update docs if needed.
 - If you could not run a relevant check, say so explicitly in the final handoff.
