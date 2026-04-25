@@ -11,6 +11,7 @@ from app.models.schemas import AgentExecutorName, CodexReasoningEffort, RunExecu
 from app.phone_access_mode import PhoneAccessMode, normalize_phone_access_mode
 
 CODEX_MODEL_OPTIONS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.1")
+DEFAULT_CODEX_MODEL = CODEX_MODEL_OPTIONS[0]
 CLAUDE_MODEL_OPTIONS = ("claude-sonnet-4-5",)
 CODEX_REASONING_EFFORT_OPTIONS: tuple[CodexReasoningEffort, ...] = ("minimal", "low", "medium", "high", "xhigh")
 
@@ -218,8 +219,8 @@ def load_agent_runtime_environment_settings(backend_root: Path) -> AgentRuntimeE
         base_dir=backend_root,
     )
     codex_enable_web_search = _read_enabled_env("VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH", default=True)
-    codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 0)
-    codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
+    codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 900)
+    codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", DEFAULT_CODEX_MODEL).strip() or DEFAULT_CODEX_MODEL
     codex_model_options = tuple(
         _runtime_option_values(
             os.getenv("VOICE_AGENT_CODEX_MODEL_OPTIONS"),

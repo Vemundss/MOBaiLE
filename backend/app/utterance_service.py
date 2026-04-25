@@ -164,7 +164,7 @@ class UtteranceService:
                 agent_executor,
                 request.thread_id,
                 request.response_profile,
-                prepared.session_context.codex_model,
+                self._codex_model_override(agent_executor, prepared.session_context),
                 prepared.session_context.codex_reasoning_effort,
                 prepared.session_context.claude_model,
                 include_profile_agents,
@@ -189,6 +189,15 @@ class UtteranceService:
                 continue
             return (item.value or "").strip().lower() != "disabled"
         return True
+
+    def _codex_model_override(
+        self,
+        executor: AgentExecutorName,
+        context: SessionContextResponse,
+    ) -> str | None:
+        if executor != "codex":
+            return None
+        return context.codex_model or self.environment.codex_model_override or None
 
     def _submit_local_request(self, prepared: PreparedUtterance) -> UtteranceResponse:
         plan = self.plan_builder(prepared.effective_text)

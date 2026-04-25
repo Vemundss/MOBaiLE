@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -17,6 +18,9 @@ from app.models.schemas import (
 from app.profile_store import ProfileStore
 from app.run_state import RunState
 from app.runtime_environment import RuntimeEnvironment
+
+LOGGER = logging.getLogger(__name__)
+TERMINAL_RUN_STATUSES = {"completed", "failed", "rejected", "blocked", "cancelled"}
 
 
 class ExecutionService:
@@ -113,6 +117,12 @@ class ExecutionService:
         self.run_state.set_run_status(run_id, "completed", "Run completed successfully")
 
     def run_local_plan(self, run_id: str, plan: ActionPlan, workdir: Path) -> None:
+        try:
+            self._run_local_plan(run_id, plan, workdir)
+        except Exception as exc:
+            self._record_worker_exception(run_id, summary="Local run crashed", exc=exc)
+
+    def _run_local_plan(self, run_id: str, plan: ActionPlan, workdir: Path) -> None:
         executor = LocalExecutor(workdir)
         self.run_state.append_activity_event(
             run_id,
@@ -155,21 +165,24 @@ class ExecutionService:
         include_profile_memory: bool = True,
         guardrail_message: str | None = None,
     ) -> None:
-        self.agent_run_service.run(
-            run_id,
-            prompt,
-            workdir=workdir,
-            session_id=session_id,
-            executor=executor,
-            client_thread_id=client_thread_id,
-            response_profile=response_profile,
-            codex_model_override=codex_model_override,
-            codex_reasoning_effort_override=codex_reasoning_effort_override,
-            claude_model_override=claude_model_override,
-            include_profile_agents=include_profile_agents,
-            include_profile_memory=include_profile_memory,
-            guardrail_message=guardrail_message,
-        )
+        try:
+            self.agent_run_service.run(
+                run_id,
+                prompt,
+                workdir=workdir,
+                session_id=session_id,
+                executor=executor,
+                client_thread_id=client_thread_id,
+                response_profile=response_profile,
+                codex_model_override=codex_model_override,
+                codex_reasoning_effort_override=codex_reasoning_effort_override,
+                claude_model_override=claude_model_override,
+                include_profile_agents=include_profile_agents,
+                include_profile_memory=include_profile_memory,
+                guardrail_message=guardrail_message,
+            )
+        except Exception as exc:
+            self._record_worker_exception(run_id, summary="Agent worker crashed", exc=exc)
 
     def _execute_plan(self, run_id: str, plan: ActionPlan, executor: LocalExecutor) -> bool:
         self.run_state.append_activity_event(
@@ -211,3 +224,23 @@ class ExecutionService:
             if not result.success:
                 return False
         return True
+
+    def _record_worker_exception(self, run_id: str, *, summary: str, exc: Exception) -> None:
+        LOGGER.exception("%s for run %s", summary, run_id)
+        run = self.run_state.get_run(run_id)
+        if run is not None and run.status in TERMINAL_RUN_STATUSES:
+            return
+        detail = f"{type(exc).__name__}: {exc}".strip()
+        self.run_state.append_activity_event(
+            run_id,
+            stage="failed",
+            title="Failed",
+            display_message=summary,
+            level="error",
+        )
+        self.run_state.append_event(
+            run_id,
+            ExecutionEvent(type="action.stderr", action_index=0, message=f"{summary}: {detail}"),
+        )
+        self.run_state.append_event(run_id, ExecutionEvent(type="run.failed", message=summary))
+        self.run_state.set_run_status(run_id, "failed", summary)

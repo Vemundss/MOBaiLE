@@ -150,6 +150,7 @@ write_env_file() {
   local public_url_value="${PUBLIC_SERVER_URL%/}"
   local phone_access_value="${PHONE_ACCESS_MODE}"
   local codex_home_value="${HOME}/.codex"
+  local codex_model_value="gpt-5.4"
   local codex_search_value="true"
   local use_runtime_context_value="true"
   local context_file_value="../.mobaile/runtime/RUNTIME_CONTEXT.md"
@@ -176,6 +177,7 @@ write_env_file() {
       -v public_url="${public_url_value}" \
       -v phone_access="${phone_access_value}" \
       -v codex_home="${codex_home_value}" \
+      -v codex_model="${codex_model_value}" \
       -v codex_search="${codex_search_value}" \
       -v use_runtime_context="${use_runtime_context_value}" \
       -v context_file="${context_file_value}" \
@@ -190,6 +192,7 @@ write_env_file() {
         seen_public_url=0
         seen_phone_access=0
         seen_codex_home=0
+        seen_codex_model=0
         seen_codex_search=0
         seen_use_runtime_context=0
         seen_context_file=0
@@ -230,6 +233,11 @@ write_env_file() {
       }
       /^VOICE_AGENT_CODEX_HOME=/ {
         seen_codex_home=1
+        print
+        next
+      }
+      /^VOICE_AGENT_CODEX_MODEL=/ {
+        seen_codex_model=1
         print
         next
       }
@@ -282,6 +290,7 @@ write_env_file() {
         if (!seen_codex) print "VOICE_AGENT_CODEX_UNRESTRICTED=" codex
         if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
         if (!seen_codex_home) print "VOICE_AGENT_CODEX_HOME=" codex_home
+        if (!seen_codex_model) print "VOICE_AGENT_CODEX_MODEL=" codex_model
         if (!seen_codex_search) print "VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=" codex_search
         if (!seen_use_runtime_context) print "VOICE_AGENT_USE_RUNTIME_CONTEXT=" use_runtime_context
         if (!seen_context_file) print "VOICE_AGENT_RUNTIME_CONTEXT_FILE=" context_file
@@ -310,6 +319,7 @@ EOF
 VOICE_AGENT_DEFAULT_EXECUTOR=codex
 VOICE_AGENT_CODEX_BINARY=codex
 VOICE_AGENT_CODEX_HOME=${codex_home_value}
+VOICE_AGENT_CODEX_MODEL=${codex_model_value}
 VOICE_AGENT_CODEX_UNRESTRICTED=${codex_unrestricted}
 VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=${codex_search_value}
 VOICE_AGENT_CODEX_GUARDRAILS=warn
@@ -325,7 +335,7 @@ VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=${playwright_output_value}
 VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=${playwright_profile_value}
 VOICE_AGENT_PAIR_CODE_TTL_MIN=${PAIR_CODE_TTL_MIN}
 # Optional model override:
-# VOICE_AGENT_CODEX_MODEL=gpt-5.1
+# VOICE_AGENT_CODEX_MODEL=gpt-5.4-mini
 # Transcription provider: openai or mock
 # Set this to mock for deterministic local testing.
 VOICE_AGENT_TRANSCRIBE_PROVIDER=openai

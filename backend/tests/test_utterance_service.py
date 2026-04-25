@@ -249,5 +249,6 @@ def test_utterance_service_passes_profile_context_toggles_to_agent_runs(monkeypa
 
     assert result.status == "accepted"
     assert launched[0][0] == "run_agent"
+    assert launched[0][1][7] == "gpt-5.4"
     assert launched[0][1][10] is False
     assert launched[0][1][11] is True

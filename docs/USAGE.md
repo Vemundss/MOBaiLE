@@ -231,7 +231,7 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=true` enables Codex live web search for backend-launched runs.
 - `VOICE_AGENT_CODEX_GUARDRAILS=warn` adds prompt-level destructive-op detection (`off|warn|enforce`).
 - `VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]` explicit token to bypass guardrail warnings.
-- `VOICE_AGENT_CODEX_MODEL=<model-id>` optionally forces a specific model.
+- `VOICE_AGENT_CODEX_MODEL=gpt-5.4` selects the default Codex model used for backend-launched runs.
 - `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
 - `VOICE_AGENT_USE_RUNTIME_CONTEXT=true` prepends MOBaiLE runtime context to backend-launched agent prompts.
 - `VOICE_AGENT_RUNTIME_CONTEXT_FILE=../.mobaile/runtime/RUNTIME_CONTEXT.md` points to the repo-local runtime context file.
