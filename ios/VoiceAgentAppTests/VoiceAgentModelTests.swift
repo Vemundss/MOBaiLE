@@ -107,6 +107,17 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertFalse(vm.needsConnectionRepair)
     }
 
+    func testAPIErrorParsesStructuredBackendDetail() {
+        let error = APIError.httpError(
+            413,
+            #"{"detail":{"code":"audio_too_large","message":"audio payload too large","field":"audio"}}"#
+        )
+
+        XCTAssertEqual(error.backendCode, "audio_too_large")
+        XCTAssertEqual(error.backendDetail, "Audio payload too large")
+        XCTAssertEqual(error.localizedDescription, "Audio payload too large")
+    }
+
     @MainActor
     func testConnectionRepairStatePersistsAcrossViewModelReload() {
         let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
@@ -1521,6 +1532,73 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testVoiceModeDeactivatesWhenRecorderStartFails() async throws {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory,
+            recorder: FailingAudioRecorder()
+        )
+        vm.serverURL = "http://127.0.0.1:8000"
+        vm.apiToken = "token"
+
+        await vm.startVoiceModeIfNeeded()
+
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertFalse(vm.isVoiceModeActiveForCurrentThread)
+        XCTAssertFalse(vm.isRecording)
+        XCTAssertNil(vm.recordingStartedAt)
+        XCTAssertEqual(vm.statusText, "Microphone access needed")
+    }
+
+    @MainActor
+    func testVoiceModeDeactivatesAfterPreRunVoiceInputFailure() throws {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try XCTUnwrap(vm.activeThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: threadID)
+
+        vm._test_deactivateVoiceModeAfterVoiceInputFailure(threadID: threadID)
+
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertFalse(vm.isVoiceModeActiveForCurrentThread)
+    }
+
+    @MainActor
+    func testAutoSendSilenceDelayIsBoundedAndFormatted() {
+        let vm = VoiceAgentViewModel()
+
+        vm.autoSendAfterSilenceSeconds = "10"
+        XCTAssertEqual(vm.autoSendAfterSilenceDelaySeconds, 5.0, accuracy: 0.001)
+        XCTAssertEqual(vm.autoSendAfterSilenceDelayLabel, "5.0 seconds")
+
+        vm.setAutoSendAfterSilenceDelay(0.1)
+        XCTAssertEqual(vm.autoSendAfterSilenceSeconds, "0.8")
+        XCTAssertEqual(vm.autoSendAfterSilenceDelayLabel, "0.8 seconds")
+    }
+
+    @MainActor
+    func testPersistSettingsSanitizesInvalidAutoSendSilenceDelay() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        vm.autoSendAfterSilenceSeconds = "abc"
+
+        vm.persistSettings()
+
+        XCTAssertEqual(vm.autoSendAfterSilenceSeconds, "1.2")
+        XCTAssertEqual(defaults.string(forKey: "mobaile.auto_send_after_silence_seconds"), "1.2")
+    }
+
+    @MainActor
     func testVoiceModeResumeDoesNotWaitForeverWhenSpokenRepliesAreDisabled() async throws {
         let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
         defer { cleanup() }
@@ -2149,6 +2227,19 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertNil(AppAppearancePreference.system.colorScheme)
         XCTAssertEqual(AppAppearancePreference.light.colorScheme, .light)
         XCTAssertEqual(AppAppearancePreference.dark.colorScheme, .dark)
+    }
+}
+
+private final class FailingAudioRecorder: AudioRecording {
+    func start(
+        silenceConfig: AudioRecorderService.SilenceConfig?,
+        onSilenceDetected: (() -> Void)?
+    ) async throws {
+        throw RecorderError.permissionDenied
+    }
+
+    func stop() -> URL? {
+        nil
     }
 }
 

@@ -69,8 +69,6 @@ class Transcriber:
         filename: str,
         text_hint: str | None = None,
     ) -> str:
-        if text_hint and text_hint.strip():
-            return text_hint.strip()
         if not self.openai_api_key:
             raise TranscriptionError("OPENAI_API_KEY is not set for openai transcription provider")
         if not audio_bytes:
@@ -80,6 +78,8 @@ class Transcriber:
         headers = {"Authorization": f"Bearer {self.openai_api_key}"}
         files = {"file": (filename or "audio.wav", audio_bytes, "application/octet-stream")}
         data = {"model": self.openai_model}
+        if text_hint and text_hint.strip():
+            data["prompt"] = text_hint.strip()
 
         try:
             response = requests.post(

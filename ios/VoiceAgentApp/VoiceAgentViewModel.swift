@@ -63,6 +63,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     enum VoiceInputPhase: Equatable {
         case idle
         case transcribing
+        case startingRun
         case uploadingAudio
 
         var isActive: Bool {
@@ -75,6 +76,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 return "Cancel run"
             case .transcribing:
                 return "Cancel transcription"
+            case .startingRun:
+                return "Cancel voice prompt"
             case .uploadingAudio:
                 return "Cancel audio upload"
             }
@@ -164,7 +167,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     let client = APIClient()
     private let speaker = AVSpeechSynthesizer()
-    private let recorder = AudioRecorderService()
+    private let recorder: AudioRecording
     private let speechTranscriber = SpeechTranscriptionService()
     private let threadStore: ChatThreadStore
     let defaults: UserDefaults
@@ -281,6 +284,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         self.draftAttachmentDirectory = appSupport
             .appendingPathComponent("MOBaiLE", isDirectory: true)
             .appendingPathComponent("draft-attachments", isDirectory: true)
+        self.recorder = AudioRecorderService()
         super.init()
         completeInitialization()
     }
@@ -288,11 +292,13 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     init(
         threadStore: ChatThreadStore,
         defaults: UserDefaults,
-        draftAttachmentDirectory: URL
+        draftAttachmentDirectory: URL,
+        recorder: AudioRecording = AudioRecorderService()
     ) {
         self.threadStore = threadStore
         self.defaults = defaults
         self.draftAttachmentDirectory = draftAttachmentDirectory
+        self.recorder = recorder
         super.init()
         completeInitialization()
     }
@@ -518,19 +524,20 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         )
     }
 
-    func startRecording() async {
+    @discardableResult
+    func startRecording() async -> Bool {
         guard !isLoading else {
             statusText = "A run is already in progress."
-            return
+            return false
         }
         guard !needsConnectionRepair else {
             statusText = "Connection needs repair"
             errorText = connectionRepairMessage
-            return
+            return false
         }
         guard hasConfiguredConnection else {
             statusText = "Run setup on your computer or enter connection details first."
-            return
+            return false
         }
         errorText = ""
         recordingStartedAt = nil
@@ -555,6 +562,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             Task { [speechTranscriber] in
                 await speechTranscriber.warmupAuthorization()
             }
+            return true
         } catch let recorderError as RecorderError {
             recordingStartedAt = nil
             switch recorderError {
@@ -566,11 +574,13 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 statusText = "Recorder unavailable"
             }
             emitFailureFeedback()
+            return false
         } catch {
             recordingStartedAt = nil
             errorText = error.localizedDescription
             statusText = "Failed to start recording"
             emitFailureFeedback()
+            return false
         }
     }
 
@@ -675,6 +685,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
 
         guard let audioFile = recorder.stop() else {
+            deactivateVoiceModeAfterVoiceInputFailure(threadID: originThreadID)
             isLoading = false
             errorText = "No recorded audio file found."
             statusText = "Failed"
@@ -719,6 +730,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             }
 
             if let localTranscription {
+                activeVoiceInputPhase = .startingRun
                 let utteranceText = composeVoiceUtteranceText(
                     draftText: stagedDraftText,
                     transcriptText: localTranscription.text
@@ -758,8 +770,19 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 let response = try await createUtteranceRun(
                     threadID: originThreadID,
                     utteranceText: utteranceText,
-                    attachments: explicitAttachments
+                    attachments: explicitAttachments,
+                    registerCancellation: { [weak self] cancel in
+                        Task { @MainActor in
+                            if self?.didCancelVoiceInputPreparation == true {
+                                cancel()
+                            } else {
+                                self?.activeVoiceInputCancellation = cancel
+                            }
+                        }
+                    }
                 )
+                activeVoiceInputCancellation = nil
+                try checkVoiceInputCancellation()
                 startedRunID = response.runId
                 if let originThreadID {
                     ensureObservedRunContext(runID: response.runId, threadID: originThreadID, inputOrigin: .voice)
@@ -879,6 +902,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             activeAttachmentUploadCancellation = nil
             activeVoiceInputCancellation = nil
             if didCancelVoiceInputPreparation || error is CancellationError || isAttachmentTransferCancellation(error) {
+                deactivateVoiceModeAfterVoiceInputFailure(threadID: originThreadID)
                 if activeThreadID == originThreadID {
                     errorText = ""
                     statusText = "Cancelled"
@@ -896,6 +920,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 return
             }
             if let repairMessage = registerConnectionRepairIfNeeded(from: error) {
+                deactivateVoiceModeAfterVoiceInputFailure(threadID: originThreadID)
                 if activeThreadID == originThreadID {
                     errorText = repairMessage
                     statusText = "Connection needs repair"
@@ -914,6 +939,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 return
             }
             maybeAutoFixWorkingDirectory(from: error)
+            deactivateVoiceModeAfterVoiceInputFailure(threadID: originThreadID)
             if activeThreadID == originThreadID {
                 errorText = error.localizedDescription
                 statusText = hasFailedDraftAttachments ? "Upload failed" : "Failed"
@@ -1048,7 +1074,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         shouldResumeVoiceModeAfterSpeech = false
         errorText = ""
         if !isRecording && !isLoading {
-            await startRecording()
+            let didStartRecording = await startRecording()
+            if !didStartRecording {
+                deactivateVoiceMode(stopSpeaking: false)
+            }
         } else if isLoading {
             statusText = "Voice mode will continue after this reply."
         } else {
@@ -1628,7 +1657,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private func createUtteranceRun(
         threadID: UUID?,
         utteranceText: String,
-        attachments: [ChatArtifact]
+        attachments: [ChatArtifact],
+        registerCancellation: ((@escaping () -> Void) -> Void)? = nil
     ) async throws -> UtteranceResponse {
         try await client.createUtterance(
             serverURL: normalizedServerURL,
@@ -1643,7 +1673,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 workingDirectory: nil,
                 responseMode: effectiveResponseMode,
                 responseProfile: effectiveAgentGuidanceMode
-            )
+            ),
+            registerCancellation: registerCancellation
         )
     }
 
@@ -1862,6 +1893,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         defaults.set(audioCuesEnabled, forKey: DefaultsKey.audioCuesEnabled)
         defaults.set(speakRepliesEnabled, forKey: DefaultsKey.speakRepliesEnabled)
         defaults.set(autoSendAfterSilenceEnabled, forKey: DefaultsKey.autoSendAfterSilenceEnabled)
+        normalizeAutoSendAfterSilenceSetting()
         defaults.set(autoSendAfterSilenceSeconds, forKey: DefaultsKey.autoSendAfterSilenceSeconds)
         refreshClientConnectionCandidates()
         updateRemoteCommandState()
@@ -2330,6 +2362,26 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         let value = autoSendAfterSilenceSeconds.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let parsed = Double(value) else { return 1.2 }
         return min(5.0, max(0.8, parsed))
+    }
+
+    var autoSendAfterSilenceDelaySeconds: Double {
+        normalizedAutoSendAfterSilenceSeconds
+    }
+
+    var autoSendAfterSilenceDelayLabel: String {
+        "\(autoSendAfterSilenceSecondsFormatted(autoSendAfterSilenceDelaySeconds)) seconds"
+    }
+
+    func setAutoSendAfterSilenceDelay(_ seconds: Double) {
+        autoSendAfterSilenceSeconds = autoSendAfterSilenceSecondsFormatted(seconds)
+    }
+
+    private func normalizeAutoSendAfterSilenceSetting() {
+        autoSendAfterSilenceSeconds = autoSendAfterSilenceSecondsFormatted(normalizedAutoSendAfterSilenceSeconds)
+    }
+
+    private func autoSendAfterSilenceSecondsFormatted(_ seconds: Double) -> String {
+        String(format: "%.1f", min(5.0, max(0.8, seconds)))
     }
 
     private var activeSilenceConfig: AudioRecorderService.SilenceConfig? {
@@ -3138,6 +3190,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         if let value = defaults.string(forKey: DefaultsKey.autoSendAfterSilenceSeconds), !value.isEmpty {
             autoSendAfterSilenceSeconds = value
         }
+        normalizeAutoSendAfterSilenceSetting()
         if let data = defaults.data(forKey: DefaultsKey.connectionRepairState),
            let decoded = try? JSONDecoder().decode(PersistedConnectionRepairState.self, from: data) {
             setConnectionRepairState(
@@ -3657,6 +3710,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
+    private func deactivateVoiceModeAfterVoiceInputFailure(threadID: UUID?) {
+        guard voiceModeEnabled else { return }
+        if let threadID, voiceModeThreadID != threadID {
+            return
+        }
+        deactivateVoiceMode(stopSpeaking: false)
+    }
+
     private func isAttachmentTransferCancellation(_ error: Error) -> Bool {
         if error is CancellationError {
             return true
@@ -3838,6 +3899,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_setActiveVoiceInputPhase(_ phase: VoiceInputPhase) {
         activeVoiceInputPhase = phase
+    }
+
+    func _test_deactivateVoiceModeAfterVoiceInputFailure(threadID: UUID?) {
+        deactivateVoiceModeAfterVoiceInputFailure(threadID: threadID)
     }
 
     func _test_resolvedSpokenReplyText(runID: String, threadID: UUID, summary: String, status: String) -> String? {

@@ -23,6 +23,13 @@ struct ConnectionSettingsSheet: View {
         case failure(String)
     }
 
+    private var autoSendAfterSilenceBinding: Binding<Double> {
+        Binding(
+            get: { vm.autoSendAfterSilenceDelaySeconds },
+            set: { vm.setAutoSendAfterSilenceDelay($0) }
+        )
+    }
+
     init(
         vm: VoiceAgentViewModel,
         isRuntimeSettingsPreviewFocus: Bool,
@@ -124,16 +131,18 @@ struct ConnectionSettingsSheet: View {
                         Toggle("Speak Replies", isOn: $vm.speakRepliesEnabled)
                         Toggle("Auto-send After Silence", isOn: $vm.autoSendAfterSilenceEnabled)
                         if vm.autoSendAfterSilenceEnabled {
-                            TextField("Silence seconds", text: $vm.autoSendAfterSilenceSeconds)
-                                .keyboardType(.decimalPad)
+                            Stepper(value: autoSendAfterSilenceBinding, in: 0.8...5.0, step: 0.2) {
+                                LabeledContent("Silence Delay", value: vm.autoSendAfterSilenceDelayLabel)
+                            }
+                            .accessibilityIdentifier("settings.voice.silenceDelay")
                         }
                     } header: {
                         Text("Voice & Feedback")
                     } footer: {
                         Text(
                             vm.autoSendAfterSilenceEnabled
-                                ? "AirPods click uses headset controls. Audio cues cover start and sent confirmations, while failures stay haptic-only. Speak Replies reads cleaned assistant responses for voice turns, keeping long code-heavy details on screen. Auto-send submits after the selected silence window, and voice mode reopens the mic after each reply."
-                                : "AirPods click uses headset controls to start recording and stop+send. Audio cues cover start and sent confirmations, while failures stay haptic-only. Speak Replies reads cleaned assistant responses for voice turns, keeping long code-heavy details on screen. Voice mode keeps the conversation going by reopening the mic after each reply."
+                                ? "Auto-send uses the selected silence delay for one-shot recordings. Voice mode uses a faster handoff and reopens the mic after each reply."
+                                : "AirPods click can start recording and stop+send. Audio cues confirm start and send. Speak Replies reads cleaned assistant responses for voice turns."
                         )
                     }
 

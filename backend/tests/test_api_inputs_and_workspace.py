@@ -248,6 +248,12 @@ def test_audio_run_can_be_cancelled_during_transcription(make_client, monkeypatc
     cancel = client.post("/v1/runs/audio-cancel/cancel", headers=auth_headers(token))
     assert cancel.status_code == 200
 
+    cancelled_run = client.get("/v1/runs/audio-cancel", headers=auth_headers(token))
+    assert cancelled_run.status_code == 200
+    cancelled_payload = cancelled_run.json()
+    assert cancelled_payload["status"] == "cancelled"
+    assert "run.cancelled" in [event["type"] for event in cancelled_payload["events"]]
+
     release.set()
     worker.join(timeout=5)
     assert not worker.is_alive()
@@ -264,6 +270,53 @@ def test_audio_run_can_be_cancelled_during_transcription(make_client, monkeypatc
     assert "run.cancelled" in [event["type"] for event in payload["events"]]
 
 
+def test_audio_cancelled_transcription_error_remains_cancelled(make_client, monkeypatch):
+    client, token = make_client(provider="mock")
+    module = importlib.import_module("app.main")
+    started = threading.Event()
+    release = threading.Event()
+    observed: dict[str, object] = {}
+
+    def fake_transcribe(**_: object) -> str:
+        started.set()
+        assert release.wait(timeout=5)
+        raise RuntimeError("provider timed out")
+
+    monkeypatch.setattr(module.TRANSCRIBER, "transcribe", fake_transcribe)
+
+    def post_audio() -> None:
+        observed["response"] = client.post(
+            "/v1/audio",
+            headers=auth_headers(token),
+            files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
+            data={
+                "session_id": "audio-cancel-error",
+                "run_id": "audio-cancel-error",
+                "executor": "local",
+            },
+        )
+
+    worker = threading.Thread(target=post_audio)
+    worker.start()
+    assert started.wait(timeout=5)
+
+    cancel = client.post("/v1/runs/audio-cancel-error/cancel", headers=auth_headers(token))
+    assert cancel.status_code == 200
+    release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+
+    response = observed["response"]
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "run_cancelled"
+
+    run = client.get("/v1/runs/audio-cancel-error", headers=auth_headers(token))
+    assert run.status_code == 200
+    payload = run.json()
+    assert payload["status"] == "cancelled"
+    assert "run.failed" not in [event["type"] for event in payload["events"]]
+
+
 def test_audio_openai_missing_key(make_client):
     client, token = make_client(provider="openai", openai_api_key="")
     resp = client.post(
@@ -272,6 +325,25 @@ def test_audio_openai_missing_key(make_client):
         files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
         data={"session_id": "audio2", "executor": "local"},
     )
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert detail["code"] == "transcription_failed"
+    assert "OPENAI_API_KEY is not set" in detail["message"]
+
+
+def test_audio_openai_transcript_hint_does_not_bypass_provider(make_client):
+    client, token = make_client(provider="openai", openai_api_key="")
+    resp = client.post(
+        "/v1/audio",
+        headers=auth_headers(token),
+        files={"audio": ("sample.wav", BytesIO(b"fakewav"), "audio/wav")},
+        data={
+            "session_id": "audio-openai-hint",
+            "executor": "local",
+            "transcript_hint": "do not execute this as a transcript",
+        },
+    )
+
     assert resp.status_code == 502
     detail = resp.json()["detail"]
     assert detail["code"] == "transcription_failed"

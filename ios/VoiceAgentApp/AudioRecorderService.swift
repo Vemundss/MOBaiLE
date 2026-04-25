@@ -1,6 +1,14 @@
 import AVFoundation
 import Foundation
 
+protocol AudioRecording: AnyObject {
+    func start(
+        silenceConfig: AudioRecorderService.SilenceConfig?,
+        onSilenceDetected: (() -> Void)?
+    ) async throws
+    func stop() -> URL?
+}
+
 enum RecorderError: Error, LocalizedError {
     case permissionDenied
     case recorderUnavailable
@@ -15,7 +23,7 @@ enum RecorderError: Error, LocalizedError {
     }
 }
 
-final class AudioRecorderService: NSObject {
+final class AudioRecorderService: NSObject, AudioRecording {
     struct SilenceConfig {
         let thresholdDB: Float
         let requiredSilenceDuration: TimeInterval

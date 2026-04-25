@@ -1,7 +1,34 @@
 import Foundation
 
 private struct APIErrorPayload: Decodable {
-    let detail: String?
+    let detail: APIErrorDetailPayload?
+}
+
+private struct APIErrorDetailPayload: Decodable {
+    let message: String?
+    let code: String?
+    let field: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case code
+        case field
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let stringValue = try? container.decode(String.self) {
+            self.message = stringValue
+            self.code = nil
+            self.field = nil
+            return
+        }
+
+        let keyed = try decoder.container(keyedBy: CodingKeys.self)
+        self.message = try keyed.decodeIfPresent(String.self, forKey: .message)
+        self.code = try keyed.decodeIfPresent(String.self, forKey: .code)
+        self.field = try keyed.decodeIfPresent(String.self, forKey: .field)
+    }
 }
 
 enum APIError: Error, LocalizedError {
@@ -20,6 +47,11 @@ enum APIError: Error, LocalizedError {
     var backendDetail: String? {
         guard case let .httpError(_, body) = self else { return nil }
         return Self.parseBackendDetail(from: body)
+    }
+
+    var backendCode: String? {
+        guard case let .httpError(_, body) = self else { return nil }
+        return Self.parseBackendCode(from: body)
     }
 
     var isMissingOrInvalidBearerToken: Bool {
@@ -57,12 +89,29 @@ enum APIError: Error, LocalizedError {
 
         if let data = trimmed.data(using: .utf8),
            let payload = try? JSONDecoder().decode(APIErrorPayload.self, from: data),
-           let detail = payload.detail?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !detail.isEmpty {
-            return humanized(detail)
+           let detail = payload.detail {
+            let message = detail.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !message.isEmpty {
+                return humanized(message)
+            }
+            let code = detail.code?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !code.isEmpty {
+                return humanized(code.replacingOccurrences(of: "_", with: " "))
+            }
         }
 
         return humanized(trimmed)
+    }
+
+    private static func parseBackendCode(from body: String) -> String? {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(APIErrorPayload.self, from: data) else {
+            return nil
+        }
+        let code = payload.detail?.code?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return code.isEmpty ? nil : code
     }
 
     private static func humanized(_ detail: String) -> String {
@@ -81,7 +130,8 @@ final class APIClient {
     func createUtterance(
         serverURL: String,
         token: String,
-        requestBody: UtteranceRequest
+        requestBody: UtteranceRequest,
+        registerCancellation: ((@escaping () -> Void) -> Void)? = nil
     ) async throws -> UtteranceResponse {
         try await withAuthorizedCandidateServerURL(serverURL, token: token) { baseURL, activeToken in
             guard let url = URL(string: baseURL + "/v1/utterances") else {
@@ -95,7 +145,7 @@ final class APIClient {
             request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.httpBody = try jsonEncoder.encode(requestBody)
 
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await data(for: request, registerCancellation: registerCancellation)
             try validate(response: response, data: data)
             return try jsonDecoder.decode(UtteranceResponse.self, from: data)
         }
@@ -448,7 +498,7 @@ final class APIClient {
             request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-            let audioData = try Data(contentsOf: audioFileURL)
+            let audioData = try await readFileData(at: audioFileURL)
             var fields: [String: String] = [
                 "session_id": sessionID,
                 "response_mode": responseMode ?? "",
@@ -479,7 +529,7 @@ final class APIClient {
                 let attachmentsJSON = String(decoding: encodedAttachments, as: UTF8.self)
                 fields["attachments_json"] = attachmentsJSON
             }
-            request.httpBody = buildMultipartBody(
+            request.httpBody = await buildMultipartBody(
                 boundary: boundary,
                 fields: fields,
                 fileData: audioData,
@@ -518,8 +568,8 @@ final class APIClient {
             request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-            let fileData = try Data(contentsOf: fileURL)
-            let bodyData = buildMultipartBody(
+            let fileData = try await readFileData(at: fileURL)
+            let bodyData = await buildMultipartBody(
                 boundary: boundary,
                 fields: ["session_id": sessionID],
                 fileData: fileData,
@@ -777,23 +827,31 @@ final class APIClient {
         fileFieldName: String,
         fileName: String,
         mimeType: String
-    ) -> Data {
-        var body = Data()
+    ) async -> Data {
+        await Task.detached(priority: .userInitiated) {
+            var body = Data()
 
-        for (key, value) in fields {
+            for (key, value) in fields {
+                body.append("--\(boundary)\r\n")
+                body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+                body.append("\(value)\r\n")
+            }
+
             body.append("--\(boundary)\r\n")
-            body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
-            body.append("\(value)\r\n")
-        }
+            body.append("Content-Disposition: form-data; name=\"\(fileFieldName)\"; filename=\"\(fileName)\"\r\n")
+            body.append("Content-Type: \(mimeType)\r\n\r\n")
+            body.append(fileData)
+            body.append("\r\n")
 
-        body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"\(fileFieldName)\"; filename=\"\(fileName)\"\r\n")
-        body.append("Content-Type: \(mimeType)\r\n\r\n")
-        body.append(fileData)
-        body.append("\r\n")
+            body.append("--\(boundary)--\r\n")
+            return body
+        }.value
+    }
 
-        body.append("--\(boundary)--\r\n")
-        return body
+    private func readFileData(at url: URL) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            try Data(contentsOf: url)
+        }.value
     }
 
     private func validate(response: URLResponse, data: Data) throws {

@@ -207,7 +207,7 @@ async def create_audio_run(
             RUN_STATE.append_event(audio_run_id, ExecutionEvent(type="run.failed", message="Audio payload too large"))
             RUN_STATE.set_run_status(audio_run_id, "failed", "Audio payload too large")
         raise
-    if RUN_STATE.is_cancelled(audio_run_id):
+    if _is_run_cancelled(audio_run_id):
         _mark_cancelled_before_execution(audio_run_id)
         raise HTTPException(
             status_code=409,
@@ -224,12 +224,30 @@ async def create_audio_run(
             text_hint=transcript_hint,
         )
     except TranscriptionError as exc:
+        if _is_run_cancelled(audio_run_id):
+            _mark_cancelled_before_execution(audio_run_id)
+            raise HTTPException(
+                status_code=409,
+                detail=ApiErrorDetail(
+                    code="run_cancelled",
+                    message="Audio run was cancelled before transcription completed.",
+                ).model_dump(),
+            ) from exc
         _mark_audio_transcription_failed(audio_run_id, str(exc))
         raise HTTPException(
             status_code=502,
             detail=ApiErrorDetail(code="transcription_failed", message=str(exc), field="audio").model_dump(),
         ) from exc
     except Exception as exc:
+        if _is_run_cancelled(audio_run_id):
+            _mark_cancelled_before_execution(audio_run_id)
+            raise HTTPException(
+                status_code=409,
+                detail=ApiErrorDetail(
+                    code="run_cancelled",
+                    message="Audio run was cancelled before transcription completed.",
+                ).model_dump(),
+            ) from exc
         _mark_audio_transcription_failed(audio_run_id, "Audio transcription failed")
         raise HTTPException(
             status_code=500,
@@ -239,7 +257,7 @@ async def create_audio_run(
                 field="audio",
             ).model_dump(),
         ) from exc
-    if RUN_STATE.is_cancelled(audio_run_id):
+    if _is_run_cancelled(audio_run_id):
         _mark_cancelled_before_execution(audio_run_id)
         raise HTTPException(
             status_code=409,
@@ -441,18 +459,35 @@ def create_directory(request: DirectoryCreateRequest) -> DirectoryCreateResponse
 @app.post("/v1/runs/{run_id}/cancel")
 def cancel_run(run_id: str) -> dict[str, str]:
     try:
-        RUN_STATE.request_cancel(run_id)
+        run = RUN_STATE.request_cancel(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=f"run already terminal ({exc})") from exc
 
-    EXECUTION_SERVICE.terminate_active_process(run_id)
+    if _is_audio_transcribing_run(run):
+        _mark_cancelled_before_execution(run_id)
+    else:
+        EXECUTION_SERVICE.terminate_active_process(run_id)
 
     return {"run_id": run_id, "status": "cancel_requested"}
 
 
+def _is_audio_transcribing_run(run: RunRecord) -> bool:
+    return run.status == "running" and run.summary == "Transcribing audio"
+
+
+def _is_run_cancelled(run_id: str) -> bool:
+    if RUN_STATE.is_cancelled(run_id):
+        return True
+    run = RUN_STATE.get_run(run_id)
+    return run is not None and run.status == "cancelled"
+
+
 def _mark_cancelled_before_execution(run_id: str) -> None:
+    run = RUN_STATE.get_run(run_id)
+    if run is not None and run.status == "cancelled":
+        return
     RUN_STATE.append_activity_event(
         run_id,
         stage="transcribing",
