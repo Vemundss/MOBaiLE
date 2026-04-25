@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var showPairingScanner = false
     @State private var showLogs = false
     @State private var showThreads = false
+    @State private var threadSheetDetent = PresentationDetent.large
     @State private var showAttachmentOptions = false
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
@@ -86,7 +87,9 @@ struct ContentView: View {
             }) {
                 settingsSheet
             }
-            .sheet(isPresented: $showThreads) {
+            .sheet(isPresented: $showThreads, onDismiss: {
+                threadSheetDetent = .large
+            }) {
                 ThreadsView(
                     threads: vm.sortedThreads,
                     activeThreadID: vm.activeThreadID,
@@ -105,7 +108,7 @@ struct ContentView: View {
                         showThreads = false
                     }
                 )
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.medium, .large], selection: $threadSheetDetent)
                 .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showLogs) {

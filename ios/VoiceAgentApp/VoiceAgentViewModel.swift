@@ -1934,9 +1934,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
-    private func speak(_ text: String) {
-        guard speakRepliesEnabled else { return }
-        guard let spoken = spokenTextForPlayback(from: text) else { return }
+    @discardableResult
+    private func speak(_ text: String) -> Bool {
+        guard speakRepliesEnabled else { return false }
+        guard let spoken = spokenTextForPlayback(from: text) else { return false }
         if speaker.isSpeaking {
             speaker.stopSpeaking(at: .immediate)
         }
@@ -1945,6 +1946,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         utterance.preUtteranceDelay = 0.02
         utterance.postUtteranceDelay = 0.08
         speaker.speak(utterance)
+        return true
     }
 
     private func scheduleVoiceModeResumeAfterCurrentReply(threadID: UUID, replyText: String) {
@@ -1962,7 +1964,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             }
             return
         }
-        speak(spokenReply)
+        if !speak(spokenReply) {
+            Task { @MainActor in
+                await self.resumeVoiceModeAfterSpokenReplyIfNeeded()
+            }
+        }
     }
 
     private func resumeVoiceModeAfterSpokenReplyIfNeeded() async {
@@ -3589,6 +3595,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         spokenTextForPlayback(from: rawText)
     }
 
+    func _test_scheduleVoiceModeResumeAfterCurrentReply(threadID: UUID, replyText: String) {
+        scheduleVoiceModeResumeAfterCurrentReply(threadID: threadID, replyText: replyText)
+    }
+
     func _test_setVoiceModeEnabled(_ enabled: Bool, threadID: UUID?) {
         if enabled {
             voiceModeEnabled = true
@@ -3600,6 +3610,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_usesAutoSendForCurrentTurn() -> Bool {
         usesAutoSendForCurrentTurn
+    }
+
+    func _test_shouldResumeVoiceModeAfterSpeech() -> Bool {
+        shouldResumeVoiceModeAfterSpeech
     }
 
     func _test_activeSilenceConfig() -> AudioRecorderService.SilenceConfig? {

@@ -1422,6 +1422,34 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testVoiceModeResumeDoesNotWaitForeverWhenSpokenRepliesAreDisabled() async throws {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+        let threadID = try XCTUnwrap(vm.activeThreadID)
+        vm.speakRepliesEnabled = false
+        vm._test_setVoiceModeEnabled(true, threadID: threadID)
+
+        vm._test_scheduleVoiceModeResumeAfterCurrentReply(
+            threadID: threadID,
+            replyText: "The run completed and the next prompt can start."
+        )
+        try await Task.sleep(nanoseconds: 700_000_000)
+
+        XCTAssertFalse(vm._test_shouldResumeVoiceModeAfterSpeech())
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertEqual(
+            vm.statusText,
+            "Run setup on your computer or enter connection details first."
+        )
+    }
+
+    @MainActor
     func testSwitchingThreadsDisablesVoiceModeLoop() {
         let vm = VoiceAgentViewModel()
         vm.createNewThread()
