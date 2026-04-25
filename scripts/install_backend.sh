@@ -150,7 +150,7 @@ write_env_file() {
   local public_url_value="${PUBLIC_SERVER_URL%/}"
   local phone_access_value="${PHONE_ACCESS_MODE}"
   local codex_home_value="${HOME}/.codex"
-  local codex_model_value="gpt-5.4"
+  local codex_model_value="auto"
   local codex_search_value="true"
   local use_runtime_context_value="true"
   local context_file_value="../.mobaile/runtime/RUNTIME_CONTEXT.md"
@@ -335,7 +335,7 @@ VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=${playwright_output_value}
 VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=${playwright_profile_value}
 VOICE_AGENT_PAIR_CODE_TTL_MIN=${PAIR_CODE_TTL_MIN}
 # Optional model override:
-# VOICE_AGENT_CODEX_MODEL=gpt-5.4-mini
+# VOICE_AGENT_CODEX_MODEL=gpt-5.5
 # Transcription provider: openai or mock
 # Set this to mock for deterministic local testing.
 VOICE_AGENT_TRANSCRIBE_PROVIDER=openai

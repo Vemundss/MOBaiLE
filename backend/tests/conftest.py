@@ -14,6 +14,7 @@ def backend_test_env(monkeypatch, tmp_path: Path):
         "VOICE_AGENT_CAPABILITIES_REPORT_PATH",
         str(tmp_path / "capabilities.json"),
     )
+    monkeypatch.setenv("VOICE_AGENT_CODEX_MODEL_DISCOVERY", "off")
 
 
 @pytest.fixture

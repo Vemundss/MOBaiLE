@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -11,12 +14,18 @@ from app.models.schemas import AgentExecutorName, CodexReasoningEffort, RunExecu
 from app.phone_access_mode import PhoneAccessMode, normalize_phone_access_mode
 
 CODEX_MODEL_OPTIONS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.1")
+CODEX_VERSION_GATED_MODEL_OPTIONS: tuple[tuple[str, tuple[int, int, int]], ...] = (
+    ("gpt-5.5", (0, 125, 0)),
+)
 DEFAULT_CODEX_MODEL = CODEX_MODEL_OPTIONS[0]
 CLAUDE_MODEL_OPTIONS = ("claude-sonnet-4-5",)
 CODEX_REASONING_EFFORT_OPTIONS: tuple[CodexReasoningEffort, ...] = ("minimal", "low", "medium", "high", "xhigh")
 
 _FALSEY_ENV_VALUES = {"0", "false", "no", "off"}
 _TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+_CODEX_MODEL_AUTO_VALUES = {"", "auto", "backend-default", "default"}
+_CODEX_MODELS_CACHE_FILENAME = "models_cache.json"
+_CODEX_VERSION_TIMEOUT_SEC = 2.0
 
 
 @dataclass(frozen=True)
@@ -220,12 +229,22 @@ def load_agent_runtime_environment_settings(backend_root: Path) -> AgentRuntimeE
     )
     codex_enable_web_search = _read_enabled_env("VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH", default=True)
     codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 900)
-    codex_model_override = os.getenv("VOICE_AGENT_CODEX_MODEL", DEFAULT_CODEX_MODEL).strip() or DEFAULT_CODEX_MODEL
+    codex_cli_version = _codex_cli_version(codex_binary)
+    discovered_codex_model_options = discover_codex_model_options(
+        codex_binary=codex_binary,
+        codex_home=codex_home,
+        installed_version=codex_cli_version,
+    )
+    version_gated_codex_model_options = _version_gated_codex_model_options(codex_cli_version)
     codex_model_options = tuple(
         _runtime_option_values(
             os.getenv("VOICE_AGENT_CODEX_MODEL_OPTIONS"),
-            CODEX_MODEL_OPTIONS,
+            (*discovered_codex_model_options, *CODEX_MODEL_OPTIONS, *version_gated_codex_model_options),
         )
+    )
+    codex_model_override = _resolve_codex_model_override(
+        os.getenv("VOICE_AGENT_CODEX_MODEL", "auto"),
+        codex_model_options,
     )
     codex_reasoning_effort_override = os.getenv("VOICE_AGENT_CODEX_REASONING_EFFORT", "").strip().lower()
     if codex_reasoning_effort_override not in CODEX_REASONING_EFFORT_OPTIONS:
@@ -420,6 +439,88 @@ def _runtime_option_values(
     for item in fallback_values:
         add(item)
     return options
+
+
+def discover_codex_model_options(
+    *,
+    codex_binary: str,
+    codex_home: Path,
+    installed_version: tuple[int, int, int] | None = None,
+) -> tuple[str, ...]:
+    if not _read_enabled_env("VOICE_AGENT_CODEX_MODEL_DISCOVERY", default=True):
+        return ()
+
+    cache_path = codex_home / _CODEX_MODELS_CACHE_FILENAME
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    if not isinstance(payload, dict):
+        return ()
+
+    cache_version = _parse_semver(payload.get("client_version"))
+    installed_version = installed_version if installed_version is not None else _codex_cli_version(codex_binary)
+    if cache_version is None or installed_version is None or cache_version > installed_version:
+        return ()
+
+    raw_models = payload.get("models")
+    if not isinstance(raw_models, list):
+        return ()
+
+    options: list[str] = []
+    seen: set[str] = set()
+    for raw_model in raw_models:
+        if not isinstance(raw_model, dict):
+            continue
+        if str(raw_model.get("visibility", "")).strip().lower() != "list":
+            continue
+        slug = str(raw_model.get("slug", "")).strip()
+        if not slug:
+            continue
+        key = slug.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        options.append(slug)
+    return tuple(options)
+
+
+def _resolve_codex_model_override(raw_value: str | None, options: tuple[str, ...]) -> str:
+    normalized = (raw_value or "").strip()
+    if normalized.casefold() in _CODEX_MODEL_AUTO_VALUES:
+        return options[0] if options else DEFAULT_CODEX_MODEL
+    return normalized
+
+
+def _version_gated_codex_model_options(installed_version: tuple[int, int, int] | None) -> tuple[str, ...]:
+    if installed_version is None:
+        return ()
+    return tuple(
+        model
+        for model, minimum_version in CODEX_VERSION_GATED_MODEL_OPTIONS
+        if installed_version >= minimum_version
+    )
+
+
+def _codex_cli_version(codex_binary: str) -> tuple[int, int, int] | None:
+    try:
+        result = subprocess.run(
+            [codex_binary, "--version"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=_CODEX_VERSION_TIMEOUT_SEC,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _parse_semver(f"{result.stdout}\n{result.stderr}")
+
+
+def _parse_semver(value: object) -> tuple[int, int, int] | None:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", str(value or ""))
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
 def _read_enabled_env(name: str, *, default: bool) -> bool:
