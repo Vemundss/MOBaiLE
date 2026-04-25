@@ -977,7 +977,7 @@ final class APIClient {
             case .invalidResponse:
                 return true
             case let .httpError(code, _):
-                return code == 404 || (500...599).contains(code)
+                return code == 404
             }
         }
         if error is DecodingError {
@@ -991,6 +991,10 @@ final class APIClient {
         }
         let nsError = error as NSError
         return nsError.domain == NSURLErrorDomain
+    }
+
+    func _test_shouldRetryAcrossCandidates(_ error: Error) -> Bool {
+        shouldRetryAcrossCandidates(error)
     }
 
     private func defaultPort(for scheme: String?) -> Int {

@@ -118,6 +118,19 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(error.localizedDescription, "Audio payload too large")
     }
 
+    func testCandidateFallbackPreservesReachableBackendErrors() {
+        let client = APIClient()
+
+        XCTAssertFalse(client._test_shouldRetryAcrossCandidates(
+            APIError.httpError(
+                502,
+                #"{"detail":{"code":"transcription_failed","message":"OPENAI_API_KEY is not set"}}"#
+            )
+        ))
+        XCTAssertTrue(client._test_shouldRetryAcrossCandidates(APIError.httpError(404, "")))
+        XCTAssertTrue(client._test_shouldRetryAcrossCandidates(URLError(.cannotConnectToHost)))
+    }
+
     @MainActor
     func testConnectionRepairStatePersistsAcrossViewModelReload() {
         let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
