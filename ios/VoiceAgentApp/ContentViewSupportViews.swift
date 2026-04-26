@@ -757,17 +757,18 @@ struct SetupGuideSheet: View {
                         SetupGuideStepSummaryRow(
                             stepNumber: 2,
                             title: "Scan the pairing QR in MOBaiLE",
-                            detail: "After install, open `backend/pairing-qr.png` on the computer. In MOBaiLE, tap Scan Pairing QR and point the phone at the screen."
+                            detail: "After install, run `mobaile pair` on the computer and open the QR path it prints. In MOBaiLE, tap Scan Pairing QR and point the phone at the screen."
                         )
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("What to do next")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
-                            Text("1. Open `backend/pairing-qr.png` on the computer.")
-                            Text("2. Tap Scan Pairing QR in MOBaiLE.")
-                            Text("3. Point the phone at the screen and confirm the pairing.")
-                            Text("4. Later, run `mobaile status` on the computer. If your shell does not find it yet, run `~/.local/bin/mobaile status`.")
+                            Text("1. Run `mobaile pair` on the computer.")
+                            Text("2. Open the `Pairing QR` path it prints.")
+                            Text("3. Tap Scan Pairing QR in MOBaiLE.")
+                            Text("4. Point the phone at the screen and confirm the pairing.")
+                            Text("5. Later, run `mobaile status` on the computer. If your shell does not find it yet, run `~/.local/bin/mobaile status`.")
                         }
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
@@ -789,7 +790,7 @@ struct SetupGuideSheet: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("Manual fallback", systemImage: "slider.horizontal.3")
                             .font(.subheadline.weight(.semibold))
-                        Text("If QR pairing is not available, open Settings and paste the `server_url` from `backend/pairing.json` plus `VOICE_AGENT_API_TOKEN` from `backend/.env`.")
+                        Text("If QR pairing is not available, open Settings and paste the server URL from the active pairing file plus `VOICE_AGENT_API_TOKEN` from the active backend `.env`.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

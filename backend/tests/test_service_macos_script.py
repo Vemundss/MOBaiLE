@@ -181,3 +181,110 @@ def test_service_macos_sync_preserves_paired_clients_in_runtime_state(tmp_path: 
         }
     ]
     assert not (runtime_dir / "pairing-qr.png").exists()
+
+
+def assert_service_sync_preserves_newer_runtime_pair_code(
+    tmp_path: Path,
+    script_name: str,
+    platform_name: str,
+    runtime_dir: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    scripts_dir = repo / "scripts"
+    backend_dir = repo / "backend"
+    fake_bin = tmp_path / "bin"
+    home = tmp_path / "home"
+
+    scripts_dir.mkdir(parents=True)
+    backend_dir.mkdir(parents=True)
+    fake_bin.mkdir(parents=True)
+    runtime_dir.mkdir(parents=True)
+    home.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(PROJECT_ROOT / "scripts" / script_name, scripts_dir / script_name)
+    (backend_dir / ".env").write_text("VOICE_AGENT_API_TOKEN=test-token\n", encoding="utf-8")
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://repo.example:8000",
+                "server_urls": ["http://repo.example:8000", "http://wifi.example:8000"],
+                "session_id": "iphone-app",
+                "pair_code": "checkout-code",
+                "pair_code_expires_at": "2026-01-01T00:00:00Z",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://old-runtime.example:8000",
+                "server_urls": ["http://old-runtime.example:8000"],
+                "session_id": "iphone-app",
+                "pair_code": "runtime-code",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+                "paired_clients": [{"token_sha256": "token-hash"}],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_dir / "pairing-qr.png").write_text("stale", encoding="utf-8")
+
+    write_executable(
+        fake_bin / "uname",
+        f"#!/usr/bin/env bash\nprintf '{platform_name}\\n'\n",
+    )
+    write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\nif [[ \"$1\" == \"sync\" ]]; then exit 0; fi\nexit 0\n",
+    )
+
+    result = subprocess.run(
+        ["bash", str(scripts_dir / script_name), "sync"],
+        cwd=repo,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    merged = json.loads((runtime_dir / "pairing.json").read_text(encoding="utf-8"))
+    assert merged["server_url"] == "http://repo.example:8000"
+    assert merged["server_urls"] == ["http://repo.example:8000", "http://wifi.example:8000"]
+    assert merged["pair_code"] == "runtime-code"
+    assert merged["pair_code_expires_at"] == "2999-01-01T00:00:00Z"
+    assert merged["paired_clients"] == [{"token_sha256": "token-hash"}]
+    assert not (runtime_dir / "pairing-qr.png").exists()
+
+
+def test_service_macos_sync_preserves_newer_runtime_pair_code(tmp_path: Path):
+    home = tmp_path / "home"
+    runtime_dir = home / "Library" / "Application Support" / "MOBaiLE" / "backend-runtime"
+
+    assert_service_sync_preserves_newer_runtime_pair_code(
+        tmp_path,
+        "service_macos.sh",
+        "Darwin",
+        runtime_dir,
+    )
+
+
+def test_service_linux_sync_preserves_newer_runtime_pair_code(tmp_path: Path):
+    home = tmp_path / "home"
+    runtime_dir = home / ".local" / "share" / "MOBaiLE" / "backend-runtime"
+
+    assert_service_sync_preserves_newer_runtime_pair_code(
+        tmp_path,
+        "service_linux.sh",
+        "Linux",
+        runtime_dir,
+    )

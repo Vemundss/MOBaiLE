@@ -76,7 +76,7 @@ struct ConnectionSettingsSheet: View {
                                 SetupGuideStepSummaryRow(
                                     stepNumber: 2,
                                     title: vm.needsConnectionRepair ? "Scan the QR again in MOBaiLE" : "Scan the pairing QR in MOBaiLE",
-                                    detail: "Open `backend/pairing-qr.png` on the computer, then tap Scan Pairing QR here. MOBaiLE reads it directly and fills the connection for you."
+                                    detail: "Run `mobaile pair` on the computer, open the QR path it prints, then tap Scan Pairing QR here. MOBaiLE reads it directly and fills the connection for you."
                                 )
                             }
 

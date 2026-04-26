@@ -48,6 +48,24 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testApplyPairingPayloadStagesPendingPairingFromJSONScannerText() {
+        let vm = VoiceAgentViewModel()
+
+        let didStage = vm.applyPairingPayload(
+            #"{"server_url":"http://127.0.0.1:8000","server_urls":["http://127.0.0.1:8000","http://100.111.99.51:8000"],"pair_code":"abc123","session_id":"iphone-app"}"#
+        )
+
+        XCTAssertTrue(didStage)
+        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://127.0.0.1:8000")
+        XCTAssertEqual(vm.pendingPairing?.serverURLs ?? [], [
+            "http://127.0.0.1:8000",
+            "http://100.111.99.51:8000",
+        ])
+        XCTAssertEqual(vm.pendingPairing?.pairCode, "abc123")
+        XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
+    }
+
+    @MainActor
     func testApplyPairingPayloadRejectsNonMobailePayload() {
         let vm = VoiceAgentViewModel()
 

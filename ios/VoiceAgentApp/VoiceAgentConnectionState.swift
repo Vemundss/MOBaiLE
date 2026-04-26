@@ -101,11 +101,12 @@ extension VoiceAgentViewModel {
             errorText = "No pairing code found."
             return false
         }
-        guard let url = extractPairingURL(from: trimmed) else {
+        if let url = extractPairingURL(from: trimmed) {
+            applyPairingURL(url)
+        } else if !applyPairingJSONPayload(trimmed) {
             errorText = "This QR code is not a MOBaiLE pairing link."
             return false
         }
-        applyPairingURL(url)
         if pendingPairing == nil, errorText.isEmpty {
             errorText = "This QR code is not a valid MOBaiLE pairing link."
         }
@@ -200,6 +201,48 @@ extension VoiceAgentViewModel {
         }
 
         return nil
+    }
+
+    func applyPairingJSONPayload(_ rawValue: String) -> Bool {
+        guard let data = rawValue.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let payload = object as? [String: Any] else {
+            return false
+        }
+
+        var items: [URLQueryItem] = []
+        if let serverURLs = payload["server_urls"] as? [Any] {
+            for value in serverURLs {
+                let trimmed = "\(value)".trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    items.append(URLQueryItem(name: "server_url", value: trimmed))
+                }
+            }
+        }
+        if items.isEmpty, let serverURL = payload["server_url"] {
+            let trimmed = "\(serverURL)".trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                items.append(URLQueryItem(name: "server_url", value: trimmed))
+            }
+        }
+
+        for key in ["pair_code", "session_id", "api_token"] {
+            guard let value = payload[key] else { continue }
+            let trimmed = "\(value)".trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                items.append(URLQueryItem(name: key, value: trimmed))
+            }
+        }
+
+        var components = URLComponents()
+        components.scheme = "mobaile"
+        components.host = "pair"
+        components.queryItems = items
+        guard let url = components.url else {
+            return false
+        }
+        applyPairingURL(url)
+        return pendingPairing != nil
     }
 
     func cancelPendingPairing() {

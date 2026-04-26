@@ -153,14 +153,15 @@ main() {
 
   step "Running checks and preparing pairing"
   bash ./scripts/doctor.sh || true
-  bash ./scripts/pairing_qr.sh || true
+  MOBAILE_SKIP_OPEN=1 bash ./scripts/mobaile pair || bash ./scripts/pairing_qr.sh || true
 
   echo
   echo "Bootstrap complete."
   echo "If service installation succeeded, the backend should now stay up automatically."
   echo
   echo "Next on your computer:"
-  echo "  1. Open ${INSTALL_DIR}/backend/pairing-qr.png"
+  echo "  1. Open the Pairing QR path printed above."
+  echo "     To refresh it later, run: bash \"${INSTALL_DIR}/scripts/mobaile\" pair"
   echo
   echo "Next on your iPhone:"
   echo "  1. In MOBaiLE, tap Scan Pairing QR"

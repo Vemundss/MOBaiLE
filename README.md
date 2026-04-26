@@ -164,9 +164,9 @@ What the installer does:
 - installs backend dependencies and creates `backend/.env`
 - creates `backend/pairing.json` using a Tailscale URL when available
 - installs and starts a background service on macOS or Linux when supported
-- generates `backend/pairing-qr.png`
+- generates a pairing QR; run `mobaile pair` later to refresh it
 
-If you want a stable hostname for the iPhone, set `VOICE_AGENT_PUBLIC_SERVER_URL` before pairing. Otherwise MOBaiLE prefers the Tailscale or LAN URLs advertised in `backend/pairing.json`.
+If you want a stable hostname for the iPhone, set `VOICE_AGENT_PUBLIC_SERVER_URL` before pairing. Otherwise MOBaiLE prefers the Tailscale or LAN URLs advertised in the active pairing file.
 
 ### Check that the computer is ready
 
@@ -180,12 +180,10 @@ Expected result: JSON with status `ok`.
 
 On the computer:
 
-1. Open `backend/pairing-qr.png`.
-2. If it is missing, regenerate it:
+1. Run `mobaile pair`. If your shell does not find it yet, run `~/.local/bin/mobaile pair`.
+2. Open the `Pairing QR` path it prints.
 
-```bash
-bash ./scripts/pairing_qr.sh
-```
+The path may be under the checkout or under the installed service runtime, depending on how the backend is running.
 
 On the iPhone:
 
@@ -195,8 +193,8 @@ On the iPhone:
 
 Manual fallback in app settings:
 
-- `Server URL`: preferred URL from `backend/pairing.json`
-- `API Token`: `VOICE_AGENT_API_TOKEN` from `backend/.env`
+- `Server URL`: preferred URL from the active pairing file
+- `API Token`: `VOICE_AGENT_API_TOKEN` from the active backend `.env`
 - `Session ID`: keep `iphone-app` unless you want a custom one
 
 If the app works on Wi-Fi but not on cellular, verify the chosen Tailscale or public URL is reachable from the phone.

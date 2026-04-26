@@ -37,11 +37,12 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/insta
 
 2. Keep the default answers in the installer:
    `Full Access`, `Anywhere with Tailscale`, and usually `Yes` for the background service.
-3. Open `backend/pairing-qr.png` on that computer.
-4. In MOBaiLE, tap `Scan Pairing QR` and point the phone at the screen.
-5. If you scan it with Camera instead, open the `mobaile://pair...` link it detects.
-6. Confirm the pairing inside MOBaiLE and send a small prompt.
-7. Later, run `mobaile status` on the computer if you want to check the connection. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
+3. Run `mobaile pair` on that computer. If your shell does not find it yet, run `~/.local/bin/mobaile pair`.
+4. Open the `Pairing QR` path it prints.
+5. In MOBaiLE, tap `Scan Pairing QR` and point the phone at the screen.
+6. If you scan it with Camera instead, open the `mobaile://pair...` link it detects.
+7. Confirm the pairing inside MOBaiLE and send a small prompt.
+8. Later, run `mobaile status` on the computer if you want to check the connection. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
 Already inside this repo? Run:
 
@@ -51,14 +52,14 @@ bash ./scripts/install.sh
 
 Manual fallback inside app Settings:
 
-1. Set `Server URL` to the value from `backend/pairing.json`
-2. Set `API Token` to `VOICE_AGENT_API_TOKEN` from `backend/.env`
+1. Set `Server URL` to the value from the active pairing file
+2. Set `API Token` to `VOICE_AGENT_API_TOKEN` from the active backend `.env`
 3. Keep `Session ID` as `iphone-app` unless you want a custom one
 
 Important:
 
 - if you are using a real iPhone, `127.0.0.1` will not work
-- use the preferred URL from `backend/pairing.json`; MOBaiLE will also keep any fallback LAN/Tailscale URLs advertised there
+- use the preferred URL from the active pairing file; MOBaiLE will also keep any fallback LAN/Tailscale URLs advertised there
 - when Tailscale MagicDNS is enabled, pairing prefers the stable `*.ts.net` hostname before raw Tailscale IPs
 - the app asks for microphone and Speech Recognition permission
 - if you have a stable remote hostname, set `VOICE_AGENT_PUBLIC_SERVER_URL` on the backend so pairing prefers that URL
@@ -134,9 +135,10 @@ The checked-in project does not hard-code a development team, so Xcode should le
 
 - Pairing link opens but app does not connect:
   - verify the backend is running
-  - verify the pair code and session in `backend/pairing.json` are current
-  - check whether `backend/pairing.json` lists multiple `server_urls`; the app will try them in order and promote the one that works
-  - verify `VOICE_AGENT_API_TOKEN` in `backend/.env` matches the running backend
+  - run `mobaile pair` and use the fresh QR path it prints
+  - verify the pair code and session in the active pairing file are current, not an old checkout copy
+  - check whether the active pairing file lists multiple `server_urls`; the app will try them in order and promote the one that works
+  - verify `VOICE_AGENT_API_TOKEN` in the active backend `.env` matches the running backend
   - if pairing fails immediately, rotate the pairing file first with `bash ./scripts/rotate_api_token.sh`
 
 - Audio fails but text works:

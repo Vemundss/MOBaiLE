@@ -80,6 +80,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 source_path = Path(sys.argv[1])
@@ -101,10 +102,40 @@ runtime_payload = load(runtime_path)
 if not source_payload and not runtime_payload:
     raise SystemExit(0)
 
+
+def has_pair_code(payload: dict[str, object]) -> bool:
+    return bool(str(payload.get("pair_code", "")).strip())
+
+
+def pair_code_expiry(payload: dict[str, object]):
+    raw = str(payload.get("pair_code_expires_at", "")).strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def source_pair_code_is_newer():
+    source_expiry = pair_code_expiry(source_payload)
+    runtime_expiry = pair_code_expiry(runtime_payload)
+    return source_expiry is not None and (
+        runtime_expiry is None or source_expiry > runtime_expiry
+    )
+
+
 merged = dict(runtime_payload)
-for key in ("session_id", "pair_code", "pair_code_expires_at", "server_url", "server_urls"):
+for key in ("session_id", "server_url", "server_urls"):
     if key in source_payload:
         merged[key] = source_payload[key]
+
+if has_pair_code(source_payload) and (
+    not has_pair_code(runtime_payload) or source_pair_code_is_newer()
+):
+    for key in ("pair_code", "pair_code_expires_at"):
+        if key in source_payload:
+            merged[key] = source_payload[key]
 
 if "paired_clients" in runtime_payload:
     merged["paired_clients"] = runtime_payload["paired_clients"]
@@ -133,7 +164,16 @@ sync_runtime() {
       "${BACKEND_DIR}/" "${RUNTIME_DIR}/"
   else
     echo "rsync not found; using cp fallback" >&2
+    local saved_pairing=""
+    if [[ -f "${RUNTIME_DIR}/pairing.json" ]]; then
+      saved_pairing="$(mktemp)"
+      cp "${RUNTIME_DIR}/pairing.json" "${saved_pairing}"
+    fi
     cp -R "${BACKEND_DIR}/." "${RUNTIME_DIR}/"
+    if [[ -n "${saved_pairing}" ]]; then
+      cp "${saved_pairing}" "${RUNTIME_DIR}/pairing.json"
+      rm -f "${saved_pairing}"
+    fi
   fi
 
   if [[ -f "${BACKEND_DIR}/.env" ]]; then

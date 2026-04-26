@@ -28,6 +28,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>$(MOBAILE_URL_SCHEME)</string>
+				<string>mobaile</string>
 			</array>
 		</dict>
 	</array>

@@ -28,3 +28,17 @@ def test_xcodegen_source_keeps_tailscale_ats_exception() -> None:
     assert "ts.net:" in text
     assert "NSExceptionAllowsInsecureHTTPLoads: true" in text
     assert "NSIncludesSubdomains: true" in text
+
+
+def test_debug_info_plist_claims_standard_pairing_scheme() -> None:
+    info_plist_path = _repo_root() / "ios" / "VoiceAgentApp" / "Info-Debug.plist"
+    payload = plistlib.loads(info_plist_path.read_bytes())
+
+    schemes = {
+        scheme
+        for url_type in payload["CFBundleURLTypes"]
+        for scheme in url_type["CFBundleURLSchemes"]
+    }
+
+    assert "$(MOBAILE_URL_SCHEME)" in schemes
+    assert "mobaile" in schemes

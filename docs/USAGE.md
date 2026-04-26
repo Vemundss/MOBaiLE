@@ -27,7 +27,7 @@ What this path does:
 - configures the backend for phone pairing
 - installs and starts a background service when supported
 - writes `backend/pairing.json`
-- generates `backend/pairing-qr.png`
+- generates a pairing QR; run `mobaile pair` later to refresh it
 
 If you are already inside this repo and want to run the installer there:
 
@@ -37,10 +37,11 @@ bash ./scripts/install.sh --checkout "$PWD"
 
 ### Step 2. Pair the iPhone
 
-1. Open `backend/pairing-qr.png` on the computer.
-2. Tap `Scan Pairing QR` inside MOBaiLE.
-3. Point the phone at the QR on the computer and confirm the pairing.
-4. Send a small prompt to confirm the thread works.
+1. Run `mobaile pair` on the computer. If your shell does not find it yet, run `~/.local/bin/mobaile pair`.
+2. Open the `Pairing QR` path it prints.
+3. Tap `Scan Pairing QR` inside MOBaiLE.
+4. Point the phone at the QR on the computer and confirm the pairing.
+5. Send a small prompt to confirm the thread works.
 
 What success looks like:
 
@@ -408,9 +409,11 @@ By default this writes:
 - `backend/pairing-qr.png`
 - QR payload format is `mobaile://pair?server_url=...&server_url=...&pair_code=...&session_id=...`
 
+For an installed background service, prefer `mobaile pair`; it uses the active runtime pairing file and prints the correct QR path.
+
 Phone onboarding with QR:
 
-1. Open `backend/pairing-qr.png` on the computer.
+1. Run `mobaile pair` on the computer and open the `Pairing QR` path it prints.
 2. In MOBaiLE, tap `Scan Pairing QR`.
 3. Point the phone at the QR. MOBaiLE exchanges the one-time pair code with the backend and stores the API token locally.
 
