@@ -1873,6 +1873,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         } else {
             connectionCandidateServerURLs = [normalizedServer]
         }
+        preferHighestReachabilityServerURL()
         defaults.set(serverURL, forKey: DefaultsKey.serverURL)
         defaults.set(connectionCandidateServerURLs, forKey: DefaultsKey.serverURLCandidates)
         if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -3124,6 +3125,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 serverURL = preferred
             }
         }
+        preferHighestReachabilityServerURL()
         if let keychainToken = KeychainStore.load(service: "MOBaiLE", account: "api_token"),
            !keychainToken.isEmpty {
             apiToken = keychainToken

@@ -5,6 +5,26 @@ extension VoiceAgentViewModel {
         client.fallbackServerURLs = Array(connectionCandidateServerURLs.dropFirst())
     }
 
+    func preferHighestReachabilityServerURL() {
+        let candidates = connectionCandidateServerURLs.isEmpty
+            ? normalizedServerURLs(preferredServerURL: normalizedServerURL)
+            : connectionCandidateServerURLs
+        guard let preferred = PairingHostRules.preferredServerURL(from: candidates),
+              !preferred.isEmpty,
+              preferred != normalizedServerURL,
+              PairingHostRules.shouldPromoteResolvedServerURL(preferred, over: normalizedServerURL) else {
+            refreshClientConnectionCandidates()
+            return
+        }
+
+        serverURL = preferred
+        connectionCandidateServerURLs = normalizedServerURLs(
+            preferredServerURL: preferred,
+            additionalServerURLs: candidates
+        )
+        refreshClientConnectionCandidates()
+    }
+
     func normalizedServerURLs(
         preferredServerURL: String? = nil,
         additionalServerURLs: [String] = []

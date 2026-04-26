@@ -200,10 +200,10 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertEqual(vm.apiToken, "fresh-token")
         XCTAssertEqual(vm.sessionID, "iphone-app")
-        XCTAssertEqual(vm.serverURL, "http://127.0.0.1:8000")
+        XCTAssertEqual(vm.serverURL, "https://relay.example.com")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
-            "http://127.0.0.1:8000",
             "https://relay.example.com",
+            "http://127.0.0.1:8000",
             "http://100.111.99.51:8000",
         ])
         XCTAssertTrue(vm.hasPairedRefreshCredential)
@@ -531,6 +531,34 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
             "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://192.168.86.122:8000",
+        ])
+    }
+
+    @MainActor
+    func testLoadSettingsPromotesPersistedLanPrimaryWhenTailscaleCandidateExists() {
+        let harness = makeIsolatedPersistenceHarness()
+        defer { harness.cleanup() }
+        harness.defaults.set("http://192.168.86.122:8000", forKey: "mobaile.server_url")
+        harness.defaults.set(
+            [
+                "http://192.168.86.122:8000",
+                "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                "http://100.111.99.51:8000",
+            ],
+            forKey: "mobaile.server_url_candidates"
+        )
+
+        let vm = VoiceAgentViewModel(
+            threadStore: harness.store,
+            defaults: harness.defaults,
+            draftAttachmentDirectory: harness.draftDirectory
+        )
+
+        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            "http://192.168.86.122:8000",
+            "http://100.111.99.51:8000",
         ])
     }
 

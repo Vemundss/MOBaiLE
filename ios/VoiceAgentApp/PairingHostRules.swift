@@ -84,6 +84,21 @@ enum PairingHostRules {
         return resolvedPriority >= currentPriority
     }
 
+    static func preferredServerURL(from serverURLs: [String]) -> String? {
+        var bestURL: String?
+        var bestPriority = Int.min
+
+        for serverURL in serverURLs {
+            let priority = connectivityPriority(for: serverURL)
+            if priority > bestPriority {
+                bestURL = serverURL
+                bestPriority = priority
+            }
+        }
+
+        return bestPriority >= 0 ? bestURL : serverURLs.first
+    }
+
     private static func connectivityFamily(for serverURL: String) -> ConnectivityFamily? {
         guard let parsed = URL(string: serverURL),
               let host = parsed.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
