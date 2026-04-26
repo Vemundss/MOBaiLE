@@ -368,6 +368,23 @@ def test_install_script_raw_dry_run_preserves_args_in_reexec_command(tmp_path: P
     assert "--dry-run" in result.stdout
 
 
+def test_install_script_rejects_public_http_url(tmp_path: Path):
+    home = tmp_path / "home"
+    script_path = make_standalone_install_script(tmp_path)
+
+    result = run_install_script(
+        home,
+        "--public-url",
+        "http://demo.mobaile.app",
+        script_path=script_path,
+        non_interactive=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert result.returncode != 0
+    assert "Expected https://..." in result.stderr
+
+
 def test_install_script_raw_existing_invalid_checkout_fails(tmp_path: Path):
     home = tmp_path / "home"
     script_path = make_standalone_install_script(tmp_path)

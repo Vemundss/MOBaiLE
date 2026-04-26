@@ -8,6 +8,7 @@ from app.models.schemas import (
     HumanUnblockRequest,
     RunEventsPage,
     RunRecord,
+    RunSummary,
 )
 
 from .run_store_runs import RunRecordStore
@@ -73,6 +74,9 @@ class RunStore:
 
     def list_runs_for_session(self, session_id: str, limit: int = 20) -> list[RunRecord]:
         return self._runs.list_runs_for_session(session_id, limit=limit)
+
+    def list_run_summaries_for_session(self, session_id: str, limit: int = 20) -> list[RunSummary]:
+        return self._runs.list_run_summaries_for_session(session_id, limit=limit)
 
     def get_session_context(self, session_id: str) -> sqlite3.Row | None:
         return self._session_context.get_session_context(session_id)

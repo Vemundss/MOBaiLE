@@ -172,6 +172,34 @@ def test_capabilities_endpoint_returns_report(make_client, tmp_path: Path):
     assert "claude_cli" in capability_ids
 
 
+def test_capabilities_light_probe_defers_subprocess_checks(make_client, tmp_path: Path):
+    write_executable(
+        tmp_path / "codex",
+        "#!/usr/bin/env bash\n"
+        "if [[ \"${1:-}\" == \"mcp\" ]]; then\n"
+        "  echo 'mcp probe should be deep-only' >&2\n"
+        "  exit 42\n"
+        "fi\n"
+        "exit 0\n",
+    )
+    env_path = os.environ.get("PATH", "")
+    client, token = make_client(
+        provider="mock",
+        extra_env={
+            "PATH": f"{tmp_path}:{env_path}",
+            "VOICE_AGENT_CODEX_BINARY": "codex",
+        },
+    )
+
+    resp = client.get("/v1/capabilities", headers=auth_headers(token))
+
+    assert resp.status_code == 200
+    by_id = {item["id"]: item for item in resp.json()["capabilities"]}
+    assert by_id["codex_mcp_playwright"]["code"] == "deep_probe_required"
+    assert by_id["codex_mcp_peekaboo"]["code"] == "deep_probe_required"
+    assert by_id["peekaboo_permissions"]["code"] == "deep_probe_required"
+
+
 def test_config_endpoint_keeps_local_as_internal_fallback_when_binaries_are_missing(make_client, tmp_path: Path):
     empty_path = tmp_path / "empty-bin"
     empty_path.mkdir()
@@ -217,3 +245,28 @@ def test_config_endpoint_reports_openai_transcription_not_ready_without_key(make
     payload = resp.json()
     assert payload["transcribe_provider"] == "openai"
     assert payload["transcribe_ready"] is False
+
+
+def test_explicit_unavailable_executor_returns_conflict(make_client, tmp_path: Path):
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
+    client, token = make_client(
+        provider="mock",
+        extra_env={
+            "PATH": str(empty_path),
+            "VOICE_AGENT_CODEX_BINARY": "codex",
+        },
+    )
+
+    resp = client.post(
+        "/v1/utterances",
+        headers=auth_headers(token),
+        json={
+            "session_id": "missing-codex",
+            "utterance_text": "inspect this repo",
+            "executor": "codex",
+        },
+    )
+
+    assert resp.status_code == 409
+    assert "executor codex is not available" in resp.json()["detail"]

@@ -256,20 +256,7 @@ class RunState:
             return run
 
     def list_session_runs(self, session_id: str, *, limit: int = 20) -> list[RunSummary]:
-        runs = self.run_store.list_runs_for_session(session_id, limit=limit)
-        return [
-            RunSummary(
-                run_id=run.run_id,
-                session_id=run.session_id,
-                executor=run.executor,
-                utterance_text=run.utterance_text,
-                status=run.status,
-                summary=run.summary,
-                updated_at=run.updated_at,
-                working_directory=run.working_directory,
-            )
-            for run in runs
-        ]
+        return self.run_store.list_run_summaries_for_session(session_id, limit=limit)
 
     def diagnostics_for(self, run_id: str) -> RunDiagnostics | None:
         run = self.get_run(run_id)

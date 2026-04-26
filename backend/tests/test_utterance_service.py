@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
 
 from app.models.schemas import (
     Action,
@@ -13,6 +17,8 @@ from app.run_state import RunState
 from app.runtime_environment import RuntimeEnvironment
 from app.storage import RunStore
 from app.utterance_service import UtteranceService
+
+from .api_test_support import write_executable
 
 
 class FakeExecutionService:
@@ -77,6 +83,15 @@ def _environment(monkeypatch, tmp_path: Path, **extra_env: str) -> RuntimeEnviro
     return RuntimeEnvironment.from_env(tmp_path)
 
 
+def _agent_binary_env(tmp_path: Path, name: str) -> dict[str, str]:
+    write_executable(tmp_path / name, "#!/usr/bin/env bash\nexit 0\n")
+    env_path = os.environ.get("PATH", "")
+    return {
+        "PATH": f"{tmp_path}:{env_path}",
+        f"VOICE_AGENT_{name.upper()}_BINARY": name,
+    }
+
+
 def _run_state(tmp_path: Path) -> RunState:
     return RunState(RunStore(tmp_path / "runs.db"), max_event_message_chars=16000)
 
@@ -105,7 +120,7 @@ def _session_context(
 
 
 def test_utterance_service_routes_calendar_requests_to_calendar_runner(monkeypatch, tmp_path: Path) -> None:
-    env = _environment(monkeypatch, tmp_path)
+    env = _environment(monkeypatch, tmp_path, **_agent_binary_env(tmp_path, "codex"))
     run_state = _run_state(tmp_path)
     execution = FakeExecutionService()
     launched: list[tuple[str, tuple[object, ...]]] = []
@@ -141,7 +156,12 @@ def test_utterance_service_routes_calendar_requests_to_calendar_runner(monkeypat
 
 
 def test_utterance_service_rejects_guardrailed_agent_requests(monkeypatch, tmp_path: Path) -> None:
-    env = _environment(monkeypatch, tmp_path, VOICE_AGENT_CODEX_GUARDRAILS="enforce")
+    env = _environment(
+        monkeypatch,
+        tmp_path,
+        VOICE_AGENT_CODEX_GUARDRAILS="enforce",
+        **_agent_binary_env(tmp_path, "codex"),
+    )
     run_state = _run_state(tmp_path)
     execution = FakeExecutionService()
     launched: list[tuple[str, tuple[object, ...]]] = []
@@ -217,7 +237,12 @@ def test_utterance_service_uses_session_defaults_for_local_runs(monkeypatch, tmp
 
 
 def test_utterance_service_passes_profile_context_toggles_to_agent_runs(monkeypatch, tmp_path: Path) -> None:
-    env = _environment(monkeypatch, tmp_path, VOICE_AGENT_DEFAULT_EXECUTOR="codex")
+    env = _environment(
+        monkeypatch,
+        tmp_path,
+        VOICE_AGENT_DEFAULT_EXECUTOR="codex",
+        **_agent_binary_env(tmp_path, "codex"),
+    )
     run_state = _run_state(tmp_path)
     execution = FakeExecutionService()
     launched: list[tuple[str, tuple[object, ...]]] = []
@@ -252,3 +277,85 @@ def test_utterance_service_passes_profile_context_toggles_to_agent_runs(monkeypa
     assert launched[0][1][7] == "gpt-5.4"
     assert launched[0][1][10] is False
     assert launched[0][1][11] is True
+
+
+def test_utterance_service_rejects_explicit_unavailable_agent(monkeypatch, tmp_path: Path) -> None:
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
+    env = _environment(
+        monkeypatch,
+        tmp_path,
+        PATH=str(empty_path),
+        VOICE_AGENT_CODEX_BINARY="codex",
+    )
+    run_state = _run_state(tmp_path)
+    execution = FakeExecutionService()
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="local",
+            resolved_working_directory=str(env.default_workdir),
+        ),
+        background_launcher=lambda target, args: None,
+        run_id_factory=lambda: "run-unavailable",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        service.submit(
+            UtteranceRequest(
+                session_id="sess-unavailable",
+                executor="codex",
+                utterance_text="inspect this repo",
+            )
+        )
+
+    assert exc.value.status_code == 409
+    assert "executor codex is not available" in str(exc.value.detail)
+    assert run_state.get_run("run-unavailable") is None
+
+
+def test_utterance_service_falls_back_from_stale_session_executor(monkeypatch, tmp_path: Path) -> None:
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
+    env = _environment(
+        monkeypatch,
+        tmp_path,
+        PATH=str(empty_path),
+        VOICE_AGENT_CODEX_BINARY="codex",
+    )
+    run_state = _run_state(tmp_path)
+    execution = FakeExecutionService()
+    launched: list[tuple[str, tuple[object, ...]]] = []
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="codex",
+            resolved_working_directory=str(env.default_workdir),
+        ),
+        background_launcher=lambda target, args: launched.append((target.__name__, args)),
+        run_id_factory=lambda: "run-stale-session-executor",
+        plan_builder=lambda prompt: ActionPlan(
+            goal=prompt,
+            actions=[Action(type="run_command", command="python3 hello.py")],
+        ),
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-stale-executor",
+            utterance_text="create a hello python script and run it",
+        )
+    )
+
+    assert result.status == "accepted"
+    run = run_state.get_run("run-stale-session-executor")
+    assert run is not None
+    assert run.executor == "local"
+    assert launched[0][0] == "run_local_plan"

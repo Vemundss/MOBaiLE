@@ -33,7 +33,7 @@ Options:
   --phone-access <mode>        tailscale, wifi, or local
   --background-service <value> yes or no
   --mode <value>               full-access or safe
-  --public-url <url>           Use a public URL for pairing
+  --public-url <url>           Use an HTTPS public URL for pairing
   -h, --help                   Show this help
 EOF
 }
@@ -129,8 +129,8 @@ validate_public_server_url() {
     return
   fi
   case "${PUBLIC_SERVER_URL}" in
-    http://* | https://*) ;;
-    *) fail "Invalid --public-url '${PUBLIC_SERVER_URL}'. Expected http://... or https://..." ;;
+    https://*) ;;
+    *) fail "Invalid --public-url '${PUBLIC_SERVER_URL}'. Expected https://..." ;;
   esac
 }
 

@@ -10,6 +10,7 @@ from app.models.schemas import (
     HumanUnblockRequest,
     RunEventsPage,
     RunRecord,
+    RunSummary,
 )
 
 from .run_store_schema import LegacyRunPayloadRow
@@ -214,6 +215,41 @@ class RunRecordStore:
             run_id = str(row["run_id"])
             results.append(self._hydrate_run(row, event_rows_by_run.get(run_id, [])))
         return results
+
+    def list_run_summaries_for_session(self, session_id: str, limit: int = 20) -> list[RunSummary]:
+        with self._connect() as conn:
+            run_rows = conn.execute(
+                """
+                SELECT
+                    run_id,
+                    session_id,
+                    executor,
+                    utterance_text,
+                    working_directory,
+                    status,
+                    summary,
+                    updated_at
+                FROM runs
+                WHERE session_id = ?
+                ORDER BY datetime(updated_at) DESC
+                LIMIT ?
+                """,
+                (session_id, limit),
+            ).fetchall()
+
+        return [
+            RunSummary(
+                run_id=row["run_id"],
+                session_id=row["session_id"],
+                executor=row["executor"] or "local",
+                utterance_text=row["utterance_text"],
+                status=row["status"],
+                summary=row["summary"],
+                updated_at=row["updated_at"],
+                working_directory=row["working_directory"],
+            )
+            for row in run_rows
+        ]
 
     def _upsert_run_conn(self, conn: sqlite3.Connection, run: RunRecord) -> None:
         plan_json = run.plan.model_dump_json() if run.plan is not None else None

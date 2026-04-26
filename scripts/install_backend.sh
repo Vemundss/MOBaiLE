@@ -419,6 +419,10 @@ main() {
   else
     EXPOSE_NETWORK="true"
   fi
+  if [[ -n "${PUBLIC_SERVER_URL}" && "${PUBLIC_SERVER_URL}" != https://* ]]; then
+    echo "Invalid --public-url '${PUBLIC_SERVER_URL}'. Expected https://..." >&2
+    exit 1
+  fi
 
   require_cmd python3
   ensure_uv

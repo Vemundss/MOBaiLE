@@ -40,7 +40,7 @@ def test_codex_guardrails_enforce_rejects_dangerous(make_client):
     assert run.json()["status"] == "rejected"
 
 
-def test_list_session_runs_and_diagnostics(make_client):
+def test_list_session_runs_and_diagnostics(make_client, monkeypatch):
     client, token = make_client()
     headers = auth_headers(token)
     create = client.post(
@@ -65,6 +65,10 @@ def test_list_session_runs_and_diagnostics(make_client):
     payload = wait_for_run_to_settle(client, token, run_id, attempts=40)
     assert payload["status"] == "completed"
 
+    def fail_if_events_are_loaded(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("session run summaries should not hydrate event histories")
+
+    monkeypatch.setattr(module.RUN_STORE._runs, "_load_event_rows_for_run_ids", fail_if_events_are_loaded)
     listing = client.get("/v1/sessions/sess-list/runs?limit=5", headers=headers)
     assert listing.status_code == 200
     listed = listing.json()

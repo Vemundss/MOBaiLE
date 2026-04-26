@@ -17,6 +17,18 @@ from app.capability_probes import (
 from app.models.schemas import AgendaItem, CapabilitiesResponse, CapabilityProbe
 
 
+def _deferred_probe(capability_id: str, title: str, message: str, *, unattended_safe: bool = True) -> CapabilityProbe:
+    return CapabilityProbe(
+        id=capability_id,
+        title=title,
+        status="degraded",
+        code="deep_probe_required",
+        message=message,
+        unattended_safe=unattended_safe,
+        details={"deep_probe_required": True},
+    )
+
+
 def collect_capabilities(
     *,
     security_mode: str,
@@ -40,15 +52,41 @@ def collect_capabilities(
     capabilities.append(probe_binary("npx_cli", "npx runtime", "npx"))
     capabilities.append(probe_transcriber(transcribe_provider))
     capabilities.append(probe_codex_search(codex_enable_web_search))
-    capabilities.append(probe_codex_mcp_server(codex_binary, codex_home, "playwright"))
-    capabilities.append(probe_codex_mcp_server(codex_binary, codex_home, "peekaboo"))
+    if deep:
+        capabilities.append(probe_codex_mcp_server(codex_binary, codex_home, "playwright"))
+        capabilities.append(probe_codex_mcp_server(codex_binary, codex_home, "peekaboo"))
+    else:
+        capabilities.append(
+            _deferred_probe(
+                "codex_mcp_playwright",
+                "Codex MCP: playwright",
+                "Skipped subprocess MCP inspection during the light capability check. Run with deep=true to verify.",
+            )
+        )
+        capabilities.append(
+            _deferred_probe(
+                "codex_mcp_peekaboo",
+                "Codex MCP: peekaboo",
+                "Skipped subprocess MCP inspection during the light capability check. Run with deep=true to verify.",
+            )
+        )
     capabilities.append(
         probe_playwright_persistence(
             output_dir=playwright_output_dir,
             user_data_dir=playwright_user_data_dir,
         )
     )
-    capabilities.append(probe_peekaboo_permissions(deep=deep))
+    if deep:
+        capabilities.append(probe_peekaboo_permissions(deep=deep))
+    else:
+        capabilities.append(
+            _deferred_probe(
+                "peekaboo_permissions",
+                "Peekaboo permissions (macOS)",
+                "Skipped desktop permission probing during the light capability check. Run with deep=true to verify.",
+                unattended_safe=False,
+            )
+        )
     capabilities.append(
         probe_calendar_adapter(
             deep=deep,

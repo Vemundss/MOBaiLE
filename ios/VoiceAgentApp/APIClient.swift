@@ -494,7 +494,7 @@ final class APIClient {
             let boundary = "Boundary-\(UUID().uuidString)"
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            request.timeoutInterval = 30
+            request.timeoutInterval = 75
             request.addValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization")
             request.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 

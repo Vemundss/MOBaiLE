@@ -604,6 +604,18 @@ struct PairingConfirmationSheet: View {
                     LabeledContent("Security", value: pending.badgeText)
                 }
 
+                if pending.serverURLs.count > 1 {
+                    Section("Connection Paths") {
+                        Text("MOBaiLE will try these URLs in order for pairing and reconnects.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(Array(pending.serverURLs.enumerated()), id: \.offset) { index, url in
+                            LabeledContent(index == 0 ? "Primary" : "Fallback \(index)", value: url)
+                                .font(.footnote.monospaced())
+                        }
+                    }
+                }
+
                 if let warning = pending.localNetworkWarning {
                     Section("Network") {
                         Label("Local network HTTP detected", systemImage: "wifi.exclamationmark")

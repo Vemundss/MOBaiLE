@@ -50,8 +50,8 @@ class SessionContextService:
             except Exception:
                 latest_run_pending_human_unblock = None
 
-        effective_executor = (
-            raw_executor if raw_executor in {"local", "codex", "claude"} else self._env.default_executor
+        effective_executor = self._env.resolve_request_executor(
+            raw_executor if raw_executor in {"local", "codex", "claude"} else None
         )
         effective_working_directory = raw_working_directory or None
         try:

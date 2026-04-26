@@ -182,8 +182,9 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertEqual(vm.apiToken, "fresh-token")
         XCTAssertEqual(vm.sessionID, "iphone-app")
-        XCTAssertEqual(vm.serverURL, "https://relay.example.com")
+        XCTAssertEqual(vm.serverURL, "http://127.0.0.1:8000")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://127.0.0.1:8000",
             "https://relay.example.com",
             "http://100.111.99.51:8000",
         ])

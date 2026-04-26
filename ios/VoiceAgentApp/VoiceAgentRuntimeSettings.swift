@@ -173,12 +173,7 @@ extension VoiceAgentViewModel {
         do {
             let normalizedSession = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalizedSession.isEmpty else { return }
-            let sameBackend = lastHydratedSessionContextServerURL == normalizedServerURL
-            if sameBackend, lastHydratedSessionContextID == normalizedSession {
-                _ = try await syncSessionContextToBackend()
-            } else {
-                _ = try await refreshSessionContextFromBackend()
-            }
+            _ = try await syncSessionContextToBackend()
             errorText = ""
         } catch {
             errorText = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription

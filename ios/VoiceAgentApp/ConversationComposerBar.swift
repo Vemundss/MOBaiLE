@@ -236,9 +236,7 @@ struct ConversationComposerBar: View {
             TextEditor(text: $vm.promptText)
                 .focused(composerFocused)
                 .accessibilityIdentifier("composer.textEditor")
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.asciiCapable)
+                .textInputAutocapitalization(.sentences)
                 .textContentType(.none)
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 10)
@@ -329,8 +327,8 @@ struct ConversationComposerBar: View {
                 iconSize: 14,
                 weight: .bold,
                 accessibilityLabel: "Send prompt",
-                isDisabled: !canUseConnectedFeatures || !vm.hasDraftContent,
-                opacity: (!canUseConnectedFeatures || !vm.hasDraftContent) ? 0.45 : 1
+                isDisabled: !canUseConnectedFeatures || !vm.hasDraftContent || vm.isLoading,
+                opacity: (!canUseConnectedFeatures || !vm.hasDraftContent || vm.isLoading) ? 0.45 : 1
             ) {
                 onSend()
             }

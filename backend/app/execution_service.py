@@ -123,7 +123,7 @@ class ExecutionService:
             self._record_worker_exception(run_id, summary="Local run crashed", exc=exc)
 
     def _run_local_plan(self, run_id: str, plan: ActionPlan, workdir: Path) -> None:
-        executor = LocalExecutor(workdir)
+        executor = LocalExecutor(workdir, is_cancelled=lambda: self.run_state.is_cancelled(run_id))
         self.run_state.append_activity_event(
             run_id,
             stage="planning",
@@ -221,6 +221,13 @@ class ExecutionService:
                 run_id,
                 ExecutionEvent(type="action.completed", action_index=idx, message=done_message),
             )
+            if self.run_state.is_cancelled(run_id):
+                self.run_state.append_event(
+                    run_id,
+                    ExecutionEvent(type="run.cancelled", message="Run cancelled by user"),
+                )
+                self.run_state.set_run_status(run_id, "cancelled", "Run cancelled by user")
+                return False
             if not result.success:
                 return False
         return True

@@ -833,8 +833,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     token: apiToken,
                     sessionID: sessionID,
                     threadID: originThreadID?.uuidString,
-                    executor: nil,
-                    workingDirectory: nil,
+                    executor: effectiveExecutor,
+                    workingDirectory: normalizedWorkingDirectory,
                     responseMode: effectiveResponseMode,
                     responseProfile: effectiveAgentGuidanceMode,
                     draftText: stagedDraftText,
@@ -1537,6 +1537,10 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     ) async {
         let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty || !stagedAttachments.isEmpty || !existingAttachments.isEmpty else { return }
+        guard !isLoading else {
+            statusText = "A run is already in progress."
+            return
+        }
         guard validateDraftAttachmentsBeforeSend(stagedAttachments) else {
             return
         }
@@ -1681,8 +1685,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 utteranceText: utteranceText,
                 attachments: attachments,
                 mode: "execute",
-                executor: nil,
-                workingDirectory: nil,
+                executor: effectiveExecutor,
+                workingDirectory: normalizedWorkingDirectory,
                 responseMode: effectiveResponseMode,
                 responseProfile: effectiveAgentGuidanceMode
             ),
@@ -2115,10 +2119,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 serverURL: normalizedServerURL,
                 token: apiToken
             )
+            let activeServerURL = normalizedServerURL
             clearConnectionRepairState()
             applyAdvertisedServerURLs(
-                primaryServerURL: cfg.serverURL,
-                advertisedServerURLs: cfg.serverURLs ?? [],
+                primaryServerURL: activeServerURL,
+                advertisedServerURLs: [cfg.serverURL].compactMap { $0 } + (cfg.serverURLs ?? []),
                 persist: true
             )
             backendSecurityMode = cfg.securityMode

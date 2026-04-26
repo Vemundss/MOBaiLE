@@ -29,6 +29,8 @@ struct ContentView: View {
     @State private var openSettingsAfterSetupGuide = false
     @State private var openPairingScannerAfterSetupGuide = false
     @State private var openSettingsAfterPairingScanner = false
+    @State private var openSetupGuideAfterSettings = false
+    @State private var openPairingScannerAfterSettings = false
     @State private var expandManualConnectionOnNextSettingsOpen = false
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -84,6 +86,13 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showConnectionSettings, onDismiss: {
                 expandManualConnectionOnNextSettingsOpen = false
+                if openSetupGuideAfterSettings {
+                    openSetupGuideAfterSettings = false
+                    showSetupGuide = true
+                } else if openPairingScannerAfterSettings {
+                    openPairingScannerAfterSettings = false
+                    showPairingScanner = true
+                }
             }) {
                 settingsSheet
             }
@@ -343,6 +352,7 @@ struct ContentView: View {
                                         showPairingScanner = true
                                     },
                                     onOpenSettings: {
+                                        expandManualConnectionOnNextSettingsOpen = true
                                         showConnectionSettings = true
                                     }
                                 )
@@ -416,8 +426,14 @@ struct ContentView: View {
             supportURL: supportURL,
             expandManualConnectionInitially: expandManualConnectionOnNextSettingsOpen,
             onDismiss: { showConnectionSettings = false },
-            onOpenSetupGuide: { showSetupGuide = true },
-            onOpenPairingScanner: { showPairingScanner = true }
+            onOpenSetupGuide: {
+                openSetupGuideAfterSettings = true
+                showConnectionSettings = false
+            },
+            onOpenPairingScanner: {
+                openPairingScannerAfterSettings = true
+                showConnectionSettings = false
+            }
         )
     }
 

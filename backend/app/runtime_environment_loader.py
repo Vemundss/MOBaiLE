@@ -11,6 +11,7 @@ from typing import Callable
 from app.agent_runtime import load_runtime_context
 from app.host_tools import binary_available
 from app.models.schemas import AgentExecutorName, CodexReasoningEffort, RunExecutorName
+from app.pairing_url_policy import validate_public_server_url
 from app.phone_access_mode import PhoneAccessMode, normalize_phone_access_mode
 
 CODEX_MODEL_OPTIONS = ("gpt-5.4", "gpt-5.4-mini", "gpt-5.1")
@@ -142,7 +143,7 @@ def load_workspace_environment_settings(backend_root: Path) -> WorkspaceEnvironm
         port = int(os.getenv("VOICE_AGENT_PORT", "8000").strip() or "8000")
     except ValueError:
         port = 8000
-    public_server_url = os.getenv("VOICE_AGENT_PUBLIC_SERVER_URL", "").strip()
+    public_server_url = validate_public_server_url(os.getenv("VOICE_AGENT_PUBLIC_SERVER_URL", "").strip())
     phone_access_mode = _read_phone_access_mode_env()
     default_workdir = Path(
         os.getenv("VOICE_AGENT_DEFAULT_WORKDIR", str(Path.home()))

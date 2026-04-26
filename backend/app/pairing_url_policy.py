@@ -43,6 +43,16 @@ def normalize_server_url(server_url: str) -> str:
     return f"{scheme}://{netloc}"
 
 
+def validate_public_server_url(server_url: str) -> str:
+    normalized = normalize_server_url(server_url)
+    if not normalized:
+        return ""
+    parsed = urlparse(normalized)
+    if is_public_server_url(normalized) and parsed.scheme != "https":
+        raise ValueError("public server URLs must use https")
+    return normalized
+
+
 def dedupe_server_urls(urls: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []

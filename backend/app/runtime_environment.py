@@ -186,10 +186,16 @@ class RuntimeEnvironment:
     def available_agent_executors(self) -> list[AgentExecutorName]:
         return self._available_agent_executors(self.codex_binary, self.claude_binary)
 
-    def resolve_request_executor(self, requested: RunExecutorName | None) -> RunExecutorName:
+    def resolve_request_executor(self, requested: RunExecutorName | None, *, explicit: bool = False) -> RunExecutorName:
         if requested is None:
             return self.default_executor
-        return requested
+        if requested == "local":
+            return "local"
+        if requested in self.available_agent_executors():
+            return requested
+        if explicit:
+            raise ValueError(f"executor {requested} is not available on this backend")
+        return self.default_executor
 
     def is_agent_executor(self, executor: str) -> bool:
         return executor in {"codex", "claude"}

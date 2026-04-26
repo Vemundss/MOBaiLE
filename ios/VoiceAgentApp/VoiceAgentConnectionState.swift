@@ -227,16 +227,16 @@ extension VoiceAgentViewModel {
     func confirmPendingPairing(trustHost: Bool) async -> Bool {
         guard let pending = pendingPairing else { return false }
 
-        if trustHost {
-            setTrustedPairHost(pending.serverHost, trusted: true)
-        }
-
         if let oneTimeCode = pending.pairCode {
-            return await exchangePairCode(
+            let didPair = await exchangePairCode(
                 serverURLs: pending.serverURLs,
                 pairCode: oneTimeCode,
                 sessionID: pending.sessionID
             )
+            if didPair, trustHost {
+                setTrustedPairHost(pending.serverHost, trusted: true)
+            }
+            return didPair
         }
         if let token = pending.legacyToken {
             pendingPairing = nil
@@ -253,6 +253,9 @@ extension VoiceAgentViewModel {
             statusText = "Paired successfully"
             errorText = ""
             persistActiveThreadSnapshot()
+            if trustHost {
+                setTrustedPairHost(pending.serverHost, trusted: true)
+            }
             return true
         }
         errorText = "Invalid pairing QR. Missing pair code."
@@ -307,9 +310,10 @@ extension VoiceAgentViewModel {
             pairedRefreshToken = refreshToken
         }
         sessionID = response.sessionId
+        let advertisedServerURLs = [response.serverURL].compactMap { $0 } + (response.serverURLs ?? []) + additionalServerURLs
         applyAdvertisedServerURLs(
-            primaryServerURL: response.serverURL ?? fallbackPrimaryServerURL,
-            advertisedServerURLs: (response.serverURLs ?? []) + additionalServerURLs,
+            primaryServerURL: fallbackPrimaryServerURL,
+            advertisedServerURLs: advertisedServerURLs,
             persist: false
         )
         backendSecurityMode = response.securityMode

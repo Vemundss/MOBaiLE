@@ -71,7 +71,6 @@ extension VoiceAgentViewModel {
             )
             directoryBrowserEntries = response.entries
             directoryBrowserTruncated = response.truncated
-            resolvedWorkingDirectory = response.path
             directoryBrowserPath = response.path
         } catch let apiError as APIError {
             if case let .httpError(code, body) = apiError, code == 404 {
@@ -113,7 +112,6 @@ extension VoiceAgentViewModel {
                 token: token,
                 path: target
             )
-            resolvedWorkingDirectory = response.path
             directoryBrowserMissingPath = ""
             await refreshDirectoryBrowser(path: response.path)
         } catch {
@@ -145,7 +143,6 @@ extension VoiceAgentViewModel {
                 token: token,
                 path: targetPath
             )
-            resolvedWorkingDirectory = response.path
             await refreshDirectoryBrowser(path: basePath.isEmpty ? response.path : basePath)
             return true
         } catch {

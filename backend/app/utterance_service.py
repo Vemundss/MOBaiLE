@@ -144,9 +144,13 @@ class UtteranceService:
 
     def _prepare(self, request: UtteranceRequest, *, run_id: str | None = None) -> PreparedUtterance:
         session_context = self.session_context_loader(request.session_id)
-        executor = self.environment.resolve_request_executor(
-            request.executor if request.executor is not None else session_context.executor
-        )
+        try:
+            if request.executor is not None:
+                executor = self.environment.resolve_request_executor(request.executor, explicit=True)
+            else:
+                executor = self.environment.resolve_request_executor(session_context.executor)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         requested_working_directory = request.working_directory
         if requested_working_directory is None:
             requested_working_directory = session_context.working_directory

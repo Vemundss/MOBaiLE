@@ -31,6 +31,27 @@ def test_load_workspace_environment_settings_defaults_to_safe_upload_root(monkey
     assert settings.path_access_roots == (default_workdir, settings.uploads_root)
 
 
+def test_load_workspace_environment_settings_rejects_public_http_url(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VOICE_AGENT_DEFAULT_WORKDIR", str(tmp_path / "workspace"))
+    monkeypatch.setenv("VOICE_AGENT_PUBLIC_SERVER_URL", "http://demo.mobaile.app")
+
+    try:
+        load_workspace_environment_settings(tmp_path)
+    except ValueError as exc:
+        assert "public server URLs must use https" in str(exc)
+    else:
+        raise AssertionError("public HTTP URL should be rejected")
+
+
+def test_load_workspace_environment_settings_allows_tailscale_http_url(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VOICE_AGENT_DEFAULT_WORKDIR", str(tmp_path / "workspace"))
+    monkeypatch.setenv("VOICE_AGENT_PUBLIC_SERVER_URL", "http://host.tail0000.ts.net:8000")
+
+    settings = load_workspace_environment_settings(tmp_path)
+
+    assert settings.public_server_url == "http://host.tail0000.ts.net:8000"
+
+
 def test_load_agent_runtime_environment_settings_filters_options_and_resolves_executor(
     monkeypatch,
     tmp_path: Path,
