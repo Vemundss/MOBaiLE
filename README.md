@@ -50,7 +50,7 @@ When you want the latest installed CLI/backend later, run `mobaile update`.
 Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USAGE.md).
 
 <p align="center">
-  <img src="docs/readme-hero.png" alt="MOBaiLE hero showing the configured start screen, a live run thread, and voice mode on iPhone" width="1200" />
+  <img src="docs/readme-hero.png" alt="MOBaiLE hero showing a ready chat, a live run thread, and voice mode on iPhone" width="1200" />
 </p>
 
 ## Why people reach for it
@@ -70,12 +70,12 @@ Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USA
 ## Three moments that matter
 
 <p align="center">
-  <img src="docs/readme-screens/configured-empty.png" alt="Configured start screen showing runtime, working directory, and quick starts" width="250" />
+  <img src="docs/readme-screens/configured-empty.png" alt="Ready chat showing runtime, working directory, and the composer" width="250" />
   <img src="docs/readme-screens/conversation.png" alt="Live run thread showing the result and the next recommended step" width="250" />
   <img src="docs/readme-screens/recording.png" alt="Voice capture controls that stay attached to the current thread" width="250" />
 </p>
 
-- **Start in the right workspace.** See the paired runtime, working directory, and quick starts before you send the first prompt.
+- **Start in the right workspace.** See the paired runtime, working directory, and chat switcher before you send the first prompt.
 - **Follow the run live.** Result, summary, and next recommended action stay together in the same thread.
 - **Keep talking without losing context.** Voice mode reopens the mic after each reply, while attachments and typed follow-ups stay in the same conversation.
 

@@ -323,33 +323,31 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         if vm.conversation.isEmpty {
-                            ConversationEmptyStateView(
-                                isConfigured: vm.hasConfiguredConnection,
-                                needsConnectionRepair: vm.needsConnectionRepair,
-                                statusText: headerStatusText,
-                                canRetryLastPrompt: vm.canRetryLastPrompt,
-                                runtimeContext: emptyStateRuntimeContext,
-                                onOpenSetupGuide: {
-                                    showSetupGuide = true
-                                },
-                                onOpenPairingScanner: {
-                                    showPairingScanner = true
-                                },
-                                onOpenSettings: {
-                                    showConnectionSettings = true
-                                },
-                                onRetryLastPrompt: {
-                                    Task { await vm.retryLastPrompt() }
-                                },
-                                onStartVoiceMode: {
-                                    handleVoiceModeStartTap()
-                                },
-                                onUsePrompt: { prompt in
-                                    vm.promptText = prompt
-                                    composerFocused = true
-                                }
-                            )
-                            .padding(.top, 20)
+                            if canUseConnectedFeatures {
+                                ConversationReadyEmptyStateView(
+                                    canRetryLastPrompt: vm.canRetryLastPrompt,
+                                    onRetryLastPrompt: {
+                                        Task { await vm.retryLastPrompt() }
+                                    }
+                                )
+                                .padding(.top, 44)
+                            } else {
+                                ConversationEmptyStateView(
+                                    isConfigured: vm.hasConfiguredConnection,
+                                    needsConnectionRepair: vm.needsConnectionRepair,
+                                    statusText: headerStatusText,
+                                    onOpenSetupGuide: {
+                                        showSetupGuide = true
+                                    },
+                                    onOpenPairingScanner: {
+                                        showPairingScanner = true
+                                    },
+                                    onOpenSettings: {
+                                        showConnectionSettings = true
+                                    }
+                                )
+                                .padding(.top, 20)
+                            }
                         }
 
                         ForEach(vm.conversation) { message in
@@ -544,7 +542,7 @@ struct ContentView: View {
     }
 
     private var navigationBarTitle: String {
-        vm.conversation.isEmpty ? activeNavigationTitle : "MOBaiLE"
+        vm.conversation.isEmpty && !shouldShowRuntimeInfoBar ? activeNavigationTitle : "MOBaiLE"
     }
 
     private var activeThread: ChatThread? {
@@ -572,17 +570,6 @@ struct ContentView: View {
 
     private var canUseConnectedFeatures: Bool {
         vm.hasConfiguredConnection && !vm.needsConnectionRepair
-    }
-
-    private var emptyStateRuntimeContext: EmptyStateRuntimeContext? {
-        guard canUseConnectedFeatures else { return nil }
-        let workspace = compactPathLabel(runtimeDirectoryLabel)
-        return EmptyStateRuntimeContext(
-            executor: runtimeExecutorLabel,
-            model: vm.currentBackendModelLabel,
-            effort: runtimeEffortLabel,
-            workspace: workspace
-        )
     }
 
     private var runtimeExecutorLabel: String {
@@ -695,7 +682,7 @@ struct ContentView: View {
     }
 
     private var shouldShowRuntimeInfoBar: Bool {
-        !vm.conversation.isEmpty
+        canUseConnectedFeatures || !vm.conversation.isEmpty
     }
 
     private var shouldShowRuntimeStatusBadge: Bool {

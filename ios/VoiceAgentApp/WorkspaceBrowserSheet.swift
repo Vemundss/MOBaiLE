@@ -7,20 +7,27 @@ struct WorkspaceBrowserSheet: View {
     @Binding var newDirectoryName: String
     @Binding var isCreatingDirectory: Bool
     let onDismiss: () -> Void
+    private let directoryBrowserPanelID = "workspace-directory-browser-panel"
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    workspaceSummaryPanel
-                    if !recentWorkspacePaths.isEmpty {
-                        recentWorkspacesPanel
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        directoryBrowserPanel
+                            .id(directoryBrowserPanelID)
+                        workspaceSummaryPanel
+                        if !recentWorkspacePaths.isEmpty {
+                            recentWorkspacesPanel
+                        }
                     }
-                    directoryBrowserPanel
+                    .padding()
                 }
-                .padding()
+                .background(Color(.systemGroupedBackground))
+                .onChange(of: vm.directoryBrowserPath) {
+                    scrollToDirectoryBrowser(using: proxy)
+                }
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Workspace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -38,6 +45,13 @@ struct WorkspaceBrowserSheet: View {
         }
     }
 
+    private func scrollToDirectoryBrowser(using proxy: ScrollViewProxy) {
+        guard !vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+            proxy.scrollTo(directoryBrowserPanelID, anchor: .top)
+        }
+    }
+
     private var directoryBrowserPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
@@ -50,22 +64,23 @@ struct WorkspaceBrowserSheet: View {
                     .lineLimit(2)
                     .truncationMode(.middle)
 
-                Button {
-                    Task { await vm.useCurrentBrowserDirectoryAsWorkingDirectory() }
-                } label: {
-                    Label(
-                        canUseBrowsedDirectory ? "Use for Future Runs" : "Already Selected",
-                        systemImage: canUseBrowsedDirectory ? "checkmark.circle" : "checkmark.circle.fill"
-                    )
-                    .labelStyle(.titleAndIcon)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .frame(maxWidth: .infinity)
+                if canUseBrowsedDirectory {
+                    Button {
+                        Task { await vm.useCurrentBrowserDirectoryAsWorkingDirectory() }
+                    } label: {
+                        Label("Use for Future Runs", systemImage: "checkmark.circle")
+                            .labelStyle(.titleAndIcon)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(vm.isLoadingDirectoryBrowser)
+                    .accessibilityLabel("Use for Future Runs")
+                } else {
+                    selectedWorkspaceBadge
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(!canUseBrowsedDirectory || vm.isLoadingDirectoryBrowser)
-                .accessibilityLabel("Use for Future Runs")
             }
 
             Text(useFolderHint)
@@ -179,16 +194,28 @@ struct WorkspaceBrowserSheet: View {
                 directoryEntriesContent
             }
 
-            if !canUseBrowsedDirectory,
-               !vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("This folder is already selected for future runs.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
         .padding(10)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var selectedWorkspaceBadge: some View {
+        Label("Selected for future runs", systemImage: "checkmark.circle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.green)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.green.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.green.opacity(0.14), lineWidth: 1)
+            )
+            .accessibilityLabel("Selected for future runs")
     }
 
     private var workspaceSummaryPanel: some View {

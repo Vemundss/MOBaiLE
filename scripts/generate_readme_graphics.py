@@ -390,7 +390,7 @@ def create_showcase() -> None:
         (
             "Get oriented",
             "Start in the right workspace",
-            "Open to a thread that already shows the runtime, recommended quick starts, and a direct path into voice.",
+            "Open to a thread that already shows the runtime, workspace, chat switcher, and composer.",
             configured,
             (49, 121, 242),
         ),

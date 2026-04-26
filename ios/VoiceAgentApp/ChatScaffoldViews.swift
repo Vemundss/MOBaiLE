@@ -104,18 +104,45 @@ private struct ConnectionBadge: View {
     }
 }
 
-private struct StarterPrompt {
-    let label: String
-    let prompt: String
-    let systemImage: String
-    let detail: String
-}
+struct ConversationReadyEmptyStateView: View {
+    let canRetryLastPrompt: Bool
+    let onRetryLastPrompt: () -> Void
 
-struct EmptyStateRuntimeContext {
-    let executor: String
-    let model: String
-    let effort: String?
-    let workspace: String
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                )
+
+            VStack(spacing: 4) {
+                Text("New chat")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text("Type or speak a prompt below.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            if canRetryLastPrompt {
+                Button {
+                    onRetryLastPrompt()
+                } label: {
+                    Label("Retry last prompt", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 220, alignment: .center)
+        .padding(.horizontal, 24)
+        .accessibilityElement(children: .contain)
+    }
 }
 
 struct ConversationEmptyStateView: View {
@@ -123,35 +150,9 @@ struct ConversationEmptyStateView: View {
     let isConfigured: Bool
     let needsConnectionRepair: Bool
     let statusText: String
-    let canRetryLastPrompt: Bool
-    let runtimeContext: EmptyStateRuntimeContext?
     let onOpenSetupGuide: () -> Void
     let onOpenPairingScanner: () -> Void
     let onOpenSettings: () -> Void
-    let onRetryLastPrompt: () -> Void
-    let onStartVoiceMode: () -> Void
-    let onUsePrompt: (String) -> Void
-
-    private let starterPrompts = [
-        StarterPrompt(
-            label: "Map the repo",
-            prompt: "summarize this repo and point out the most important modules",
-            systemImage: "square.stack.3d.up",
-            detail: "Get a quick codebase map."
-        ),
-        StarterPrompt(
-            label: "Run Smoke Test",
-            prompt: "run the recommended smoke test for this project and summarize the result",
-            systemImage: "checkmark.seal",
-            detail: "Check the current baseline first."
-        ),
-        StarterPrompt(
-            label: "Review Latest UI",
-            prompt: "review the current UI and suggest the highest-impact improvements",
-            systemImage: "wand.and.stars",
-            detail: "Tighten the current screen."
-        )
-    ]
 
     private var setupHeaderTitle: String {
         needsConnectionRepair ? "Reconnect this phone" : "Pair your computer"
@@ -177,158 +178,66 @@ struct ConversationEmptyStateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if isConfigured && !needsConnectionRepair {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        MobaileLogoMark()
-                            .frame(width: 38, height: 38)
-                            .padding(5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(Color(.systemBackground))
-                            )
+            setupHeader
 
-                        setupReadyHeaderText
+            ConnectionBadge(
+                isConnected: isConfigured,
+                requiresRepair: needsConnectionRepair,
+                statusText: statusText
+            )
 
-                        Label(statusText, systemImage: "checkmark.circle.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.green)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule()
-                                    .fill(Color.green.opacity(0.10))
-                            )
-                            .overlay(
-                                Capsule()
-                                    .stroke(Color.green.opacity(0.14), lineWidth: 1)
-                            )
-                    }
-
-                    if let runtimeContext {
-                        configuredRuntimeContextRow(context: runtimeContext)
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Try one")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        ForEach(starterPrompts, id: \.label) { prompt in
-                            CompactStarterPromptButton(prompt: prompt) {
-                                onUsePrompt(prompt.prompt)
-                            }
-                        }
-                    }
-
-                    if canRetryLastPrompt {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 10) {
-                                Button {
-                                    onRetryLastPrompt()
-                                } label: {
-                                    Label("Retry last prompt", systemImage: "arrow.clockwise")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-
-                                Button {
-                                    onStartVoiceMode()
-                                } label: {
-                                    Label("Start voice mode", systemImage: "waveform.circle.fill")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-
-                            VStack(spacing: 10) {
-                                Button {
-                                    onRetryLastPrompt()
-                                } label: {
-                                    Label("Retry last prompt", systemImage: "arrow.clockwise")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-
-                                Button {
-                                    onStartVoiceMode()
-                                } label: {
-                                    Label("Start voice mode", systemImage: "waveform.circle.fill")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                    } else {
-                        Label("Voice mode stays in the composer for fast hands-free follow-up.", systemImage: "waveform.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    setupHeader
-
-                    ConnectionBadge(
-                        isConnected: isConfigured,
-                        requiresRepair: needsConnectionRepair,
-                        statusText: statusText
-                    )
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Two quick steps")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        SetupStepRow(
-                            stepNumber: 1,
-                            systemImage: "laptopcomputer",
-                            title: needsConnectionRepair ? "Refresh the QR on your computer" : "Run the installer on your computer",
-                            detail: needsConnectionRepair
-                                ? "Run `mobaile pair` if you need a new QR, then keep it visible on screen."
-                                : "The guided setup installs the backend and leaves the pairing QR ready to scan."
-                        )
-                        SetupStepRow(
-                            stepNumber: 2,
-                            systemImage: "qrcode.viewfinder",
-                            title: needsConnectionRepair ? "Scan the new QR in MOBaiLE" : "Scan the QR in MOBaiLE",
-                            detail: "Tap the button below, point the phone at the screen, and confirm the host."
-                        )
-                    }
-
-                    Button {
-                        onOpenPairingScanner()
-                    } label: {
-                        Label(setupPrimaryActionTitle, systemImage: "qrcode.viewfinder")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .accessibilityLabel(setupPrimaryActionAccessibilityLabel)
-
-                    Button {
-                        onOpenSetupGuide()
-                    } label: {
-                        Label(setupGuideActionTitle, systemImage: "list.number")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Divider()
-                        .padding(.top, 2)
-
-                    Button {
-                        onOpenSettings()
-                    } label: {
-                        Label("Enter URL and token manually", systemImage: "slider.horizontal.3")
-                            .font(.footnote.weight(.medium))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Two quick steps")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Enter the server URL and token manually")
-                }
+
+                SetupStepRow(
+                    stepNumber: 1,
+                    systemImage: "laptopcomputer",
+                    title: needsConnectionRepair ? "Refresh the QR on your computer" : "Run the installer on your computer",
+                    detail: needsConnectionRepair
+                        ? "Run `mobaile pair` if you need a new QR, then keep it visible on screen."
+                        : "The guided setup installs the backend and leaves the pairing QR ready to scan."
+                )
+                SetupStepRow(
+                    stepNumber: 2,
+                    systemImage: "qrcode.viewfinder",
+                    title: needsConnectionRepair ? "Scan the new QR in MOBaiLE" : "Scan the QR in MOBaiLE",
+                    detail: "Tap the button below, point the phone at the screen, and confirm the host."
+                )
             }
+
+            Button {
+                onOpenPairingScanner()
+            } label: {
+                Label(setupPrimaryActionTitle, systemImage: "qrcode.viewfinder")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .accessibilityLabel(setupPrimaryActionAccessibilityLabel)
+
+            Button {
+                onOpenSetupGuide()
+            } label: {
+                Label(setupGuideActionTitle, systemImage: "list.number")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
+            Divider()
+                .padding(.top, 2)
+
+            Button {
+                onOpenSettings()
+            } label: {
+                Label("Enter URL and token manually", systemImage: "slider.horizontal.3")
+                    .font(.footnote.weight(.medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Enter the server URL and token manually")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
@@ -395,140 +304,6 @@ struct ConversationEmptyStateView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private var setupReadyHeaderText: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Start with a focused task")
-                .font(.title3.weight(.semibold))
-            Text("Use a quick start or type below. Keeping the first run narrow makes the thread easier to scan.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    @ViewBuilder
-    private func configuredRuntimeContextRow(context: EmptyStateRuntimeContext) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "bolt.horizontal.circle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                Text("Connected runtime")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(runtimeSummary(for: context))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.86)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(.systemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
-                )
-
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "folder.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Workspace for future runs")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(context.workspace)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(.systemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
-            )
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.tertiarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
-        )
-    }
-
-    private func runtimeSummary(for context: EmptyStateRuntimeContext) -> String {
-        var parts = [context.executor.uppercased(), context.model]
-        if let effort = context.effort {
-            parts.append(effort)
-        }
-        return parts.joined(separator: " / ")
-    }
-}
-
-private struct CompactStarterPromptButton: View {
-    let prompt: StarterPrompt
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: prompt.systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 32, height: 32)
-                    .background(Color.accentColor.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(prompt.label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(prompt.detail)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.systemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.14), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
     }
 }
 

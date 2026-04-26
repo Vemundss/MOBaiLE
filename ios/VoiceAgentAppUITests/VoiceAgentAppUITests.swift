@@ -5,11 +5,15 @@ final class VoiceAgentAppUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testConfiguredEmptyPreviewShowsQuickStartAndReadyThread() {
-        let app = launchApp(previewScenario: "configured-empty", previewPresentation: "threads")
+    func testConfiguredEmptyPreviewShowsChatChromeAndThreadSwitcher() {
+        let app = launchApp(previewScenario: "configured-empty")
 
-        XCTAssertTrue(app.staticTexts["Start with a focused task"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Connected runtime"].exists)
+        XCTAssertTrue(app.staticTexts["New chat"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Type or speak a prompt below."].exists)
+
+        let threadButton = threadToolbarButton(in: app)
+        XCTAssertTrue(threadButton.waitForExistence(timeout: 5))
+        threadButton.tap()
 
         XCTAssertTrue(app.staticTexts["New Chat"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Ready"].waitForExistence(timeout: 5))
@@ -79,7 +83,7 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Future runs"].exists)
         XCTAssertTrue(app.staticTexts["Selected workspace"].exists)
         XCTAssertTrue(app.staticTexts["Browsing"].exists)
-        XCTAssertTrue(app.buttons["Use for Future Runs"].exists)
+        XCTAssertTrue(app.staticTexts["Selected for future runs"].exists)
     }
 
     func testLiveActivityPreviewShowsStreamingCard() {
