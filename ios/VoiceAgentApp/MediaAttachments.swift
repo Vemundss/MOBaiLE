@@ -105,7 +105,7 @@ func inferAttachmentKind(fileName: String, mimeType: String) -> DraftAttachment.
 
 func humanReadableAttachmentSize(_ sizeBytes: Int64) -> String {
     let formatter = ByteCountFormatter()
-    formatter.allowedUnits = [.useKB, .useMB]
+    formatter.allowedUnits = [.useBytes, .useKB, .useMB]
     formatter.countStyle = .file
     return formatter.string(fromByteCount: sizeBytes)
 }

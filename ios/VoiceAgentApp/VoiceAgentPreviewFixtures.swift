@@ -9,6 +9,7 @@ enum PreviewScenario: String {
     case repair = "repair"
     case timeout = "timeout"
     case restoredRunning = "restored-running"
+    case media = "media"
 
     static var current: PreviewScenario? {
         let processInfo = ProcessInfo.processInfo
@@ -257,6 +258,8 @@ enum VoiceAgentPreviewFactory {
             ),
         ]
 
+        let mediaDraftAttachments = Self.previewDraftAttachments(in: draftAttachmentDirectory)
+
         let previewConversation = [
             ConversationMessage(
                 role: "user",
@@ -314,6 +317,44 @@ enum VoiceAgentPreviewFactory {
                 text: "Running the smoke test and comparing the latest changes…",
                 presentation: .liveActivity,
                 sourceRunID: "pvw-live-2048"
+            ),
+        ]
+
+        let previewMediaConversation = [
+            ConversationMessage(
+                role: "user",
+                text: "Review the generated media and attached notes before I send the next task."
+            ),
+            ConversationMessage(
+                role: "assistant",
+                text: """
+{
+  "type": "assistant_response",
+  "version": "1.0",
+  "summary": "Generated media is ready to inspect.",
+  "sections": [
+    {
+      "title": "Result",
+      "body": "Created a markdown note and PDF-style artifact. File cards should stay readable, keep the original extension, and open in the in-app preview."
+    }
+  ],
+  "agenda_items": [],
+  "artifacts": [
+    {
+      "type": "code",
+      "title": "rendering-notes.md",
+      "path": "/Users/test/Mobile Documents/MOBaiLE/rendering-notes.md",
+      "mime": "text/markdown"
+    },
+    {
+      "type": "file",
+      "title": "sample-output.pdf",
+      "url": "http://old-host.example/v1/files?path=/Users/test/Mobile%20Documents/MOBaiLE/sample-output.pdf",
+      "mime": "application/pdf"
+    }
+  ]
+}
+"""
             ),
         ]
 
@@ -569,6 +610,37 @@ enum VoiceAgentPreviewFactory {
                 connectionRepairState: nil,
                 autoSendAfterSilenceEnabled: nil
             )
+        case .media:
+            return VoiceAgentPreviewData(
+                workspace: workspace,
+                activeThreadID: primaryThreadID,
+                threads: previewThreads,
+                executors: previewExecutors,
+                codexModelOptions: codexModelOptions,
+                codexReasoningEffort: "high",
+                codexReasoningEffortOptions: codexReasoningEffortOptions,
+                claudeModelOptions: claudeModelOptions,
+                slashCommands: slashCommands,
+                events: standardPreviewEvents,
+                conversation: previewMediaConversation,
+                promptText: "Compare these files with the current renderer.",
+                draftAttachments: mediaDraftAttachments,
+                runID: "pvw-media-2048",
+                summaryText: "Prepared media artifacts and local draft attachments for review.",
+                transcriptText: "",
+                statusText: "Ready",
+                runPhaseText: "Idle",
+                runStartedAt: now.addingTimeInterval(-180),
+                runEndedAt: now.addingTimeInterval(-90),
+                isLoading: false,
+                isRecording: false,
+                recordingStartedAt: nil,
+                didCompleteRun: true,
+                voiceModeEnabled: false,
+                voiceModeThreadID: nil,
+                connectionRepairState: nil,
+                autoSendAfterSilenceEnabled: nil
+            )
         case .liveActivity:
             return VoiceAgentPreviewData(
                 workspace: workspace,
@@ -660,7 +732,7 @@ enum VoiceAgentPreviewFactory {
                 events: standardPreviewEvents,
                 conversation: previewConversation,
                 promptText: "Run the smoke test again and tell me what changed since the last pass.",
-                draftAttachments: previewDraftAttachments(in: draftAttachmentDirectory),
+                draftAttachments: Self.previewDraftAttachments(in: draftAttachmentDirectory),
                 runID: "",
                 summaryText: "",
                 transcriptText: "",

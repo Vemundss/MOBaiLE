@@ -27,7 +27,7 @@ enum AttachmentDraftValidationError: Error, LocalizedError, Equatable {
         case let .fileTooLarge(fileName, sizeBytes, maxBytes):
             return "\(fileName) is \(humanReadableAttachmentSize(sizeBytes)). Attachments must be \(humanReadableAttachmentSize(maxBytes)) or smaller."
         case let .unsupportedFileType(fileName, mimeType):
-            return "\(fileName) uses unsupported type \(mimeType). Choose an image, text, PDF, archive, or plain file export."
+            return "\(fileName) uses unsupported type \(mimeType). Choose a regular file export that is \(humanReadableAttachmentSize(AttachmentDraftPolicy.defaultMaxAttachmentBytes)) or smaller."
         case let .missingFile(fileName):
             return "\(fileName) is no longer available. Remove it and attach the file again."
         }

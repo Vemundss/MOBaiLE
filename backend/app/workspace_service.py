@@ -6,6 +6,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
@@ -119,6 +120,9 @@ class WorkspaceService:
         content_type: str | None,
         file_bytes: bytes,
     ) -> UploadResponse:
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="uploaded file is empty")
+
         target_dir = self.environment.upload_session_dir(session_id)
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -142,14 +146,30 @@ class WorkspaceService:
         )
         return UploadResponse(artifact=artifact, size_bytes=len(file_bytes))
 
+    def validate_attachment_artifacts(self, attachments: list[ChatArtifact]) -> list[ChatArtifact]:
+        validated: list[ChatArtifact] = []
+        for artifact in attachments:
+            path = (artifact.path or "").strip()
+            url = (artifact.url or "").strip()
+            if not path and not url:
+                raise HTTPException(status_code=400, detail="attachment must include a file path or backend file URL")
+            if path:
+                self._resolve_file_target(path)
+                validated.append(artifact)
+                continue
+
+            backend_path = self._path_from_backend_file_url(url)
+            if backend_path is None:
+                raise HTTPException(status_code=400, detail="attachment URL must point to /v1/files on this backend")
+            self._resolve_file_target(backend_path)
+            validated.append(artifact)
+        return validated
+
     def _resolve_file_target(self, raw_path: str) -> Path:
         target = Path(raw_path.strip()).expanduser()
         if target.is_absolute():
             target = target.resolve()
-            if not self.environment.allow_absolute_file_reads and not self._is_relative_to(
-                target,
-                self.environment.uploads_root,
-            ):
+            if not self.environment.allow_absolute_file_reads and not self.environment.is_path_allowed(target):
                 raise HTTPException(
                     status_code=403,
                     detail="absolute file paths are disabled in safe mode",
@@ -161,6 +181,15 @@ class WorkspaceService:
         if not target.exists() or not target.is_file():
             raise HTTPException(status_code=404, detail="file not found")
         return target
+
+    def _path_from_backend_file_url(self, raw_url: str) -> str | None:
+        parsed = urlparse(raw_url)
+        if parsed.path != "/v1/files":
+            return None
+        values = parse_qs(parsed.query).get("path", [])
+        if not values:
+            return None
+        return values[0]
 
     def _resolve_workspace_path(self, raw_path: str | None) -> Path:
         raw_value = (raw_path or "").strip()

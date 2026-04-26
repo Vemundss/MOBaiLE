@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import QuickLook
 import SwiftUI
 import UIKit
@@ -32,7 +33,7 @@ struct MessageBubble: View {
             Text(artifactOpenError)
         }
         .sheet(item: $previewDocument) { preview in
-            QuickLookPreview(url: preview.url)
+            FilePreviewSheet(url: preview.url, title: preview.title)
         }
     }
 
@@ -134,7 +135,8 @@ struct MessageBubble: View {
 
         if let rawURL = artifact.url,
            let parsed = URL(string: rawURL),
-           !ChatArtifactResolution.isProtectedBackendURL(parsed, serverURL: serverURL) {
+           !ChatArtifactResolution.isProtectedBackendURL(parsed, serverURL: serverURL),
+           !ChatArtifactResolution.isBackendFileRoute(parsed) {
             await MainActor.run {
                 UIApplication.shared.open(parsed)
             }
@@ -148,7 +150,11 @@ struct MessageBubble: View {
                 artifact: artifact
             )
             await MainActor.run {
-                previewDocument = PreviewDocument(url: localURL)
+                if QLPreviewController.canPreview(localURL as NSURL) {
+                    previewDocument = PreviewDocument(url: localURL, title: artifact.title)
+                } else {
+                    artifactOpenError = "This file type can't be previewed on iPhone."
+                }
             }
         } catch {
             await MainActor.run {
@@ -579,41 +585,7 @@ private struct ArtifactCard: View {
 private struct PreviewDocument: Identifiable {
     let id = UUID()
     let url: URL
-}
-
-private struct QuickLookPreview: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(url: url)
-    }
-
-    func makeUIViewController(context: Context) -> QLPreviewController {
-        let controller = QLPreviewController()
-        controller.dataSource = context.coordinator
-        return controller
-    }
-
-    func updateUIViewController(_ controller: QLPreviewController, context: Context) {
-        context.coordinator.url = url
-        controller.reloadData()
-    }
-
-    final class Coordinator: NSObject, QLPreviewControllerDataSource {
-        var url: URL
-
-        init(url: URL) {
-            self.url = url
-        }
-
-        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-            1
-        }
-
-        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-            url as NSURL
-        }
-    }
+    let title: String
 }
 
 struct MessageSegment: Identifiable {
@@ -1172,7 +1144,7 @@ private struct RemoteImageView: View {
                 url: url,
                 timeout: 20
             )
-            guard let uiImage = UIImage(data: data) else {
+            guard let uiImage = downsampleImage(data: data, maxPixelSize: 1_800) ?? UIImage(data: data) else {
                 failureMessage = "Downloaded file is not a valid image."
                 didFail = true
                 isLoading = false
@@ -1209,6 +1181,23 @@ private struct RemoteImageView: View {
         let raw = URL(string: urlString)?.lastPathComponent ?? "Image"
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Image" : trimmed
+    }
+
+    private func downsampleImage(data: Data, maxPixelSize: CGFloat) -> UIImage? {
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
+            return nil
+        }
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxPixelSize),
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: image)
     }
 }
 

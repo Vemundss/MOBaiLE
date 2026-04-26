@@ -2189,11 +2189,20 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Binary file content."
+          },
+          "403": {
+            "description": "File access denied."
+          },
+          "404": {
+            "description": "File not found."
           },
           "422": {
             "content": {

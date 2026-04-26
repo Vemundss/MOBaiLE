@@ -1,4 +1,5 @@
 import Foundation
+import QuickLook
 import SwiftUI
 import UIKit
 
@@ -379,30 +380,40 @@ struct DraftAttachmentChip: View {
     let attachment: DraftAttachment
     let transferState: DraftAttachmentTransferState
     let isBusy: Bool
+    let onPreview: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: iconName)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tintColor)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attachment.fileName)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                if showsDetailText {
-                    Text(detailText)
-                        .font(detailFont)
-                        .foregroundStyle(detailColor)
-                        .lineLimit(1)
+            Button {
+                onPreview()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: iconName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tintColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(attachment.fileName)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        if showsDetailText {
+                            Text(detailText)
+                                .font(detailFont)
+                                .foregroundStyle(detailColor)
+                                .lineLimit(1)
+                        }
+                    }
+                    if let progress = transferState.progressValue {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .tint(tintColor)
+                            .frame(width: 44)
+                    }
                 }
             }
-            if let progress = transferState.progressValue {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(tintColor)
-                    .frame(width: 44)
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Preview \(attachment.fileName)")
+
             Button {
                 onRemove()
             } label: {
@@ -421,6 +432,7 @@ struct DraftAttachmentChip: View {
                 .stroke(borderColor, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var iconName: String {
@@ -512,6 +524,62 @@ struct DraftAttachmentChip: View {
             return tintColor.opacity(0.16)
         case .failed:
             return Color.red.opacity(0.16)
+        }
+    }
+}
+
+struct FilePreviewSheet: View {
+    let url: URL
+    let title: String?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            FileQuickLookPreview(url: url)
+                .navigationTitle((title ?? url.lastPathComponent).trimmingCharacters(in: .whitespacesAndNewlines))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
+                }
+        }
+    }
+}
+
+private struct FileQuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(url: url)
+    }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {
+        context.coordinator.url = url
+        controller.reloadData()
+    }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        var url: URL
+
+        init(url: URL) {
+            self.url = url
+        }
+
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+            1
+        }
+
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
         }
     }
 }

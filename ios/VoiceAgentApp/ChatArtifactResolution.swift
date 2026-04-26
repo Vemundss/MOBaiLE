@@ -31,9 +31,11 @@ enum ChatArtifactResolution {
     static func extractInlineMediaReferences(from text: String, serverURL: String) -> [InlineMediaReference] {
         var references: [InlineMediaReference] = []
         let nsRange = NSRange(text.startIndex..., in: text)
+        let fencedCodeRanges = codeFenceRanges(in: text)
 
         if let imageRegex = try? NSRegularExpression(pattern: #"\!\[[^\]]*\]\(([^)]+)\)"#) {
             for match in imageRegex.matches(in: text, options: [], range: nsRange) {
+                guard !overlapsAnyRange(match.range, ranges: fencedCodeRanges) else { continue }
                 guard let valueRange = Range(match.range(at: 1), in: text) else { continue }
                 let raw = String(text[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 guard let resolved = resolveImageURL(from: raw, serverURL: serverURL) else { continue }
@@ -48,6 +50,7 @@ enum ChatArtifactResolution {
 
         if let linkRegex = try? NSRegularExpression(pattern: #"(?<!!)\[([^\]]+)\]\(([^)]+)\)"#) {
             for match in linkRegex.matches(in: text, options: [], range: nsRange) {
+                guard !overlapsAnyRange(match.range, ranges: fencedCodeRanges) else { continue }
                 guard let titleRange = Range(match.range(at: 1), in: text),
                       let targetRange = Range(match.range(at: 2), in: text) else {
                     continue
@@ -156,6 +159,21 @@ enum ChatArtifactResolution {
             url.path.hasPrefix("/v1/")
     }
 
+    static func isBackendFileRoute(_ url: URL) -> Bool {
+        url.path == "/v1/files"
+    }
+
+    static func backendFilePath(from url: URL) -> String? {
+        guard isBackendFileRoute(url),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let rawPath = components.queryItems?.first(where: { $0.name == "path" })?.value?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawPath.isEmpty else {
+            return nil
+        }
+        return rawPath.removingPercentEncoding ?? rawPath
+    }
+
     private static func resolveInlineArtifact(title: String, rawReference: String, serverURL: String) -> ChatArtifact? {
         let trimmed = rawReference.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
@@ -172,9 +190,11 @@ enum ChatArtifactResolution {
             guard isBackendFileURL(url, serverURL: serverURL) else {
                 return nil
             }
-            let mime = inferArtifactMimeType(from: url.lastPathComponent)
+            let fileName = backendFilePath(from: url).map { URL(fileURLWithPath: $0).lastPathComponent }
+                ?? url.lastPathComponent
+            let mime = inferArtifactMimeType(from: fileName)
             return ChatArtifact(
-                type: inferArtifactType(fileName: url.lastPathComponent, mimeType: mime),
+                type: inferArtifactType(fileName: fileName, mimeType: mime),
                 title: resolvedTitle,
                 path: nil,
                 mime: mime,
@@ -271,6 +291,26 @@ enum ChatArtifactResolution {
             out = out.replacingOccurrences(of: "\n\n\n", with: "\n\n")
         }
         return out
+    }
+
+    private static func codeFenceRanges(in text: String) -> [NSRange] {
+        var ranges: [NSRange] = []
+        var remaining = text[...]
+        while let open = remaining.range(of: "```") {
+            let afterOpen = remaining[open.upperBound...]
+            if let close = afterOpen.range(of: "```") {
+                ranges.append(NSRange(open.lowerBound..<close.upperBound, in: text))
+                remaining = afterOpen[close.upperBound...]
+            } else {
+                ranges.append(NSRange(open.lowerBound..<text.endIndex, in: text))
+                break
+            }
+        }
+        return ranges
+    }
+
+    private static func overlapsAnyRange(_ range: NSRange, ranges: [NSRange]) -> Bool {
+        ranges.contains { NSIntersectionRange(range, $0).length > 0 }
     }
 }
 

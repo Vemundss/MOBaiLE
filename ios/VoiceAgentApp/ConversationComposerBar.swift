@@ -1,3 +1,4 @@
+import QuickLook
 import SwiftUI
 import UIKit
 
@@ -14,6 +15,8 @@ struct ConversationComposerBar: View {
     let onVoiceModeButtonTap: () -> Void
     let onSend: () -> Void
     let onSelectSlashCommand: (ComposerSlashCommand, ComposerSlashCommandState) -> Void
+    @State private var previewAttachment: DraftAttachment?
+    @State private var attachmentPreviewError: String = ""
 
     var body: some View {
         VStack(spacing: 8) {
@@ -89,6 +92,7 @@ struct ConversationComposerBar: View {
                                     attachment: attachment,
                                     transferState: vm.draftAttachmentTransferState(for: attachment),
                                     isBusy: vm.isLoading,
+                                    onPreview: { previewDraftAttachment(attachment) },
                                     onRemove: { vm.removeDraftAttachment(attachment) }
                                 )
                             }
@@ -130,6 +134,17 @@ struct ConversationComposerBar: View {
         .animation(.easeInOut(duration: 0.18), value: vm.isRecording)
         .animation(.easeInOut(duration: 0.18), value: shouldShowRecordingNotice)
         .animation(.easeInOut(duration: 0.18), value: vm.voiceInteractionNoticeText)
+        .sheet(item: $previewAttachment) { attachment in
+            FilePreviewSheet(url: attachment.localFileURL, title: attachment.fileName)
+        }
+        .alert("Preview unavailable", isPresented: Binding(
+            get: { !attachmentPreviewError.isEmpty },
+            set: { if !$0 { attachmentPreviewError = "" } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(attachmentPreviewError)
+        }
         .simultaneousGesture(
             DragGesture(minimumDistance: 14)
                 .onEnded { value in
@@ -139,6 +154,14 @@ struct ConversationComposerBar: View {
                     composerFocused.wrappedValue = false
                 }
         )
+    }
+
+    private func previewDraftAttachment(_ attachment: DraftAttachment) {
+        if QLPreviewController.canPreview(attachment.localFileURL as NSURL) {
+            previewAttachment = attachment
+        } else {
+            attachmentPreviewError = "This attachment type can't be previewed on iPhone."
+        }
     }
 
     private var composerSlashCommandState: ComposerSlashCommandState? {

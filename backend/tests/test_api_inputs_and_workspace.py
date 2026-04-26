@@ -164,10 +164,12 @@ def test_audio_mock_flow(make_client):
 
 def test_audio_mock_flow_preserves_draft_context_and_attachments(make_client, tmp_path: Path):
     client, token = make_client(provider="mock")
+    attachment_path = tmp_path / "notes.txt"
+    attachment_path.write_text("hello-file", encoding="utf-8")
     attachment = {
         "type": "file",
         "title": "notes.txt",
-        "path": str(tmp_path / "notes.txt"),
+        "path": str(attachment_path),
         "mime": "text/plain",
     }
     resp = client.post(
@@ -441,7 +443,7 @@ def test_file_fetch_relative_path_uses_default_workdir(make_client, tmp_path: Pa
     assert resp.content.startswith(b"\x89PNG")
 
 
-def test_file_fetch_absolute_blocked_when_disabled(make_client, tmp_path: Path):
+def test_file_fetch_absolute_allowed_inside_roots_when_disabled(make_client, tmp_path: Path):
     file_path = tmp_path / "sample.txt"
     file_path.write_text("hello-file", encoding="utf-8")
     client, token = make_client(
@@ -452,8 +454,8 @@ def test_file_fetch_absolute_blocked_when_disabled(make_client, tmp_path: Path):
         },
     )
     resp = client.get("/v1/files", headers=auth_headers(token), params={"path": str(file_path)})
-    assert resp.status_code == 403
-    assert "absolute file paths are disabled" in resp.json()["detail"].lower()
+    assert resp.status_code == 200
+    assert resp.text == "hello-file"
 
 
 def test_file_fetch_rejects_outside_allowed_roots(make_client, tmp_path: Path):
@@ -569,6 +571,75 @@ def test_upload_endpoint_rejects_large_file(make_client, tmp_path: Path):
     detail = resp.json()["detail"]
     assert detail["code"] == "file_too_large"
     assert "file payload too large" in detail["message"]
+
+
+def test_upload_endpoint_rejects_empty_file(make_client, tmp_path: Path):
+    client, token = make_client(
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(tmp_path / "workspace"),
+        },
+    )
+    resp = client.post(
+        "/v1/uploads",
+        headers=auth_headers(token),
+        files={"file": ("empty.txt", BytesIO(b""), "text/plain")},
+        data={"session_id": "ios-session"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "uploaded file is empty"
+
+
+def test_utterance_rejects_missing_attachment_reference(make_client, tmp_path: Path):
+    client, token = make_client(
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(tmp_path / "workspace"),
+        },
+    )
+    resp = client.post(
+        "/v1/utterances",
+        headers=auth_headers(token),
+        json={
+            "session_id": "ios-session",
+            "utterance_text": "inspect this",
+            "attachments": [{"type": "file", "title": "notes.txt"}],
+            "executor": "local",
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "attachment must include a file path or backend file URL"
+
+
+def test_utterance_accepts_backend_file_url_attachment(make_client, tmp_path: Path):
+    workdir = tmp_path / "workspace"
+    file_path = workdir / "notes.txt"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text("hello-file", encoding="utf-8")
+    client, token = make_client(
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_DEFAULT_WORKDIR": str(workdir),
+            "VOICE_AGENT_FILE_ROOTS": str(workdir),
+        },
+    )
+    resp = client.post(
+        "/v1/utterances",
+        headers=auth_headers(token),
+        json={
+            "session_id": "ios-session",
+            "utterance_text": "inspect this",
+            "attachments": [
+                {
+                    "type": "file",
+                    "title": "notes.txt",
+                    "url": f"http://old-host.example/v1/files?path={file_path}",
+                }
+            ],
+            "executor": "local",
+        },
+    )
+    assert resp.status_code == 200
 
 
 def test_directory_listing_rejects_outside_allowed_roots(make_client, tmp_path: Path):

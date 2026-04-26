@@ -65,6 +65,7 @@ load_env_defaults(BACKEND_ROOT / ".env")
 
 
 app = FastAPI(title="Voice Agent Backend", version="0.1.0")
+MULTIPART_REQUEST_OVERHEAD_BYTES = 1024 * 1024
 ENV = RuntimeEnvironment.from_env(BACKEND_ROOT)
 refresh_pairing_server_url(
     ENV.pairing_file,
@@ -108,6 +109,32 @@ def health() -> dict[str, str]:
 
 
 @app.middleware("http")
+async def enforce_upload_request_size(request: Request, call_next):
+    upload_limit = _upload_request_limit_for_path(request.url.path)
+    if upload_limit is None:
+        return await call_next(request)
+
+    field, max_bytes, max_mb = upload_limit
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            request_bytes = int(content_length)
+        except ValueError:
+            request_bytes = 0
+        if request_bytes > max_bytes + MULTIPART_REQUEST_OVERHEAD_BYTES:
+            detail = ApiErrorDetail(
+                code=f"{field}_too_large",
+                message=f"{field} payload too large (max {max_mb:g} MB)",
+                field=field,
+                limit_bytes=max_bytes,
+                limit_mb=max_mb,
+                received_bytes=request_bytes,
+            )
+            return JSONResponse(status_code=413, content={"detail": detail.model_dump()})
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def require_api_token(request: Request, call_next):
     if not request.url.path.startswith("/v1/"):
         return await call_next(request)
@@ -129,6 +156,14 @@ async def require_api_token(request: Request, call_next):
     return await call_next(request)
 
 
+def _upload_request_limit_for_path(path: str) -> tuple[str, int, float] | None:
+    if path == "/v1/uploads":
+        return ("file", ENV.max_upload_bytes, ENV.max_upload_mb)
+    if path == "/v1/audio":
+        return ("audio", ENV.max_audio_bytes, ENV.max_audio_mb)
+    return None
+
+
 @app.post("/v1/pair/exchange", response_model=PairExchangeResponse)
 def pair_exchange(payload: PairExchangeRequest, request: Request) -> PairExchangeResponse:
     return PAIRING_SERVICE.exchange_pair_code(
@@ -148,6 +183,8 @@ def pair_refresh(payload: PairRefreshRequest, request: Request) -> PairExchangeR
 
 @app.post("/v1/utterances", response_model=UtteranceResponse)
 def create_utterance(request: UtteranceRequest) -> UtteranceResponse:
+    if request.attachments:
+        request = request.model_copy(update={"attachments": WORKSPACE_SERVICE.validate_attachment_artifacts(request.attachments)})
     return UTTERANCE_SERVICE.submit(request)
 
 
@@ -169,6 +206,8 @@ async def create_audio_run(
     normalized_thread_id = (thread_id or "").strip() or None
     audio_run_id = (run_id or "").strip() or str(uuid.uuid4())
     attachments = parse_audio_attachments(attachments_json)
+    if attachments:
+        attachments = WORKSPACE_SERVICE.validate_attachment_artifacts(attachments)
     lifecycle_request = UtteranceRequest(
         session_id=session_id,
         thread_id=normalized_thread_id,
@@ -441,7 +480,22 @@ def get_run_events_page(
     return page
 
 
-@app.get("/v1/files")
+@app.get(
+    "/v1/files",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Binary file content.",
+            "content": {
+                "application/octet-stream": {
+                    "schema": {"type": "string", "format": "binary"}
+                }
+            },
+        },
+        403: {"description": "File access denied."},
+        404: {"description": "File not found."},
+    },
+)
 def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
     return WORKSPACE_SERVICE.file_response(path)
 

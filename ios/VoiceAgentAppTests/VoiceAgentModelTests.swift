@@ -1456,6 +1456,21 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(extracted, ["notes.txt", "report.pdf"])
     }
 
+    func testExtractInlineArtifactTitlesIgnoresMarkdownLinksInsideCodeFences() {
+        let text = """
+        Here is the example:
+
+        ```markdown
+        [not-an-artifact](/Users/test/Mobile Documents/session/secret.txt)
+        ```
+
+        [notes.txt](/Users/test/Mobile Documents/session/notes.txt)
+        """
+
+        let extracted = _test_extractInlineArtifactTitles(text, serverURL: "http://127.0.0.1:8000")
+        XCTAssertEqual(extracted, ["notes.txt"])
+    }
+
     func testExtractArtifactPathDecodesPercentEncodedAbsolutePaths() {
         let extracted = _test_extractArtifactPath("/Users/test/Mobile%20Documents/session/AGENTS.md")
         XCTAssertEqual(extracted, "/Users/test/Mobile Documents/session/AGENTS.md")
@@ -1471,6 +1486,23 @@ final class VoiceAgentModelTests: XCTestCase {
             "http://127.0.0.1:8000/v1/files?path=/Users/test/Mobile%20Documents/session/AGENTS.md"
         )
         XCTAssertFalse(resolved?.contains("%2520") == true)
+    }
+
+    func testArtifactDownloadNameUsesBackendFileQueryPathExtension() {
+        let artifact = ChatArtifact(
+            type: "file",
+            title: "Run report",
+            path: nil,
+            mime: nil,
+            url: "http://old-host.example/v1/files?path=/Users/test/Mobile%20Documents/session/report.pdf"
+        )
+
+        let suggested = APIClient()._test_suggestedDownloadFileName(
+            serverURL: "http://127.0.0.1:8000",
+            artifact: artifact
+        )
+
+        XCTAssertEqual(suggested, "Run-report.pdf")
     }
 
     func testSlashCommandStateForBareSlashShowsCatalog() {

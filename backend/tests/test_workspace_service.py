@@ -82,7 +82,10 @@ def test_workspace_service_create_directory_uses_default_workdir_for_relative_pa
     assert Path(created.path).is_dir()
 
 
-def test_workspace_service_blocks_non_upload_absolute_paths_when_disabled(monkeypatch, tmp_path: Path) -> None:
+def test_workspace_service_allows_allowed_absolute_paths_when_absolute_reads_disabled(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     env = _environment(
         monkeypatch,
         tmp_path,
@@ -93,8 +96,27 @@ def test_workspace_service_blocks_non_upload_absolute_paths_when_disabled(monkey
     sample = env.default_workdir / "sample.txt"
     sample.write_text("hello", encoding="utf-8")
 
+    response = service.file_response(str(sample))
+
+    assert response.path == str(sample)
+
+
+def test_workspace_service_blocks_outside_absolute_paths_when_absolute_reads_disabled(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env = _environment(
+        monkeypatch,
+        tmp_path,
+        VOICE_AGENT_FILE_ROOTS=str(tmp_path / "workspace"),
+        VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS="false",
+    )
+    service = WorkspaceService(env)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("hello", encoding="utf-8")
+
     with pytest.raises(HTTPException, match="absolute file paths are disabled in safe mode"):
-        service.file_response(str(sample))
+        service.file_response(str(outside))
 
 
 def test_workspace_service_allows_uploaded_artifact_paths_when_absolute_reads_disabled(
@@ -115,3 +137,16 @@ def test_workspace_service_allows_uploaded_artifact_paths_when_absolute_reads_di
     assert upload.artifact.title == "notes.txt"
     assert Path(upload.artifact.path).exists()
     assert response.path == upload.artifact.path
+
+
+def test_workspace_service_rejects_empty_uploads(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+
+    with pytest.raises(HTTPException, match="uploaded file is empty"):
+        service.store_upload(
+            session_id="ios-session",
+            filename="empty.txt",
+            content_type="text/plain",
+            file_bytes=b"",
+        )

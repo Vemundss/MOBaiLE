@@ -1007,7 +1007,7 @@ final class APIClient {
     }
 
     private func preferredExtension(from artifact: ChatArtifact, url: URL) -> String {
-        if let ext = URL(fileURLWithPath: artifact.path ?? "").pathExtension.nonEmpty {
+        if let ext = artifactFileReference(for: artifact, url: url).flatMap({ URL(fileURLWithPath: $0).pathExtension.nonEmpty }) {
             return "." + ext
         }
         if let ext = url.pathExtension.nonEmpty {
@@ -1018,7 +1018,12 @@ final class APIClient {
             if mime.contains("jpeg") || mime.contains("jpg") { return ".jpg" }
             if mime.contains("gif") { return ".gif" }
             if mime.contains("webp") { return ".webp" }
+            if mime.contains("pdf") { return ".pdf" }
+            if mime.contains("rtf") { return ".rtf" }
+            if mime.contains("zip") { return ".zip" }
             if mime.contains("json") { return ".json" }
+            if mime.contains("markdown") { return ".md" }
+            if mime.contains("yaml") { return ".yaml" }
             if mime.contains("text/plain") { return ".txt" }
             if mime.contains("python") { return ".py" }
         }
@@ -1029,7 +1034,8 @@ final class APIClient {
         if let title = artifact.title.nonEmpty {
             return sanitizeFileName(title)
         }
-        if let name = URL(fileURLWithPath: artifact.path ?? "").deletingPathExtension().lastPathComponent.nonEmpty {
+        if let reference = artifactFileReference(for: artifact, url: url),
+           let name = URL(fileURLWithPath: reference).deletingPathExtension().lastPathComponent.nonEmpty {
             return sanitizeFileName(name)
         }
         if let name = url.deletingPathExtension().lastPathComponent.nonEmpty {
@@ -1044,12 +1050,31 @@ final class APIClient {
         let collapsed = String(cleaned).replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
         return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-")).nonEmpty ?? "artifact"
     }
+
+    private func artifactFileReference(for artifact: ChatArtifact, url: URL) -> String? {
+        if let path = artifact.path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+            return path.removingPercentEncoding ?? path
+        }
+        if let rawURL = artifact.url?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let parsedURL = URL(string: rawURL),
+           let path = ChatArtifactResolution.backendFilePath(from: parsedURL) {
+            return path
+        }
+        return ChatArtifactResolution.backendFilePath(from: url)
+    }
 }
 
 #if DEBUG
 extension APIClient {
     func _test_resolveArtifactURL(serverURL: String, artifact: ChatArtifact) -> URL? {
         resolveArtifactURL(serverURL: serverURL, artifact: artifact)
+    }
+
+    func _test_suggestedDownloadFileName(serverURL: String, artifact: ChatArtifact) -> String? {
+        guard let url = resolveArtifactURL(serverURL: serverURL, artifact: artifact) else {
+            return nil
+        }
+        return "\(suggestedBaseName(from: artifact, url: url))\(preferredExtension(from: artifact, url: url))"
     }
 }
 #endif
