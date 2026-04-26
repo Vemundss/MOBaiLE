@@ -24,10 +24,10 @@ final class VoiceAgentModelTests: XCTestCase {
 
         vm.applyPairingURL(url)
 
-        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://100.111.99.51:8000")
         XCTAssertEqual(vm.pendingPairing?.serverURLs ?? [], [
-            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://100.111.99.51:8000",
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
         ])
         XCTAssertEqual(vm.pendingPairing?.pairCode, "abc123")
         XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
@@ -56,10 +56,10 @@ final class VoiceAgentModelTests: XCTestCase {
         )
 
         XCTAssertTrue(didStage)
-        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://127.0.0.1:8000")
+        XCTAssertEqual(vm.pendingPairing?.serverURL, "http://100.111.99.51:8000")
         XCTAssertEqual(vm.pendingPairing?.serverURLs ?? [], [
-            "http://127.0.0.1:8000",
             "http://100.111.99.51:8000",
+            "http://127.0.0.1:8000",
         ])
         XCTAssertEqual(vm.pendingPairing?.pairCode, "abc123")
         XCTAssertEqual(vm.pendingPairing?.sessionID, "iphone-app")
@@ -203,8 +203,8 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(vm.serverURL, "https://relay.example.com")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
             "https://relay.example.com",
-            "http://127.0.0.1:8000",
             "http://100.111.99.51:8000",
+            "http://127.0.0.1:8000",
         ])
         XCTAssertTrue(vm.hasPairedRefreshCredential)
         XCTAssertFalse(vm.needsConnectionRepair)
@@ -470,10 +470,10 @@ final class VoiceAgentModelTests: XCTestCase {
 
         vm.promoteResolvedServerURL("http://192.168.86.122:8000")
 
-        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.serverURL, "http://100.111.99.51:8000")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
-            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://100.111.99.51:8000",
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://192.168.86.122:8000",
         ])
     }
@@ -505,10 +505,10 @@ final class VoiceAgentModelTests: XCTestCase {
 
         vm.promoteResolvedServerURL("http://192.168.86.122:8000")
 
-        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.serverURL, "http://100.111.99.51:8000")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
-            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://100.111.99.51:8000",
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://192.168.86.122:8000",
         ])
     }
@@ -554,11 +554,11 @@ final class VoiceAgentModelTests: XCTestCase {
             draftAttachmentDirectory: harness.draftDirectory
         )
 
-        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.serverURL, "http://100.111.99.51:8000")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://100.111.99.51:8000",
             "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://192.168.86.122:8000",
-            "http://100.111.99.51:8000",
         ])
     }
 

@@ -37,6 +37,11 @@ enum PairingHostRules {
         if lower.hasSuffix(".ts.net") {
             return true
         }
+        return isTailscaleIPHost(lower)
+    }
+
+    static func isTailscaleIPHost(_ host: String) -> Bool {
+        let lower = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if lower.hasPrefix("100.") {
             let parts = lower.split(separator: ".")
             if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) {
@@ -55,10 +60,10 @@ enum PairingHostRules {
         if scheme == "https" && !isLocalOrPrivateHost(host) {
             return 4
         }
-        if host.hasSuffix(".ts.net") {
+        if isTailscaleIPHost(host) {
             return 3
         }
-        if isTailscaleHost(host) {
+        if host.hasSuffix(".ts.net") {
             return 2
         }
         if isRFC1918LANHost(host) || host.hasSuffix(".local") {
@@ -68,6 +73,17 @@ enum PairingHostRules {
             return 0
         }
         return scheme == "https" ? 4 : -1
+    }
+
+    static func serverURLsByReachability(_ serverURLs: [String]) -> [String] {
+        serverURLs.enumerated().sorted { lhs, rhs in
+            let lhsPriority = connectivityPriority(for: lhs.element)
+            let rhsPriority = connectivityPriority(for: rhs.element)
+            if lhsPriority != rhsPriority {
+                return lhsPriority > rhsPriority
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     static func shouldPromoteResolvedServerURL(_ resolvedURL: String, over currentURL: String) -> Bool {
@@ -85,18 +101,9 @@ enum PairingHostRules {
     }
 
     static func preferredServerURL(from serverURLs: [String]) -> String? {
-        var bestURL: String?
-        var bestPriority = Int.min
-
-        for serverURL in serverURLs {
-            let priority = connectivityPriority(for: serverURL)
-            if priority > bestPriority {
-                bestURL = serverURL
-                bestPriority = priority
-            }
-        }
-
-        return bestPriority >= 0 ? bestURL : serverURLs.first
+        let ordered = serverURLsByReachability(serverURLs)
+        guard let bestURL = ordered.first else { return nil }
+        return connectivityPriority(for: bestURL) >= 0 ? bestURL : serverURLs.first
     }
 
     private static func connectivityFamily(for serverURL: String) -> ConnectivityFamily? {

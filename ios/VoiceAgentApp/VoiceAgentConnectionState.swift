@@ -9,19 +9,18 @@ extension VoiceAgentViewModel {
         let candidates = connectionCandidateServerURLs.isEmpty
             ? normalizedServerURLs(preferredServerURL: normalizedServerURL)
             : connectionCandidateServerURLs
-        guard let preferred = PairingHostRules.preferredServerURL(from: candidates),
+        let orderedCandidates = reachabilityOrderedServerURLs(candidates)
+        guard let preferred = orderedCandidates.first,
               !preferred.isEmpty,
               preferred != normalizedServerURL,
               PairingHostRules.shouldPromoteResolvedServerURL(preferred, over: normalizedServerURL) else {
+            connectionCandidateServerURLs = orderedCandidates
             refreshClientConnectionCandidates()
             return
         }
 
         serverURL = preferred
-        connectionCandidateServerURLs = normalizedServerURLs(
-            preferredServerURL: preferred,
-            additionalServerURLs: candidates
-        )
+        connectionCandidateServerURLs = orderedCandidates
         refreshClientConnectionCandidates()
     }
 
@@ -42,19 +41,30 @@ extension VoiceAgentViewModel {
         return ordered
     }
 
+    func reachabilityOrderedServerURLs(_ serverURLs: [String]) -> [String] {
+        let normalizedCandidates = normalizedServerURLs(additionalServerURLs: serverURLs)
+        return normalizedServerURLs(
+            additionalServerURLs: PairingHostRules.serverURLsByReachability(normalizedCandidates)
+        )
+    }
+
     func applyAdvertisedServerURLs(
         primaryServerURL: String?,
         advertisedServerURLs: [String],
         persist: Bool = true
     ) {
-        let resolved = normalizedServerURLs(
-            preferredServerURL: primaryServerURL,
-            additionalServerURLs: advertisedServerURLs
+        let resolved = reachabilityOrderedServerURLs(
+            normalizedServerURLs(
+                preferredServerURL: primaryServerURL,
+                additionalServerURLs: advertisedServerURLs
+            )
         )
         let finalCandidates = resolved.isEmpty
-            ? normalizedServerURLs(
-                preferredServerURL: normalizedServerURL,
-                additionalServerURLs: connectionCandidateServerURLs
+            ? reachabilityOrderedServerURLs(
+                normalizedServerURLs(
+                    preferredServerURL: normalizedServerURL,
+                    additionalServerURLs: connectionCandidateServerURLs
+                )
             )
             : resolved
         if let preferred = finalCandidates.first {
@@ -167,7 +177,7 @@ extension VoiceAgentViewModel {
             }
         }
 
-        let resolvedServerURLs = normalizedServerURLs(additionalServerURLs: advertisedServerURLs)
+        let resolvedServerURLs = reachabilityOrderedServerURLs(advertisedServerURLs)
         guard let normalizedServer = resolvedServerURLs.first else {
             errorText = "Invalid pairing QR. Missing server URL."
             return
@@ -500,7 +510,7 @@ private extension VoiceAgentViewModel {
     }
 
     func exchangePairCode(serverURLs: [String], pairCode: String, sessionID: String?) async -> Bool {
-        let resolvedServerURLs = normalizedServerURLs(additionalServerURLs: serverURLs)
+        let resolvedServerURLs = reachabilityOrderedServerURLs(serverURLs)
         guard let primaryServerURL = resolvedServerURLs.first else {
             errorText = "Pairing failed"
             statusText = "Missing pairing server URL"
