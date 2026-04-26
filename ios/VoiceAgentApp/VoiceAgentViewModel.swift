@@ -1264,7 +1264,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 if activeThreadID == threadID, run.status == "running", runPhaseText == "Planning" || runPhaseText == "Idle" {
                     runPhaseText = "Executing"
                 }
-                ingestEvents(run.events, runID: runID, threadID: threadID)
+                try await fetchAndIngestRunEventsPage(runID: runID, threadID: threadID)
 
                 if isTerminalStatus(run.status) {
                     applyTerminalRunStateIfNeeded(run, threadID: threadID)
@@ -1305,6 +1305,18 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         updateThreadMetadata(threadID: threadID, statusText: "Timed out")
         appendConversation(role: "assistant", text: "Timed out waiting for run completion.", to: threadID)
         removeObservedRunContext(runID: runID)
+    }
+
+    private func fetchAndIngestRunEventsPage(runID: String, threadID: UUID) async throws {
+        let lastSeq = observedRunContexts[runID]?.lastEventSeq ?? -1
+        let page = try await client.fetchRunEventsPage(
+            serverURL: normalizedServerURL,
+            token: apiToken,
+            runID: runID,
+            limit: 500,
+            afterSeq: lastSeq >= 0 ? lastSeq : nil
+        )
+        ingestEvents(page.events, runID: runID, threadID: threadID)
     }
 
     private func streamRunUntilDone(runID: String, threadID: UUID, timeoutSec: TimeInterval?) async throws {

@@ -1,6 +1,13 @@
 import Foundation
 
 enum PairingHostRules {
+    private enum ConnectivityFamily: Equatable {
+        case publicHTTPS
+        case tailscale
+        case lan
+        case local
+    }
+
     static func isLocalOrPrivateHost(_ host: String) -> Bool {
         if host.isEmpty { return false }
         return isLoopbackOrBonjourHost(host) || isRFC1918LANHost(host) || isTailscaleHost(host)
@@ -61,5 +68,40 @@ enum PairingHostRules {
             return 0
         }
         return scheme == "https" ? 4 : -1
+    }
+
+    static func shouldPromoteResolvedServerURL(_ resolvedURL: String, over currentURL: String) -> Bool {
+        let resolvedPriority = connectivityPriority(for: resolvedURL)
+        guard resolvedPriority >= 0 else { return false }
+
+        let currentPriority = connectivityPriority(for: currentURL)
+        guard currentPriority >= 0 else { return true }
+
+        if let resolvedFamily = connectivityFamily(for: resolvedURL),
+           resolvedFamily == connectivityFamily(for: currentURL) {
+            return true
+        }
+        return resolvedPriority >= currentPriority
+    }
+
+    private static func connectivityFamily(for serverURL: String) -> ConnectivityFamily? {
+        guard let parsed = URL(string: serverURL),
+              let host = parsed.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return nil
+        }
+        let scheme = parsed.scheme?.lowercased() ?? ""
+        if scheme == "https" && !isLocalOrPrivateHost(host) {
+            return .publicHTTPS
+        }
+        if isTailscaleHost(host) {
+            return .tailscale
+        }
+        if isRFC1918LANHost(host) || host.hasSuffix(".local") {
+            return .lan
+        }
+        if isLoopbackOrBonjourHost(host) {
+            return .local
+        }
+        return scheme == "https" ? .publicHTTPS : nil
     }
 }

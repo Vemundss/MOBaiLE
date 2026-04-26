@@ -53,12 +53,29 @@ extension VoiceAgentViewModel {
         if promoted == normalizedServerURL {
             return
         }
+        if !PairingHostRules.shouldPromoteResolvedServerURL(promoted, over: normalizedServerURL) {
+            rememberResolvedServerURL(promoted)
+            return
+        }
         let currentCandidates = connectionCandidateServerURLs.isEmpty ? [normalizedServerURL] : connectionCandidateServerURLs
         applyAdvertisedServerURLs(
             primaryServerURL: promoted,
             advertisedServerURLs: currentCandidates,
             persist: true
         )
+    }
+
+    private func rememberResolvedServerURL(_ resolvedURL: String) {
+        let remembered = normalized(resolvedURL)
+        guard !remembered.isEmpty else { return }
+        let current = normalizedServerURL
+        let currentCandidates = connectionCandidateServerURLs.isEmpty ? [current] : connectionCandidateServerURLs
+        connectionCandidateServerURLs = normalizedServerURLs(
+            preferredServerURL: current,
+            additionalServerURLs: currentCandidates + [remembered]
+        )
+        refreshClientConnectionCandidates()
+        persistSettings()
     }
 
     func refreshSessionPresenceFromBackendIfPossible() async {

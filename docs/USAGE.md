@@ -376,7 +376,18 @@ After install + service start:
 bash ./scripts/phone_connectivity_smoke.sh
 ```
 
-This script reads `backend/pairing.json`, validates auth behavior, uploads audio to `/v1/audio`, and waits for terminal run status.
+This script reads `backend/pairing.json`, validates auth behavior, creates a text run through `/v1/utterances`, and waits for terminal run status.
+To include the backend audio upload/transcription path, run:
+
+```bash
+VOICE_AGENT_SMOKE_AUDIO=true bash ./scripts/phone_connectivity_smoke.sh
+```
+
+For a real transcription provider, pass an actual audio file:
+
+```bash
+VOICE_AGENT_SMOKE_AUDIO=true VOICE_AGENT_SMOKE_AUDIO_FILE=/path/to/sample.wav bash ./scripts/phone_connectivity_smoke.sh
+```
 
 ## 8) Legacy no-app voice testing
 

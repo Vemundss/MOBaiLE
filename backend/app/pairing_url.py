@@ -11,9 +11,6 @@ try:
     from app.pairing_url_policy import is_ipv4 as _is_ipv4
     from app.pairing_url_policy import is_loopback_host as _is_loopback_host
     from app.pairing_url_policy import (
-        is_loopback_only_server_urls as _is_loopback_only_server_urls,
-    )
-    from app.pairing_url_policy import (
         is_network_exposed_host as _is_network_exposed_host,
     )
     from app.pairing_url_policy import (
@@ -52,10 +49,6 @@ except ModuleNotFoundError:
 
     def _loopback_server_url(bind_port: int) -> str:
         return f"http://127.0.0.1:{bind_port}"
-
-    def _is_loopback_only_server_urls(urls: list[str], *, bind_port: int) -> bool:
-        normalized = _dedupe_server_urls(urls)
-        return normalized == [_loopback_server_url(bind_port)]
 
     def _normalize_server_url(server_url: str) -> str:
         candidate = server_url.strip().rstrip("/")
@@ -182,11 +175,11 @@ def refresh_pairing_server_url(
     if (
         not explicit_public_url
         and normalized_phone_access_mode in {"tailscale", "wifi"}
-        and _is_loopback_only_server_urls(detected, bind_port=bind_port)
+        and not _has_mode_url(detected, phone_access_mode=normalized_phone_access_mode)
     ):
         fallback_urls = _matching_previous_server_urls(payload, phone_access_mode=normalized_phone_access_mode)
         if fallback_urls:
-            next_urls = _dedupe_server_urls(fallback_urls + detected)
+            next_urls = _dedupe_server_urls(preferred + fallback_urls + detected)
     if not next_urls and current:
         next_urls = [current]
     if not next_urls:
@@ -363,6 +356,10 @@ def _matching_previous_server_urls(payload: dict[str, object], *, phone_access_m
         if _server_url_matches_mode(url, phone_access_mode=phone_access_mode):
             candidates.append(url)
     return _dedupe_server_urls(candidates)
+
+
+def _has_mode_url(urls: list[str], *, phone_access_mode: PhoneAccessMode) -> bool:
+    return any(_server_url_matches_mode(url, phone_access_mode=phone_access_mode) for url in urls)
 
 
 def _previous_public_server_urls(payload: dict[str, object]) -> list[str]:

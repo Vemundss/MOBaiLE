@@ -424,8 +424,14 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
-    func testPromoteResolvedServerURLMovesWorkingLanFallbackToFront() {
-        let vm = VoiceAgentViewModel()
+    func testPromoteResolvedServerURLDoesNotDemoteTailscaleToLan() {
+        let harness = makeIsolatedPersistenceHarness()
+        defer { harness.cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: harness.store,
+            defaults: harness.defaults,
+            draftAttachmentDirectory: harness.draftDirectory
+        )
 
         vm.applyPairedClientCredentials(
             PairExchangeResponse(
@@ -445,17 +451,58 @@ final class VoiceAgentModelTests: XCTestCase {
 
         vm.promoteResolvedServerURL("http://192.168.86.122:8000")
 
-        XCTAssertEqual(vm.serverURL, "http://192.168.86.122:8000")
+        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
         XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
-            "http://192.168.86.122:8000",
             "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
             "http://100.111.99.51:8000",
+            "http://192.168.86.122:8000",
+        ])
+    }
+
+    @MainActor
+    func testPromoteResolvedServerURLRemembersLanFallbackWithoutDemotingTailscale() {
+        let harness = makeIsolatedPersistenceHarness()
+        defer { harness.cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: harness.store,
+            defaults: harness.defaults,
+            draftAttachmentDirectory: harness.draftDirectory
+        )
+
+        vm.applyPairedClientCredentials(
+            PairExchangeResponse(
+                apiToken: "fresh-token",
+                refreshToken: "refresh-token",
+                sessionId: "iphone-app",
+                securityMode: "full-access",
+                serverURL: "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                serverURLs: [
+                    "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                    "http://100.111.99.51:8000",
+                ]
+            ),
+            fallbackPrimaryServerURL: "http://vemunds-macbook-air.tail6a5903.ts.net:8000"
+        )
+
+        vm.promoteResolvedServerURL("http://192.168.86.122:8000")
+
+        XCTAssertEqual(vm.serverURL, "http://vemunds-macbook-air.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.connectionCandidateServerURLsForTesting, [
+            "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            "http://100.111.99.51:8000",
+            "http://192.168.86.122:8000",
         ])
     }
 
     @MainActor
     func testPromoteResolvedServerURLCanUpgradeLanToTailscale() {
-        let vm = VoiceAgentViewModel()
+        let harness = makeIsolatedPersistenceHarness()
+        defer { harness.cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: harness.store,
+            defaults: harness.defaults,
+            draftAttachmentDirectory: harness.draftDirectory
+        )
         vm.serverURL = "http://192.168.86.122:8000"
         vm.persistSettings()
 

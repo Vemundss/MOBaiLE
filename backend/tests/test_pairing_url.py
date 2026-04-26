@@ -101,6 +101,52 @@ def test_refresh_pairing_server_url_updates_stale_private_host(monkeypatch, tmp_
     assert updated["pair_code"] == "pair-1234"
 
 
+def test_refresh_pairing_server_url_keeps_previous_tailscale_when_detection_is_lan_only(
+    monkeypatch,
+    tmp_path: Path,
+):
+    module = importlib.import_module("app.pairing_url")
+    module = importlib.reload(module)
+    monkeypatch.setattr(
+        module,
+        "detect_server_urls",
+        lambda **_: ["http://192.168.1.20:8000"],
+    )
+
+    pairing_file = tmp_path / "pairing.json"
+    pairing_file.write_text(
+        json.dumps(
+            {
+                "server_url": "http://mobaile.tail6a5903.ts.net:8000",
+                "server_urls": [
+                    "http://mobaile.tail6a5903.ts.net:8000",
+                    "http://100.111.99.51:8000",
+                    "http://192.168.1.10:8000",
+                ],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    module.refresh_pairing_server_url(
+        pairing_file,
+        bind_host="0.0.0.0",
+        bind_port=8000,
+        phone_access_mode="tailscale",
+    )
+
+    updated = json.loads(pairing_file.read_text(encoding="utf-8"))
+    assert updated["server_url"] == "http://mobaile.tail6a5903.ts.net:8000"
+    assert updated["server_urls"] == [
+        "http://mobaile.tail6a5903.ts.net:8000",
+        "http://100.111.99.51:8000",
+        "http://192.168.1.20:8000",
+    ]
+
+
 def test_refresh_pairing_server_url_discards_stale_public_url_without_override(monkeypatch, tmp_path: Path):
     module = importlib.import_module("app.pairing_url")
     module = importlib.reload(module)
