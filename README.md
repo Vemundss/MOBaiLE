@@ -166,7 +166,7 @@ What the installer does:
 - installs and starts a background service on macOS or Linux when supported
 - generates a pairing QR; run `mobaile pair` later to refresh it
 
-If you want a stable hostname for the iPhone, set `VOICE_AGENT_PUBLIC_SERVER_URL` before pairing. Otherwise MOBaiLE prefers the Tailscale or LAN URLs advertised in the active pairing file.
+If you want a stable hostname for the iPhone, set `VOICE_AGENT_PUBLIC_SERVER_URL` before pairing. Otherwise MOBaiLE uses the URLs for the selected phone access mode: Tailscale mode advertises Tailscale/public URLs only, while Wi-Fi mode advertises the LAN URL.
 
 ### Check that the computer is ready
 
@@ -273,7 +273,9 @@ bash ./scripts/pairing_qr.sh
 ```
 
 - iPhone can pair on Wi-Fi but not on cellular:
+  - run `mobaile pair` and scan the fresh QR; pair codes expire
   - confirm Tailscale is connected on both devices
+  - in iOS Settings, confirm Cellular Data is enabled for Tailscale and MOBaiLE
   - confirm the backend is still running with `bash ./scripts/doctor.sh`
 
 - Voice works for text but not the mic:

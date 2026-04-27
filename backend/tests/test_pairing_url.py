@@ -18,7 +18,6 @@ def test_detect_server_url_prefers_tailscale_for_network_exposed_backend(monkeyp
     assert module.detect_server_urls(bind_host="0.0.0.0", bind_port=8000) == [
         "http://mobaile.tail6a5903.ts.net:8000",
         "http://100.111.99.51:8000",
-        "http://192.168.1.20:8000",
     ]
 
 
@@ -96,7 +95,6 @@ def test_refresh_pairing_server_url_updates_stale_private_host(monkeypatch, tmp_
     assert updated["server_urls"] == [
         "http://mobaile.tail6a5903.ts.net:8000",
         "http://100.111.99.51:8000",
-        "http://192.168.1.20:8000",
     ]
     assert updated["pair_code"] == "pair-1234"
 
@@ -143,7 +141,6 @@ def test_refresh_pairing_server_url_keeps_previous_tailscale_when_detection_is_l
     assert updated["server_urls"] == [
         "http://mobaile.tail6a5903.ts.net:8000",
         "http://100.111.99.51:8000",
-        "http://192.168.1.20:8000",
     ]
 
 
@@ -180,7 +177,6 @@ def test_refresh_pairing_server_url_discards_stale_public_url_without_override(m
     assert updated["server_urls"] == [
         "http://mobaile.tail6a5903.ts.net:8000",
         "http://100.111.99.51:8000",
-        "http://192.168.1.20:8000",
     ]
 
 
@@ -452,7 +448,6 @@ def test_refresh_pairing_server_url_preserves_previous_tailscale_url_when_detect
     assert updated["server_urls"] == [
         "http://mobaile.tail6a5903.ts.net:8000",
         "http://100.111.99.51:8000",
-        "http://127.0.0.1:8000",
     ]
 
 
@@ -537,5 +532,4 @@ def test_backend_startup_refreshes_pairing_server_url(monkeypatch, tmp_path: Pat
     assert updated["server_urls"] == [
         "http://mobaile.tail6a5903.ts.net:8000",
         "http://100.111.99.51:8000",
-        "http://192.168.1.20:8000",
     ]

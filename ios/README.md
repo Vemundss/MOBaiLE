@@ -59,8 +59,8 @@ Manual fallback inside app Settings:
 Important:
 
 - if you are using a real iPhone, `127.0.0.1` will not work
-- use the preferred URL from the active pairing file; MOBaiLE will also keep any fallback LAN/Tailscale URLs advertised there
-- when Tailscale MagicDNS is enabled, pairing prefers the stable `*.ts.net` hostname before raw Tailscale IPs
+- use the preferred URL from the active pairing file; in Tailscale mode this should be a Tailscale/public URL, not a LAN fallback
+- when Tailscale is enabled, MOBaiLE keeps both raw `100.x` and `*.ts.net` candidates so cellular use does not depend only on Wi-Fi or DNS
 - the app asks for microphone and Speech Recognition permission
 - if you have a stable remote hostname, set `VOICE_AGENT_PUBLIC_SERVER_URL` on the backend so pairing prefers that URL
 
@@ -138,6 +138,7 @@ The checked-in project does not hard-code a development team, so Xcode should le
   - run `mobaile pair` and use the fresh QR path it prints
   - verify the pair code and session in the active pairing file are current, not an old checkout copy
   - check whether the active pairing file lists multiple `server_urls`; the app will try them in order and promote the one that works
+  - if Wi-Fi works but cellular does not, confirm Cellular Data is enabled for both Tailscale and MOBaiLE in iOS Settings
   - verify `VOICE_AGENT_API_TOKEN` in the active backend `.env` matches the running backend
   - if pairing fails immediately, rotate the pairing file first with `bash ./scripts/rotate_api_token.sh`
 

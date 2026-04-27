@@ -72,7 +72,7 @@ mobaile update
 
 `install.sh` is the main setup entry point. `install_backend.sh` is the lower-level backend-only path.
 `install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
-If Tailscale MagicDNS is available, pairing prefers the stable `*.ts.net` hostname automatically before raw `100.x` or LAN IPs.
+In Tailscale mode, pairing advertises Tailscale/public URLs only so a Wi-Fi LAN fallback cannot mask a broken cellular path.
 The iPhone app only talks to this backend. It does not run code on-device.
 
 ## Trust Boundary And Modes
@@ -420,7 +420,7 @@ Phone onboarding with QR:
 Notes:
 
 - App now confirms pairing details before applying server/session changes.
-- Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding.
+- Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding. In Tailscale mode those candidates stay on the Tailscale/public path.
 - Non-local servers must use `https://` for pairing.
 - Legacy `api_token` pairing links are disabled by default (developer-mode fallback only).
 

@@ -163,6 +163,8 @@ def refresh_pairing_server_url(
         phone_access_mode=phone_access_mode,
     )
     normalized_phone_access_mode = _normalize_phone_access_mode(phone_access_mode)
+    if normalized_phone_access_mode == "tailscale":
+        detected = _tailscale_reachable_server_urls(detected)
 
     preferred: list[str] = []
     explicit_public_url = _normalize_server_url(public_server_url)
@@ -246,9 +248,6 @@ def detect_server_urls(
         tailscale_ip = detect_tailscale_ip()
         if tailscale_ip:
             candidates.append(f"http://{tailscale_ip}:{bind_port}")
-        lan_ip = detect_lan_ip()
-        if lan_ip:
-            candidates.append(f"http://{lan_ip}:{bind_port}")
         if len(candidates) == (1 if explicit_public_url else 0):
             candidates.append(_loopback_server_url(bind_port))
         return _dedupe_server_urls(candidates)
@@ -367,4 +366,12 @@ def _previous_public_server_urls(payload: dict[str, object]) -> list[str]:
         url
         for url in _read_pairing_server_urls(payload)
         if _is_public_server_url(url)
+    ]
+
+
+def _tailscale_reachable_server_urls(urls: list[str]) -> list[str]:
+    return [
+        url
+        for url in _dedupe_server_urls(urls)
+        if _server_url_matches_mode(url, phone_access_mode="tailscale") or _is_public_server_url(url)
     ]
