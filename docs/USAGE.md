@@ -374,6 +374,14 @@ uv run pytest -q
 After install + service start:
 
 ```bash
+mobaile doctor
+```
+
+`mobaile doctor` checks the active installed backend, the fresh pair code, the QR image, the advertised phone URLs, and `/health` on each advertised URL. In Tailscale mode it fails if the active QR advertises a Wi-Fi-only fallback, because that can hide a broken cellular path.
+
+To test an authenticated run from the computer side:
+
+```bash
 bash ./scripts/phone_connectivity_smoke.sh
 ```
 
@@ -420,6 +428,7 @@ Phone onboarding with QR:
 Notes:
 
 - App now confirms pairing details before applying server/session changes.
+- A fresh one-time pair-code QR is treated as an explicit trust action in the app; the app can remember all advertised hosts for that computer after a successful pair.
 - Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding. In Tailscale mode those candidates stay on the Tailscale/public path.
 - Non-local servers must use `https://` for pairing.
 - Legacy `api_token` pairing links are disabled by default (developer-mode fallback only).

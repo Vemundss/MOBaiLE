@@ -21,6 +21,7 @@ Usage: mobaile [command]
 
 Commands:
   status   Show backend status and pairing readiness
+  doctor   Check service, pairing, QR, and advertised phone URLs
   pair     Generate or surface the pairing QR image
   update   Check for or install newer MOBaiLE updates
   logs     Show backend service logs
@@ -419,11 +420,309 @@ Pairing QR: $(pairing_qr_label "${backend_dir}")
 
 Quick actions:
   mobaile pair
+  mobaile doctor
   mobaile update
   mobaile restart
   mobaile logs
   mobaile config
 EOF
+}
+
+doctor_pairing_report() {
+  local pairing_file="$1"
+  local phone_access_mode="$2"
+  local qr_path="$3"
+
+  python3 - "${pairing_file}" "${phone_access_mode}" "${qr_path}" << 'PY'
+import ipaddress
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+from urllib.parse import urlparse
+
+pairing_path = Path(sys.argv[1])
+phone_access_mode = sys.argv[2].strip().lower() or "tailscale"
+qr_path = Path(sys.argv[3])
+failures = 0
+
+
+def line(status: str, message: str) -> None:
+    print(f"[{status}] {message}")
+
+
+def fail(message: str) -> None:
+    global failures
+    failures += 1
+    line("fail", message)
+
+
+def warn(message: str) -> None:
+    line("warn", message)
+
+
+def ok(message: str) -> None:
+    line("ok", message)
+
+
+def normalize_url(raw: object) -> str:
+    candidate = str(raw or "").strip().rstrip("/")
+    if not candidate:
+        return ""
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return ""
+    netloc = parsed.hostname.lower()
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return f"{parsed.scheme.lower()}://{netloc}"
+
+
+def dedupe(urls: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in urls:
+        normalized = normalize_url(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def host_for(url: str) -> str:
+    return (urlparse(url).hostname or "").lower()
+
+
+def ip_address(host: str):
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+def is_loopback(host: str) -> bool:
+    addr = ip_address(host)
+    return host in {"localhost", "::1"} or bool(addr and addr.is_loopback)
+
+
+def is_lan(host: str) -> bool:
+    addr = ip_address(host)
+    return host.endswith(".local") or bool(addr and addr.is_private and not addr.is_loopback)
+
+
+def is_tailscale(host: str) -> bool:
+    addr = ip_address(host)
+    return host.endswith(".ts.net") or bool(
+        addr
+        and addr.version == 4
+        and addr in ipaddress.ip_network("100.64.0.0/10")
+    )
+
+
+def is_public_https(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    addr = ip_address(host)
+    return (
+        parsed.scheme == "https"
+        and not host.endswith(".local")
+        and not host.endswith(".ts.net")
+        and not is_loopback(host)
+        and not is_tailscale(host)
+        and not (addr and addr.is_private)
+    )
+
+
+if not pairing_path.exists():
+    fail(f"Pairing file is missing: {pairing_path}")
+    raise SystemExit(1)
+
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    fail(f"Pairing file is not readable JSON: {exc}")
+    raise SystemExit(1)
+
+server_url = normalize_url(payload.get("server_url"))
+raw_urls = payload.get("server_urls")
+server_urls = dedupe(raw_urls if isinstance(raw_urls, list) else [server_url])
+if server_url and server_url not in server_urls:
+    server_urls.insert(0, server_url)
+
+if server_url:
+    ok(f"Primary URL: {server_url}")
+else:
+    fail("Pairing file has no valid server_url")
+
+if server_urls:
+    ok(f"Advertised URLs: {', '.join(server_urls)}")
+else:
+    fail("Pairing file has no valid advertised URLs")
+
+pair_code = str(payload.get("pair_code", "")).strip()
+expires_at = str(payload.get("pair_code_expires_at", "")).strip()
+if not pair_code:
+    fail("Pair code is missing; run mobaile pair")
+elif not expires_at:
+    fail("Pair code expiry is missing; run mobaile pair")
+else:
+    try:
+        expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        fail(f"Pair code expiry is invalid: {expires_at}")
+    else:
+        if expires <= datetime.now(timezone.utc):
+            fail("Pair code is expired; run mobaile pair")
+        else:
+            ok(f"Pair code is valid until {expires_at}")
+
+if qr_path.exists():
+    ok(f"Pairing QR image exists: {qr_path}")
+else:
+    fail(f"Pairing QR image is missing: {qr_path}")
+
+hosts = [host_for(url) for url in server_urls]
+if phone_access_mode == "tailscale":
+    bad_urls = [
+        url for url in server_urls
+        if not (is_tailscale(host_for(url)) or is_public_https(url))
+    ]
+    if bad_urls:
+        fail("Tailscale mode advertises Wi-Fi/local-only URL(s): " + ", ".join(bad_urls))
+    elif any(is_tailscale(host) for host in hosts):
+        ok("Tailscale mode advertises a Tailscale phone path")
+    elif any(is_public_https(url) for url in server_urls):
+        ok("Tailscale mode advertises a public HTTPS phone path")
+    else:
+        fail("Tailscale mode has no Tailscale or public HTTPS URL")
+elif phone_access_mode == "wifi":
+    if any(is_lan(host) and not is_tailscale(host) for host in hosts):
+        ok("Wi-Fi mode advertises a LAN phone path")
+    else:
+        fail("Wi-Fi mode has no LAN URL")
+elif phone_access_mode == "local":
+    if all(is_loopback(host) for host in hosts):
+        ok("Local mode is loopback-only")
+    else:
+        fail("Local mode advertises non-loopback URL(s): " + ", ".join(server_urls))
+else:
+    warn(f"Unknown phone access mode: {phone_access_mode}")
+
+raise SystemExit(1 if failures else 0)
+PY
+}
+
+doctor_urls() {
+  local pairing_file="$1"
+
+  python3 - "${pairing_file}" << 'PY'
+import json
+from pathlib import Path
+import sys
+from urllib.parse import urlparse
+
+pairing_path = Path(sys.argv[1])
+if not pairing_path.exists():
+    raise SystemExit(0)
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+urls = payload.get("server_urls")
+if not isinstance(urls, list):
+    urls = [payload.get("server_url", "")]
+seen = set()
+for raw in urls:
+    value = str(raw or "").strip().rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or value in seen:
+        continue
+    seen.add(value)
+    print(value)
+PY
+}
+
+doctor_health_check() {
+  local pairing_file="$1"
+  local failures=0
+  local successes=0
+  local urls=()
+  local url code
+
+  if [[ "${MOBAILE_DOCTOR_SKIP_NETWORK:-0}" == "1" ]]; then
+    echo "[warn] Network health checks skipped by MOBAILE_DOCTOR_SKIP_NETWORK=1"
+    return 0
+  fi
+  if ! command -v curl > /dev/null 2>&1; then
+    echo "[fail] curl is required for network health checks"
+    return 1
+  fi
+
+  while IFS= read -r url; do
+    [[ -n "${url}" ]] && urls+=("${url}")
+  done < <(doctor_urls "${pairing_file}")
+
+  if [[ "${#urls[@]}" -eq 0 ]]; then
+    echo "[fail] No advertised URLs available for health checks"
+    return 1
+  fi
+
+  for url in "${urls[@]}"; do
+    code="$(curl -sS --connect-timeout 3 --max-time 5 -o /dev/null -w "%{http_code}" "${url}/health" 2> /dev/null || true)"
+    if [[ "${code}" == "200" ]]; then
+      echo "[ok] ${url}/health returned 200"
+      successes=$((successes + 1))
+    else
+      echo "[warn] ${url}/health returned ${code:-no response}"
+      failures=$((failures + 1))
+    fi
+  done
+
+  if [[ "${successes}" -eq 0 ]]; then
+    echo "[fail] None of the advertised URLs answered /health"
+    return 1
+  fi
+  return 0
+}
+
+doctor_command() {
+  local repo_root="$1"
+  local backend_dir env_file pairing_file qr_path phone_access_mode state failures=0
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  state="$(service_state_label "${repo_root}")"
+
+  echo "MOBaiLE doctor"
+  echo "Active backend: ${backend_dir}"
+  echo "Phone access mode: $(friendly_phone_access_label "${phone_access_mode}" "$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")" "$(read_pairing_value "${pairing_file}" "server_url" "")") (${phone_access_mode})"
+
+  if [[ "${state}" == "Running" ]]; then
+    echo "[ok] Backend service is running"
+  else
+    echo "[fail] Backend service is not running"
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_pairing_report "${pairing_file}" "${phone_access_mode}" "${qr_path}"; then
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_health_check "${pairing_file}"; then
+    failures=$((failures + 1))
+  fi
+
+  if [[ "${failures}" -eq 0 ]]; then
+    echo "Doctor result: ready"
+    return 0
+  fi
+  echo "Doctor result: attention needed"
+  return 1
 }
 
 pair_command() {
@@ -455,6 +754,7 @@ pair_command() {
       MOBAILE_PAIRING_FILE="${pairing_file}" \
       MOBAILE_PAIRING_QR_OUT="${qr_path}" \
       MOBAILE_QR_PYTHON_ENV_DIR="${backend_dir}" \
+      MOBAILE_PAIR_FORCE_REFRESH=1 \
       bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}" --quiet --no-preview
   fi
 
@@ -614,6 +914,7 @@ main() {
       ;;
     logs | restart | start | stop) delegate_service_command "${repo_root}" "${command_name}" ;;
     config) config_command "${repo_root}" ;;
+    doctor) doctor_command "${repo_root}" ;;
     -h | --help | help) usage ;;
     *)
       usage

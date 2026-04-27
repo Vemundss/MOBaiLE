@@ -616,14 +616,24 @@ struct PairingConfirmationSheet: View {
                     }
                 }
 
-                if let warning = pending.localNetworkWarning {
+                if pending.tailscaleNetworkNotice != nil || pending.localNetworkWarning != nil {
                     Section("Network") {
-                        Label("Local network HTTP detected", systemImage: "wifi.exclamationmark")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.orange)
-                        Text(warning)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if let notice = pending.tailscaleNetworkNotice {
+                            Label("Tailscale path selected", systemImage: "network")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.blue)
+                            Text(notice)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let warning = pending.localNetworkWarning {
+                            Label("Local network HTTP detected", systemImage: "wifi.exclamationmark")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.orange)
+                            Text(warning)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -636,8 +646,8 @@ struct PairingConfirmationSheet: View {
                 }
 
                 Section("Trust") {
-                    Toggle("Trust this server", isOn: $trustHost)
-                    Text("Trusted hosts auto-enable this toggle the next time you pair.")
+                    Toggle("Remember this server after pairing", isOn: $trustHost)
+                    Text("A fresh pair code is still required. Remembering the server only preselects this trust choice the next time you pair with the same host.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

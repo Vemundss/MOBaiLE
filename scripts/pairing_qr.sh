@@ -12,6 +12,7 @@ QR_SCALE="12"
 QUIET="false"
 SHOW_PREVIEW="true"
 PAIR_CODE_TTL_MIN="${VOICE_AGENT_PAIR_CODE_TTL_MIN:-30}"
+PAIR_CODE_FORCE_REFRESH="${MOBAILE_PAIR_FORCE_REFRESH:-false}"
 
 ensure_uv_available() {
   if command -v uv > /dev/null 2>&1; then
@@ -76,7 +77,7 @@ if [[ ! -f "${PAIRING_FILE}" ]]; then
 fi
 
 PAIRING_REFRESHED="$(
-  PAIRING_PATH="${PAIRING_FILE}" PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - << 'PY'
+  PAIRING_PATH="${PAIRING_FILE}" PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" PAIR_FORCE_REFRESH="${PAIR_CODE_FORCE_REFRESH}" python3 - << 'PY'
 import json
 import os
 import secrets
@@ -87,7 +88,12 @@ p = Path(os.environ["PAIRING_PATH"])
 data = json.loads(p.read_text(encoding="utf-8"))
 pair_code = str(data.get("pair_code", "")).strip()
 expires_at = str(data.get("pair_code_expires_at", "")).strip()
-needs_refresh = not pair_code
+force_refresh = os.environ.get("PAIR_FORCE_REFRESH", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+needs_refresh = force_refresh or not pair_code
 
 if expires_at:
     try:

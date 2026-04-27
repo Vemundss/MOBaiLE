@@ -285,6 +285,13 @@ extension VoiceAgentViewModel {
         return trustedPairHosts.contains(normalizedHost)
     }
 
+    func shouldTrustPendingPairingByDefault(_ pending: PendingPairing) -> Bool {
+        if pending.serverHosts.contains(where: isTrustedPairHost) {
+            return true
+        }
+        return pending.pairCode != nil && pending.legacyToken == nil && !pending.serverHosts.isEmpty
+    }
+
     func setTrustedPairHost(_ host: String, trusted: Bool) {
         let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedHost.isEmpty else { return }
@@ -294,6 +301,20 @@ extension VoiceAgentViewModel {
             trustedPairHosts.remove(normalizedHost)
         }
         persistTrustedPairHosts()
+    }
+
+    func setTrustedPairHosts(from pending: PendingPairing, trusted: Bool) {
+        var didChange = false
+        for host in pending.serverHosts {
+            if trusted {
+                didChange = trustedPairHosts.insert(host).inserted || didChange
+            } else if trustedPairHosts.remove(host) != nil {
+                didChange = true
+            }
+        }
+        if didChange {
+            persistTrustedPairHosts()
+        }
     }
 
     @discardableResult
@@ -307,7 +328,7 @@ extension VoiceAgentViewModel {
                 sessionID: pending.sessionID
             )
             if didPair, trustHost {
-                setTrustedPairHost(pending.serverHost, trusted: true)
+                setTrustedPairHosts(from: pending, trusted: true)
             }
             return didPair
         }
@@ -327,7 +348,7 @@ extension VoiceAgentViewModel {
             errorText = ""
             persistActiveThreadSnapshot()
             if trustHost {
-                setTrustedPairHost(pending.serverHost, trusted: true)
+                setTrustedPairHosts(from: pending, trusted: true)
             }
             return true
         }
@@ -540,13 +561,62 @@ private extension VoiceAgentViewModel {
             persistActiveThreadSnapshot()
             return true
         } catch {
-            errorText = error.localizedDescription
+            errorText = pairingFailureMessage(for: error, serverURLs: resolvedServerURLs)
             statusText = "Pairing failed"
             return false
         }
+    }
+
+    func pairingFailureMessage(for error: Error, serverURLs: [String]) -> String {
+        if let apiError = error as? APIError {
+            return apiError.localizedDescription
+        }
+
+        let hosts = serverURLs.compactMap { URL(string: $0)?.host?.lowercased() }
+        let hasTailscalePath = hosts.contains { PairingHostRules.isTailscaleHost($0) }
+        let hasLANPath = hosts.contains { PairingHostRules.isRFC1918LANHost($0) || $0.hasSuffix(".local") }
+        let nsError = error as NSError
+        let urlError = error as? URLError ?? (nsError.domain == NSURLErrorDomain ? URLError(URLError.Code(rawValue: nsError.code)) : nil)
+
+        if let code = urlError?.code {
+            switch code {
+            case .serverCertificateUntrusted,
+                 .serverCertificateHasBadDate,
+                 .serverCertificateHasUnknownRoot,
+                 .serverCertificateNotYetValid,
+                 .secureConnectionFailed:
+                return "iOS does not trust this server certificate. Use a fresh MOBaiLE QR with the default Tailscale HTTP path, or configure the backend with a valid HTTPS certificate."
+            case .appTransportSecurityRequiresSecureConnection:
+                return "iOS blocked this insecure HTTP path. Run mobaile pair again and scan the fresh QR; Tailscale pairing should use a permitted Tailscale or local path."
+            case .cannotFindHost,
+                 .cannotConnectToHost,
+                 .timedOut,
+                 .networkConnectionLost,
+                 .notConnectedToInternet,
+                 .dnsLookupFailed:
+                if hasTailscalePath {
+                    return "Could not reach the Tailscale backend. Open Tailscale on this iPhone, confirm it is connected to the same tailnet as this computer, then scan a fresh MOBaiLE QR."
+                }
+                if hasLANPath {
+                    return "Could not reach the Wi-Fi backend. Confirm the iPhone is on the same Wi-Fi as this computer and local network access is allowed in iOS Settings."
+                }
+            default:
+                break
+            }
+        }
+
+        return error.localizedDescription
     }
 
     func isLocalOrPrivateHost(_ host: String) -> Bool {
         PairingHostRules.isLocalOrPrivateHost(host)
     }
 }
+
+#if DEBUG
+extension VoiceAgentViewModel {
+    func _test_pairingFailureMessage(for error: Error, serverURLs: [String]) -> String {
+        pairingFailureMessage(for: error, serverURLs: serverURLs)
+    }
+}
+#endif

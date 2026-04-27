@@ -185,7 +185,7 @@ struct ContentView: View {
                     trustPairHost = false
                     return
                 }
-                trustPairHost = vm.isTrustedPairHost(pending.serverHost)
+                trustPairHost = vm.shouldTrustPendingPairingByDefault(pending)
             }
             .onOpenURL { url in
                 incomingURLStore.receive(url)

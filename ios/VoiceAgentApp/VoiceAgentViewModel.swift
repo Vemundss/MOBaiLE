@@ -18,6 +18,30 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             URL(string: serverURL)?.host?.lowercased() ?? ""
         }
 
+        var serverHosts: [String] {
+            var seen: Set<String> = []
+            var hosts: [String] = []
+            for url in serverURLs {
+                guard let host = URL(string: url)?.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                      !host.isEmpty,
+                      !seen.contains(host) else {
+                    continue
+                }
+                seen.insert(host)
+                hosts.append(host)
+            }
+            return hosts
+        }
+
+        var usesTailscalePath: Bool {
+            serverHosts.contains { PairingHostRules.isTailscaleHost($0) }
+        }
+
+        var tailscaleNetworkNotice: String? {
+            guard usesTailscalePath else { return nil }
+            return "This QR uses the Tailscale path, which is the one that should work on cellular. If pairing fails on 5G, open Tailscale on this iPhone and confirm it is connected to the same tailnet as this computer."
+        }
+
         var localNetworkWarning: String? {
             guard serverURL.lowercased().hasPrefix("http://"),
                   PairingHostRules.isRFC1918LANHost(serverHost) else {

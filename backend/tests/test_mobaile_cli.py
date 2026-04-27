@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import platform
 import subprocess
@@ -204,6 +205,46 @@ def test_mobaile_pair_prints_qr_path_when_open_is_skipped(tmp_path: Path):
     assert "pairing-qr.png" in result.stdout
 
 
+def test_mobaile_pair_requests_fresh_pair_code(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    scripts_dir = repo / "scripts"
+    backend_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    (backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://127.0.0.1:8000","session_id":"iphone-app","pair_code":"pair-1234","pair_code_expires_at":"2999-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    (scripts_dir / "pairing_qr.sh").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf "%s" "${MOBAILE_PAIR_FORCE_REFRESH:-}" > "${MOBAILE_BACKEND_DIR}/pair-force-refresh.txt"
+            : > "${MOBAILE_PAIRING_QR_OUT}"
+            """
+        ),
+        encoding="utf-8",
+    )
+    (scripts_dir / "pairing_qr.sh").chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "pair"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_SKIP_OPEN": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (backend_dir / "pair-force-refresh.txt").read_text(encoding="utf-8") == "1"
+
+
 def test_mobaile_status_does_not_report_ready_for_expired_pairing(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"
@@ -258,6 +299,94 @@ def test_mobaile_status_does_not_report_existing_qr_as_ready_when_pairing_expire
 
     assert result.returncode == 0
     assert "Pairing QR: Expired; run mobaile pair" in result.stdout
+
+
+def test_mobaile_doctor_passes_for_tailscale_pairing(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://mobaile.tail6a5903.ts.net:8000",
+                "server_urls": [
+                    "http://mobaile.tail6a5903.ts.net:8000",
+                    "http://100.111.99.51:8000",
+                ],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "[ok] Tailscale mode advertises a Tailscale phone path" in result.stdout
+    assert "Doctor result: ready" in result.stdout
+
+
+def test_mobaile_doctor_fails_when_tailscale_pairing_has_lan_fallback(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://mobaile.tail6a5903.ts.net:8000",
+                "server_urls": [
+                    "http://mobaile.tail6a5903.ts.net:8000",
+                    "http://192.168.1.20:8000",
+                ],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Tailscale mode advertises Wi-Fi/local-only URL(s): http://192.168.1.20:8000" in result.stdout
+    assert "Doctor result: attention needed" in result.stdout
 
 
 def test_mobaile_status_reports_pairing_qr_can_be_regenerated(tmp_path: Path):

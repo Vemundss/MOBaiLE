@@ -442,6 +442,90 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertNil(pending.localNetworkWarning)
     }
 
+    func testPendingPairingIdentifiesTailscaleCellularPath() {
+        let pending = VoiceAgentViewModel.PendingPairing(
+            serverURL: "http://100.111.99.51:8000",
+            serverURLs: [
+                "http://100.111.99.51:8000",
+                "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            ],
+            sessionID: "iphone-app",
+            pairCode: "123456",
+            legacyToken: nil
+        )
+
+        XCTAssertTrue(pending.usesTailscalePath)
+        XCTAssertTrue(pending.tailscaleNetworkNotice?.contains("5G") ?? false)
+    }
+
+    @MainActor
+    func testFreshPairCodePairingTrustsServerByDefault() {
+        let vm = VoiceAgentViewModel()
+        let pending = VoiceAgentViewModel.PendingPairing(
+            serverURL: "http://100.111.99.51:8000",
+            serverURLs: ["http://100.111.99.51:8000"],
+            sessionID: "iphone-app",
+            pairCode: "123456",
+            legacyToken: nil
+        )
+
+        XCTAssertTrue(vm.shouldTrustPendingPairingByDefault(pending))
+    }
+
+    @MainActor
+    func testTrustingPendingPairingStoresAllAdvertisedHosts() {
+        let harness = makeIsolatedPersistenceHarness()
+        defer { harness.cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: harness.store,
+            defaults: harness.defaults,
+            draftAttachmentDirectory: harness.draftDirectory
+        )
+        let pending = VoiceAgentViewModel.PendingPairing(
+            serverURL: "http://100.111.99.51:8000",
+            serverURLs: [
+                "http://100.111.99.51:8000",
+                "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            ],
+            sessionID: "iphone-app",
+            pairCode: "123456",
+            legacyToken: nil
+        )
+
+        vm.setTrustedPairHosts(from: pending, trusted: true)
+
+        XCTAssertTrue(vm.isTrustedPairHost("100.111.99.51"))
+        XCTAssertTrue(vm.isTrustedPairHost("vemunds-macbook-air.tail6a5903.ts.net"))
+    }
+
+    @MainActor
+    func testPairingFailureMessageExplainsUnreachableTailscale() {
+        let vm = VoiceAgentViewModel()
+
+        let message = vm._test_pairingFailureMessage(
+            for: URLError(.cannotConnectToHost),
+            serverURLs: [
+                "http://100.111.99.51:8000",
+                "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+            ]
+        )
+
+        XCTAssertTrue(message.contains("Tailscale"))
+        XCTAssertTrue(message.contains("same tailnet"))
+    }
+
+    @MainActor
+    func testPairingFailureMessageExplainsUntrustedCertificate() {
+        let vm = VoiceAgentViewModel()
+
+        let message = vm._test_pairingFailureMessage(
+            for: URLError(.serverCertificateUntrusted),
+            serverURLs: ["https://mobaile.example.com"]
+        )
+
+        XCTAssertTrue(message.contains("does not trust this server certificate"))
+    }
+
     @MainActor
     func testPromoteResolvedServerURLDoesNotDemoteTailscaleToLan() {
         let harness = makeIsolatedPersistenceHarness()

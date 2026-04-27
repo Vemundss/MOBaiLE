@@ -273,10 +273,11 @@ bash ./scripts/pairing_qr.sh
 ```
 
 - iPhone can pair on Wi-Fi but not on cellular:
+  - run `mobaile doctor` and fix any reported pairing or advertised-URL issues first
   - run `mobaile pair` and scan the fresh QR; pair codes expire
   - confirm Tailscale is connected on both devices
   - in iOS Settings, confirm Cellular Data is enabled for Tailscale and MOBaiLE
-  - confirm the backend is still running with `bash ./scripts/doctor.sh`
+  - confirm the backend is still running with `mobaile status`
 
 - Voice works for text but not the mic:
   - enable `Speech Recognition` for MOBaiLE in iOS Settings
