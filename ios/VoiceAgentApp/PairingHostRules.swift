@@ -60,10 +60,10 @@ enum PairingHostRules {
         if scheme == "https" && !isLocalOrPrivateHost(host) {
             return 4
         }
-        if isTailscaleIPHost(host) {
+        if host.hasSuffix(".ts.net") {
             return 3
         }
-        if host.hasSuffix(".ts.net") {
+        if isTailscaleIPHost(host) {
             return 2
         }
         if isRFC1918LANHost(host) || host.hasSuffix(".local") {
@@ -95,7 +95,7 @@ enum PairingHostRules {
 
         if let resolvedFamily = connectivityFamily(for: resolvedURL),
            resolvedFamily == connectivityFamily(for: currentURL) {
-            return true
+            return resolvedPriority >= currentPriority
         }
         return resolvedPriority >= currentPriority
     }

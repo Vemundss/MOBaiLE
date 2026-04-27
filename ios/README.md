@@ -60,7 +60,7 @@ Important:
 
 - if you are using a real iPhone, `127.0.0.1` will not work
 - use the preferred URL from the active pairing file; in Tailscale mode this should be a Tailscale/public URL, not a LAN fallback
-- when Tailscale is enabled, MOBaiLE keeps both raw `100.x` and `*.ts.net` candidates so cellular use does not depend only on Wi-Fi or DNS
+- when Tailscale is enabled, MOBaiLE prefers the `*.ts.net` MagicDNS candidate and keeps the raw `100.x` URL only as a fallback; release builds allow insecure HTTP for `*.ts.net`, not arbitrary remote IPs
 - the app asks for microphone and Speech Recognition permission
 - if you have a stable remote hostname, set `VOICE_AGENT_PUBLIC_SERVER_URL` on the backend so pairing prefers that URL
 
@@ -132,6 +132,7 @@ The checked-in project does not hard-code a development team, so Xcode should le
   - Debug builds allow plain `http://` backend URLs
   - Release-style builds allow plain `http://` for local network addresses and `*.ts.net` Tailscale MagicDNS hosts
   - Other remote hosts still require `https://` unless you add a matching ATS exception
+  - run `mobaile doctor` and refresh pairing with `mobaile pair` if the QR advertises only a raw `100.x` Tailscale IP
 
 - Pairing link opens but app does not connect:
   - verify the backend is running

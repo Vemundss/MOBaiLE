@@ -275,6 +275,7 @@ bash ./scripts/pairing_qr.sh
 - iPhone can pair on Wi-Fi but not on cellular:
   - run `mobaile doctor` and fix any reported pairing or advertised-URL issues first
   - run `mobaile pair` and scan the fresh QR; pair codes expire
+  - confirm the pairing URL prefers a `*.ts.net` Tailscale MagicDNS host; raw `100.x` Tailscale IPs are fallback-only and can be blocked by iOS transport policy in release builds
   - confirm Tailscale is connected on both devices
   - in iOS Settings, confirm Cellular Data is enabled for Tailscale and MOBaiLE
   - confirm the backend is still running with `mobaile status`

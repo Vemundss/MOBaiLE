@@ -587,7 +587,7 @@ private extension VoiceAgentViewModel {
                  .secureConnectionFailed:
                 return "iOS does not trust this server certificate. Use a fresh MOBaiLE QR with the default Tailscale HTTP path, or configure the backend with a valid HTTPS certificate."
             case .appTransportSecurityRequiresSecureConnection:
-                return "iOS blocked this insecure HTTP path. Run mobaile pair again and scan the fresh QR; Tailscale pairing should use a permitted Tailscale or local path."
+                return "iOS blocked this insecure HTTP path. Run mobaile pair again and scan the fresh QR; MOBaiLE should use the Tailscale *.ts.net path instead of the raw 100.x IP."
             case .cannotFindHost,
                  .cannotConnectToHost,
                  .timedOut,

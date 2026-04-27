@@ -377,7 +377,7 @@ After install + service start:
 mobaile doctor
 ```
 
-`mobaile doctor` checks the active installed backend, the fresh pair code, the QR image, the advertised phone URLs, and `/health` on each advertised URL. In Tailscale mode it fails if the active QR advertises a Wi-Fi-only fallback, because that can hide a broken cellular path.
+`mobaile doctor` checks the active installed backend, the fresh pair code, the QR image, the advertised phone URLs, and `/health` on each advertised URL. In Tailscale mode it fails if the active QR advertises a Wi-Fi-only fallback or only a raw `100.x` Tailscale IP, because those paths can hide a broken cellular path or trigger iOS transport blocking.
 
 To test an authenticated run from the computer side:
 
@@ -429,7 +429,7 @@ Notes:
 
 - App now confirms pairing details before applying server/session changes.
 - A fresh one-time pair-code QR is treated as an explicit trust action in the app; the app can remember all advertised hosts for that computer after a successful pair.
-- Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding. In Tailscale mode those candidates stay on the Tailscale/public path.
+- Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding. In Tailscale mode the app prefers `*.ts.net` MagicDNS over raw `100.x` IPs so release builds stay on the iOS-permitted HTTP path.
 - Non-local servers must use `https://` for pairing.
 - Legacy `api_token` pairing links are disabled by default (developer-mode fallback only).
 

@@ -389,6 +389,93 @@ def test_mobaile_doctor_fails_when_tailscale_pairing_has_lan_fallback(tmp_path: 
     assert "Doctor result: attention needed" in result.stdout
 
 
+def test_mobaile_doctor_fails_when_tailscale_pairing_has_raw_ip_only(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://100.111.99.51:8000",
+                "server_urls": [
+                    "http://100.111.99.51:8000",
+                ],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Tailscale mode has no iOS-permitted pairing URL" in result.stdout
+    assert "Doctor result: attention needed" in result.stdout
+
+
+def test_mobaile_doctor_fails_when_tailscale_pairing_raw_ip_is_primary(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://100.111.99.51:8000",
+                "server_urls": [
+                    "http://100.111.99.51:8000",
+                    "http://mobaile.tail6a5903.ts.net:8000",
+                ],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Primary Tailscale pairing URL may be blocked by iOS ATS" in result.stdout
+    assert "Doctor result: attention needed" in result.stdout
+
+
 def test_mobaile_status_reports_pairing_qr_can_be_regenerated(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"

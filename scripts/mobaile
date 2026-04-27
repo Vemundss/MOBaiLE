@@ -534,6 +534,12 @@ def is_public_https(url: str) -> bool:
     )
 
 
+def is_ios_permitted_tailscale_pairing_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return is_public_https(url) or host.endswith(".ts.net") or parsed.scheme == "https"
+
+
 if not pairing_path.exists():
     fail(f"Pairing file is missing: {pairing_path}")
     raise SystemExit(1)
@@ -588,8 +594,16 @@ if phone_access_mode == "tailscale":
         url for url in server_urls
         if not (is_tailscale(host_for(url)) or is_public_https(url))
     ]
+    ios_pairing_urls = [
+        url for url in server_urls
+        if is_ios_permitted_tailscale_pairing_url(url)
+    ]
     if bad_urls:
         fail("Tailscale mode advertises Wi-Fi/local-only URL(s): " + ", ".join(bad_urls))
+    elif not ios_pairing_urls:
+        fail("Tailscale mode has no iOS-permitted pairing URL; use MagicDNS *.ts.net or public HTTPS")
+    elif not is_ios_permitted_tailscale_pairing_url(server_urls[0]):
+        fail("Primary Tailscale pairing URL may be blocked by iOS ATS: " + server_urls[0])
     elif any(is_tailscale(host) for host in hosts):
         ok("Tailscale mode advertises a Tailscale phone path")
     elif any(is_public_https(url) for url in server_urls):
