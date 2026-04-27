@@ -144,6 +144,29 @@ final class VoiceAgentAppUITests: XCTestCase {
         )
     }
 
+    func testLivePairingPayloadCompletesAndDismissesConfirmation() throws {
+        guard let pairingPayload = ProcessInfo.processInfo.environment["MOBAILE_E2E_PAIRING_PAYLOAD"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !pairingPayload.isEmpty else {
+            throw XCTSkip("Set MOBAILE_E2E_PAIRING_PAYLOAD to run the live pairing UI test.")
+        }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["MOBAILE_UI_TESTING"] = "1"
+        app.launchEnvironment["MOBAILE_TEST_PAIRING_PAYLOAD"] = pairingPayload
+        app.launch()
+
+        let confirmationTitle = app.navigationBars.staticTexts["Confirm Pairing"]
+        XCTAssertTrue(confirmationTitle.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["One-time pair code"].exists)
+
+        app.buttons["Pair"].tap()
+
+        XCTAssertTrue(confirmationTitle.waitUntilMissing(timeout: 30))
+        XCTAssertFalse(app.staticTexts["Pairing failed"].exists)
+        XCTAssertTrue(app.staticTexts["New chat"].waitForExistence(timeout: 10))
+    }
+
     @discardableResult
     private func launchApp(previewScenario: String, previewPresentation: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
@@ -176,5 +199,13 @@ final class VoiceAgentAppUITests: XCTestCase {
         for _ in 0..<5 where !(codexModel.exists && codexEffort.exists) {
             app.swipeUp()
         }
+    }
+}
+
+private extension XCUIElement {
+    func waitUntilMissing(timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "exists == false")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 }

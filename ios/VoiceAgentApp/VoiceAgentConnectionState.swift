@@ -532,18 +532,35 @@ private extension VoiceAgentViewModel {
 
     func exchangePairCode(serverURLs: [String], pairCode: String, sessionID: String?) async -> Bool {
         let resolvedServerURLs = reachabilityOrderedServerURLs(serverURLs)
-        guard let primaryServerURL = resolvedServerURLs.first else {
+        guard !resolvedServerURLs.isEmpty else {
+            errorText = "Pairing failed"
+            statusText = "Missing pairing server URL"
+            return false
+        }
+
+        statusText = "Checking pairing route"
+        let exchangeServerURLs: [String]
+        do {
+            exchangeServerURLs = try await healthCheckedPairingServerURLs(resolvedServerURLs)
+        } catch {
+            errorText = noReachablePairingRouteMessage(for: resolvedServerURLs)
+            statusText = "Pairing failed"
+            return false
+        }
+
+        guard let primaryServerURL = exchangeServerURLs.first else {
             errorText = "Pairing failed"
             statusText = "Missing pairing server URL"
             return false
         }
         let previousFallbacks = client.fallbackServerURLs
-        client.fallbackServerURLs = Array(resolvedServerURLs.dropFirst())
+        client.fallbackServerURLs = []
         defer {
             client.fallbackServerURLs = previousFallbacks
             refreshClientConnectionCandidates()
         }
         do {
+            statusText = "Pairing"
             let response = try await client.exchangePairingCode(
                 serverURL: primaryServerURL,
                 pairCode: pairCode,
@@ -552,7 +569,7 @@ private extension VoiceAgentViewModel {
             applyPairedClientCredentials(
                 response,
                 fallbackPrimaryServerURL: primaryServerURL,
-                additionalServerURLs: resolvedServerURLs
+                additionalServerURLs: exchangeServerURLs
             )
             _ = try? await refreshRuntimeConfiguration()
             _ = try? await refreshSessionContextFromBackend()
@@ -565,6 +582,35 @@ private extension VoiceAgentViewModel {
             statusText = "Pairing failed"
             return false
         }
+    }
+
+    func healthCheckedPairingServerURLs(_ serverURLs: [String]) async throws -> [String] {
+        var lastError: Error?
+        for (index, candidate) in serverURLs.enumerated() {
+            do {
+                try await client.checkHealth(serverURL: candidate, timeoutInterval: 5)
+                if index == 0 {
+                    return serverURLs
+                }
+
+                return [candidate] + serverURLs.filter { $0 != candidate }
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError ?? URLError(.cannotConnectToHost)
+    }
+
+    func noReachablePairingRouteMessage(for serverURLs: [String]) -> String {
+        let hosts = serverURLs.compactMap { URL(string: $0)?.host?.lowercased() }
+        if hosts.contains(where: PairingHostRules.isTailscaleHost) {
+            return "Could not reach any Tailscale pairing path. Open Tailscale on this iPhone, confirm it is connected to the same tailnet as this computer, then tap Pair again with this same QR."
+        }
+        if hosts.contains(where: { PairingHostRules.isRFC1918LANHost($0) || $0.hasSuffix(".local") }) {
+            return "Could not reach the Wi-Fi pairing path. Confirm the iPhone is on the same Wi-Fi as this computer and local network access is allowed in iOS Settings, then tap Pair again."
+        }
+        return "Could not reach any advertised pairing URL. Confirm the MOBaiLE backend is running on the computer, then tap Pair again."
     }
 
     func pairingFailureMessage(for error: Error, serverURLs: [String]) -> String {
@@ -617,6 +663,10 @@ private extension VoiceAgentViewModel {
 extension VoiceAgentViewModel {
     func _test_pairingFailureMessage(for error: Error, serverURLs: [String]) -> String {
         pairingFailureMessage(for: error, serverURLs: serverURLs)
+    }
+
+    func _test_noReachablePairingRouteMessage(for serverURLs: [String]) -> String {
+        noReachablePairingRouteMessage(for: serverURLs)
     }
 }
 #endif

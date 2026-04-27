@@ -38,6 +38,7 @@ run `mobaile update`.
 - `warmup_capabilities.sh`: preflight capabilities and runtime readiness
 - `pairing_qr.sh`: generate pairing QR from `backend/pairing.json`
 - `phone_connectivity_smoke.sh`: end-to-end connectivity smoke test
+- `ios_pairing_e2e.sh`: simulator-driven iOS pairing test against the live backend; defaults to the simulator-safe `127.0.0.1` backend route
 
 ## Contracts and Autonomy
 

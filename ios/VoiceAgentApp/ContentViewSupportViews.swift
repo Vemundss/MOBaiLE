@@ -652,6 +652,21 @@ struct PairingConfirmationSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
+                if isPairing {
+                    Section {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Pairing with \(pending.serverHost.isEmpty ? pending.serverURL : pending.serverHost)")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Checking the advertised route first so the one-time pair code is only used on a reachable backend.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 if let pairingError {
                     Section {
                         Label("Pairing failed", systemImage: "exclamationmark.triangle.fill")

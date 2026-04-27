@@ -804,6 +804,22 @@ struct ContentView: View {
     private func applyPreviewPresentationIfNeeded() {
         let previewPairingPayload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123&session_id=iphone-app"
 
+#if DEBUG
+        if ProcessInfo.processInfo.environment["MOBAILE_UI_TESTING"] == "1",
+           let testPairingPayload = ProcessInfo.processInfo.environment["MOBAILE_TEST_PAIRING_PAYLOAD"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !testPairingPayload.isEmpty {
+            let didStagePairing = vm.applyPairingPayload(testPairingPayload)
+            if didStagePairing,
+               ProcessInfo.processInfo.environment["MOBAILE_TEST_AUTO_CONFIRM_PAIRING"] == "1" {
+                Task {
+                    _ = await vm.confirmPendingPairing(trustHost: true)
+                }
+            }
+            return
+        }
+#endif
+
         switch previewPresentation {
         case "setup":
             showSetupGuide = true

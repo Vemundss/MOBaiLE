@@ -173,6 +173,19 @@ final class APIClient {
         }
     }
 
+    func checkHealth(serverURL: String, timeoutInterval: TimeInterval = 5) async throws {
+        let baseURL = normalizedBaseURL(serverURL)
+        guard let url = URL(string: baseURL + "/health") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeoutInterval
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+    }
+
     func refreshPairingCredentials(
         serverURL: String,
         refreshToken: String?,

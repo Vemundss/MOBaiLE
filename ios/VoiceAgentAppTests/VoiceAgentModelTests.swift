@@ -515,6 +515,21 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testPairingRouteMessageExplainsPairCodeWasNotSpent() {
+        let vm = VoiceAgentViewModel()
+
+        let message = vm._test_noReachablePairingRouteMessage(
+            for: [
+                "http://vemunds-macbook-air.tail6a5903.ts.net:8000",
+                "http://100.111.99.51:8000",
+            ]
+        )
+
+        XCTAssertTrue(message.contains("Tailscale"))
+        XCTAssertTrue(message.contains("same QR"))
+    }
+
+    @MainActor
     func testPairingFailureMessageExplainsUntrustedCertificate() {
         let vm = VoiceAgentViewModel()
 
