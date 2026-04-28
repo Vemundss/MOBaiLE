@@ -377,7 +377,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         backendClaudeModelOptions = preview.claudeModelOptions
         backendSlashCommands = preview.slashCommands
         directoryBrowserPath = preview.workspace
-        directoryBrowserEntries = []
+        directoryBrowserEntries = preview.directoryEntries
         directoryBrowserError = ""
         directoryBrowserMissingPath = ""
         directoryBrowserTruncated = false

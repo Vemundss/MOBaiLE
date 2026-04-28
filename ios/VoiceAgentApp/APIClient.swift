@@ -123,6 +123,7 @@ enum APIError: Error, LocalizedError {
 final class APIClient {
     private let jsonDecoder = JSONDecoder()
     private let jsonEncoder = JSONEncoder()
+    private let previewDownloadCache = PreviewDownloadCache()
     var fallbackServerURLs: [String] = []
     var onResolvedServerURL: ((String) -> Void)?
     var onUnauthorizedRecovery: ((String) async throws -> String?)?
@@ -711,9 +712,13 @@ final class APIClient {
         token: String,
         artifact: ChatArtifact
     ) async throws -> URL {
-        let (requestURL, data) = try await withCandidateServerURL(serverURL) { baseURL in
+        try await withCandidateServerURL(serverURL) { baseURL in
             guard let requestURL = resolveArtifactURL(serverURL: baseURL, artifact: artifact) else {
                 throw APIError.invalidURL
+            }
+            let cacheKey = requestURL.absoluteString
+            if let cachedURL = await previewDownloadCache.file(for: cacheKey) {
+                return cachedURL
             }
             let data = try await fetchURLData(
                 serverURL: baseURL,
@@ -721,14 +726,37 @@ final class APIClient {
                 url: requestURL,
                 timeout: 30
             )
-            return (requestURL, data)
+            return try await previewDownloadCache.store(
+                data,
+                key: cacheKey,
+                baseName: suggestedBaseName(from: artifact, url: requestURL),
+                fileExtension: preferredExtension(from: artifact, url: requestURL)
+            )
         }
-        let ext = preferredExtension(from: artifact, url: requestURL)
-        let baseName = suggestedBaseName(from: artifact, url: requestURL)
-        let filename = "\(baseName)-\(UUID().uuidString)\(ext)"
-        let targetURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-        try data.write(to: targetURL, options: .atomic)
-        return targetURL
+    }
+
+    func inspectArtifactFile(
+        serverURL: String,
+        token: String,
+        artifact: ChatArtifact,
+        textPreviewBytes: Int = 64 * 1024
+    ) async throws -> FileInspectionResponse {
+        try await withCandidateServerURL(serverURL) { baseURL in
+            guard let url = resolveArtifactInspectURL(
+                serverURL: baseURL,
+                artifact: artifact,
+                textPreviewBytes: textPreviewBytes
+            ) else {
+                throw APIError.invalidURL
+            }
+            let data = try await fetchURLData(
+                serverURL: baseURL,
+                token: token,
+                url: url,
+                timeout: 15
+            )
+            return try jsonDecoder.decode(FileInspectionResponse.self, from: data)
+        }
     }
 
     func fetchURLData(
@@ -932,6 +960,25 @@ final class APIClient {
         return nil
     }
 
+    private func resolveArtifactInspectURL(
+        serverURL: String,
+        artifact: ChatArtifact,
+        textPreviewBytes: Int
+    ) -> URL? {
+        guard let resolvedURL = resolveArtifactURL(serverURL: serverURL, artifact: artifact),
+              let path = artifactFileReference(for: artifact, url: resolvedURL)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty,
+              var components = URLComponents(string: normalizedBaseURL(serverURL)) else {
+            return nil
+        }
+        components.path = "/v1/files/inspect"
+        components.queryItems = [
+            URLQueryItem(name: "path", value: path),
+            URLQueryItem(name: "text_preview_bytes", value: String(max(0, textPreviewBytes))),
+        ]
+        return components.url
+    }
+
     private func rewriteProtectedBackendURL(_ rawURL: String, serverURL: String) -> URL? {
         guard let original = URL(string: rawURL),
               original.path.hasPrefix("/v1/"),
@@ -1089,8 +1136,85 @@ extension APIClient {
         }
         return "\(suggestedBaseName(from: artifact, url: url))\(preferredExtension(from: artifact, url: url))"
     }
+
+    func _test_resolveArtifactInspectURL(
+        serverURL: String,
+        artifact: ChatArtifact,
+        textPreviewBytes: Int = 64 * 1024
+    ) -> URL? {
+        resolveArtifactInspectURL(
+            serverURL: serverURL,
+            artifact: artifact,
+            textPreviewBytes: textPreviewBytes
+        )
+    }
 }
 #endif
+
+private actor PreviewDownloadCache {
+    private struct Entry {
+        let url: URL
+        let createdAt: Date
+    }
+
+    private let prefix = "mobaile-preview-"
+    private let reuseInterval: TimeInterval = 10 * 60
+    private let staleFileAge: TimeInterval = 24 * 60 * 60
+    private var entries: [String: Entry] = [:]
+    private var lastCleanup: Date?
+
+    func file(for key: String) -> URL? {
+        cleanupIfNeeded()
+        guard let entry = entries[key],
+              Date().timeIntervalSince(entry.createdAt) <= reuseInterval,
+              FileManager.default.fileExists(atPath: entry.url.path) else {
+            entries.removeValue(forKey: key)
+            return nil
+        }
+        return entry.url
+    }
+
+    func store(
+        _ data: Data,
+        key: String,
+        baseName: String,
+        fileExtension: String
+    ) throws -> URL {
+        cleanupIfNeeded()
+        let filename = "\(prefix)\(baseName)-\(UUID().uuidString)\(fileExtension)"
+        let targetURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try data.write(to: targetURL, options: .atomic)
+        entries[key] = Entry(url: targetURL, createdAt: Date())
+        return targetURL
+    }
+
+    private func cleanupIfNeeded() {
+        let now = Date()
+        if let lastCleanup, now.timeIntervalSince(lastCleanup) < 30 * 60 {
+            return
+        }
+        lastCleanup = now
+        entries = entries.filter { _, entry in
+            now.timeIntervalSince(entry.createdAt) <= reuseInterval &&
+                FileManager.default.fileExists(atPath: entry.url.path)
+        }
+
+        let directory = FileManager.default.temporaryDirectory
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+        for url in urls where url.lastPathComponent.hasPrefix(prefix) {
+            let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if now.timeIntervalSince(modifiedAt) > staleFileAge {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+}
 
 private extension Data {
     mutating func append(_ string: String) {

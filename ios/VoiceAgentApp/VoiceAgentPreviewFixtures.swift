@@ -62,6 +62,7 @@ struct VoiceAgentPreviewData {
     let voiceModeThreadID: UUID?
     let connectionRepairState: VoiceAgentViewModel.ConnectionRepairState?
     let autoSendAfterSilenceEnabled: Bool?
+    let directoryEntries: [DirectoryEntry]
 }
 
 enum VoiceAgentPreviewFactory {
@@ -73,7 +74,15 @@ enum VoiceAgentPreviewFactory {
         let previewPresentation = ProcessInfo.processInfo.environment["MOBAILE_PREVIEW_PRESENTATION"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let workspace = "/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE"
+        let realWorkspace = "/Users/vemundss/Library/Mobile Documents/com~apple~CloudDocs/jobb/EV-GROUP/MOBaiLE"
+        let previewWorkspaceURL = draftAttachmentDirectory.appendingPathComponent("workspace-preview", isDirectory: true)
+        let directoryEntries: [DirectoryEntry]
+        if previewPresentation == "workspace-files" {
+            directoryEntries = Self.previewDirectoryEntries(in: previewWorkspaceURL)
+        } else {
+            directoryEntries = []
+        }
+        let workspace = previewPresentation == "workspace-files" ? previewWorkspaceURL.path : realWorkspace
         let now = Date()
         let primaryThreadID = UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID()
         let captureThreadID = UUID(uuidString: "22222222-2222-2222-2222-222222222222") ?? UUID()
@@ -577,7 +586,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: false,
                 voiceModeThreadID: nil,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         case .conversation:
             return VoiceAgentPreviewData(
@@ -608,7 +618,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: false,
                 voiceModeThreadID: nil,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         case .media:
             return VoiceAgentPreviewData(
@@ -639,7 +650,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: false,
                 voiceModeThreadID: nil,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         case .liveActivity:
             return VoiceAgentPreviewData(
@@ -685,7 +697,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: false,
                 voiceModeThreadID: nil,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         case .blocked:
             return VoiceAgentPreviewData(
@@ -716,7 +729,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: false,
                 voiceModeThreadID: nil,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         case .recording:
             return VoiceAgentPreviewData(
@@ -747,7 +761,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: true,
                 voiceModeThreadID: primaryThreadID,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: true
+                autoSendAfterSilenceEnabled: true,
+                directoryEntries: directoryEntries
             )
         case .repair:
             return VoiceAgentPreviewData(
@@ -781,7 +796,8 @@ enum VoiceAgentPreviewFactory {
                     title: "Reconnect this phone",
                     message: "This phone is no longer paired with demo.mobaile.app. Open the latest pairing QR on that computer and scan it again here."
                 ),
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         case .timeout:
             return VoiceAgentPreviewData(
@@ -812,7 +828,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: false,
                 voiceModeThreadID: nil,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         case .restoredRunning:
             return VoiceAgentPreviewData(
@@ -843,7 +860,8 @@ enum VoiceAgentPreviewFactory {
                 voiceModeEnabled: false,
                 voiceModeThreadID: nil,
                 connectionRepairState: nil,
-                autoSendAfterSilenceEnabled: nil
+                autoSendAfterSilenceEnabled: nil,
+                directoryEntries: directoryEntries
             )
         }
     }
@@ -870,6 +888,49 @@ enum VoiceAgentPreviewFactory {
                 """
             ),
         ]
+    }
+
+    private static func previewDirectoryEntries(in directory: URL) -> [DirectoryEntry] {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let scriptURL = directory.appendingPathComponent("PreviewScript.py")
+        let script = """
+        def render_preview():
+            return "MOBaiLE file preview"
+
+        if __name__ == "__main__":
+            print(render_preview())
+        """
+        if !FileManager.default.fileExists(atPath: scriptURL.path),
+           let data = script.data(using: .utf8) {
+            try? data.write(to: scriptURL, options: .atomic)
+        }
+
+        let imageURL = directory.appendingPathComponent("PreviewPlot.png")
+        if !FileManager.default.fileExists(atPath: imageURL.path),
+           let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=") {
+            try? data.write(to: imageURL, options: .atomic)
+        }
+
+        return [
+            DirectoryEntry(
+                name: "PreviewScript.py",
+                path: scriptURL.path,
+                isDirectory: false,
+                sizeBytes: fileSize(at: scriptURL),
+                mime: "text/x-python"
+            ),
+            DirectoryEntry(
+                name: "PreviewPlot.png",
+                path: imageURL.path,
+                isDirectory: false,
+                sizeBytes: fileSize(at: imageURL),
+                mime: "image/png"
+            ),
+        ]
+    }
+
+    private static func fileSize(at url: URL) -> Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
     }
 
     private static func makePreviewAttachment(

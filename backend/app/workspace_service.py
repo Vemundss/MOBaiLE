@@ -17,9 +17,13 @@ from app.models.schemas import (
     DirectoryCreateResponse,
     DirectoryEntry,
     DirectoryListingResponse,
+    FileInspectionResponse,
     UploadResponse,
 )
 from app.runtime_environment import RuntimeEnvironment
+
+DEFAULT_TEXT_PREVIEW_BYTES = 64 * 1024
+MAX_TEXT_PREVIEW_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,37 @@ class WorkspaceService:
         target = self._resolve_file_target(raw_path)
         media_type, _ = mimetypes.guess_type(str(target))
         return FileResponse(str(target), media_type=media_type or "application/octet-stream")
+
+    def inspect_file(
+        self,
+        raw_path: str,
+        *,
+        text_preview_bytes: int = DEFAULT_TEXT_PREVIEW_BYTES,
+    ) -> FileInspectionResponse:
+        target = self._resolve_file_target(raw_path)
+        size_bytes = target.stat().st_size
+        mime = mimetypes.guess_type(target.name)[0]
+        artifact_type = artifact_type_for_upload(target.name, mime)
+        text_preview, preview_byte_count, text_truncated = self._text_preview(
+            target,
+            artifact_type=artifact_type,
+            mime=mime,
+            size_bytes=size_bytes,
+            requested_bytes=text_preview_bytes,
+        )
+        image_width, image_height = self._image_dimensions(target, mime=mime)
+        return FileInspectionResponse(
+            name=target.name,
+            path=str(target),
+            size_bytes=size_bytes,
+            mime=mime,
+            artifact_type=artifact_type,
+            text_preview=text_preview,
+            text_preview_bytes=preview_byte_count,
+            text_preview_truncated=text_truncated,
+            image_width=image_width,
+            image_height=image_height,
+        )
 
     def list_directory(self, raw_path: str | None) -> DirectoryListingResponse:
         target = self._resolve_workspace_path(raw_path)
@@ -219,6 +254,100 @@ class WorkspaceService:
     def _ensure_allowed_path(self, target: Path, *, detail: str) -> None:
         if not self.environment.is_path_allowed(target):
             raise HTTPException(status_code=403, detail=detail)
+
+    def _text_preview(
+        self,
+        target: Path,
+        *,
+        artifact_type: str,
+        mime: str | None,
+        size_bytes: int,
+        requested_bytes: int,
+    ) -> tuple[str | None, int, bool]:
+        if not self._can_preview_text(target, artifact_type=artifact_type, mime=mime):
+            return None, 0, False
+        limit = min(max(requested_bytes, 0), MAX_TEXT_PREVIEW_BYTES)
+        if limit == 0:
+            return "", 0, size_bytes > 0
+        try:
+            data = target.open("rb").read(limit + 1)
+        except OSError as exc:
+            raise HTTPException(status_code=403, detail="permission denied for file path") from exc
+        preview_data = data[:limit]
+        for encoding in ("utf-8", "utf-16", "utf-16-le", "utf-16-be", "iso-8859-1"):
+            try:
+                text = preview_data.decode(encoding)
+                return text, len(preview_data), len(data) > limit or size_bytes > len(preview_data)
+            except UnicodeDecodeError:
+                continue
+        return preview_data.decode("utf-8", errors="replace"), len(preview_data), len(data) > limit
+
+    def _can_preview_text(self, target: Path, *, artifact_type: str, mime: str | None) -> bool:
+        if self._is_sensitive_preview_path(target):
+            return False
+        if artifact_type == "code":
+            return True
+        lower_mime = (mime or "").lower()
+        if lower_mime.startswith("text/"):
+            return True
+        return any(token in lower_mime for token in ("json", "xml", "yaml", "toml"))
+
+    def _is_sensitive_preview_path(self, target: Path) -> bool:
+        sensitive_names = {".env", "pairing.json", "pairing-qr.png"}
+        if target.name in sensitive_names:
+            return True
+        sensitive_roots = [
+            self.environment.backend_root / "data",
+            self.environment.profile_state_root,
+            self.environment.legacy_session_state_root,
+        ]
+        return any(self._is_relative_to(target, root.resolve()) for root in sensitive_roots)
+
+    def _image_dimensions(self, target: Path, *, mime: str | None) -> tuple[int | None, int | None]:
+        lower_mime = (mime or "").lower()
+        if not lower_mime.startswith("image/"):
+            return None, None
+        try:
+            header = target.open("rb").read(256 * 1024)
+        except OSError:
+            return None, None
+        return self._png_dimensions(header) or self._gif_dimensions(header) or self._jpeg_dimensions(header) or (None, None)
+
+    @staticmethod
+    def _png_dimensions(header: bytes) -> tuple[int, int] | None:
+        if len(header) < 24 or not header.startswith(b"\x89PNG\r\n\x1a\n") or header[12:16] != b"IHDR":
+            return None
+        return int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
+
+    @staticmethod
+    def _gif_dimensions(header: bytes) -> tuple[int, int] | None:
+        if len(header) < 10 or header[:6] not in {b"GIF87a", b"GIF89a"}:
+            return None
+        return int.from_bytes(header[6:8], "little"), int.from_bytes(header[8:10], "little")
+
+    @staticmethod
+    def _jpeg_dimensions(header: bytes) -> tuple[int, int] | None:
+        if len(header) < 4 or not header.startswith(b"\xff\xd8"):
+            return None
+        offset = 2
+        sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+        while offset + 8 < len(header):
+            if header[offset] != 0xFF:
+                offset += 1
+                continue
+            marker = header[offset + 1]
+            if marker in {0xD8, 0xD9}:
+                offset += 2
+                continue
+            segment_length = int.from_bytes(header[offset + 2 : offset + 4], "big")
+            if segment_length < 2:
+                return None
+            if marker in sof_markers and offset + 8 < len(header):
+                height = int.from_bytes(header[offset + 5 : offset + 7], "big")
+                width = int.from_bytes(header[offset + 7 : offset + 9], "big")
+                return width, height
+            offset += 2 + segment_length
+        return None
 
     @staticmethod
     def _is_relative_to(path: Path, root: Path) -> bool:

@@ -26,6 +26,7 @@ from app.models.schemas import (
     DirectoryCreateResponse,
     DirectoryListingResponse,
     ExecutionEvent,
+    FileInspectionResponse,
     PairExchangeRequest,
     PairExchangeResponse,
     PairRefreshRequest,
@@ -498,6 +499,14 @@ def get_run_events_page(
 )
 def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
     return WORKSPACE_SERVICE.file_response(path)
+
+
+@app.get("/v1/files/inspect", response_model=FileInspectionResponse)
+def inspect_file(
+    path: str = Query(..., min_length=1),
+    text_preview_bytes: int = Query(64 * 1024, ge=0, le=256 * 1024),
+) -> FileInspectionResponse:
+    return WORKSPACE_SERVICE.inspect_file(path, text_preview_bytes=text_preview_bytes)
 
 
 @app.get("/v1/directories", response_model=DirectoryListingResponse)

@@ -838,7 +838,7 @@ struct ContentView: View {
             showThreads = true
         case "logs":
             showLogs = true
-        case "workspace":
+        case "workspace", "workspace-files":
             showWorkspaceBrowser = true
         default:
             break

@@ -86,6 +86,33 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Selected for future runs"].exists)
     }
 
+    func testWorkspaceBrowserOpensTextPreviewFile() {
+        let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace-files")
+
+        XCTAssertTrue(app.navigationBars.staticTexts["Workspace"].waitForExistence(timeout: 5))
+        let fileButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PreviewScript.py")).firstMatch
+        XCTAssertTrue(fileButton.waitForExistence(timeout: 5))
+        fileButton.tap()
+
+        XCTAssertTrue(app.navigationBars.staticTexts["PreviewScript.py"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Text preview options"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "def render_preview")).firstMatch
+                .waitForExistence(timeout: 5)
+        )
+    }
+
+    func testWorkspaceBrowserOpensImagePreviewFile() {
+        let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace-files")
+
+        XCTAssertTrue(app.navigationBars.staticTexts["Workspace"].waitForExistence(timeout: 5))
+        let fileButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PreviewPlot.png")).firstMatch
+        XCTAssertTrue(fileButton.waitForExistence(timeout: 5))
+        fileButton.tap()
+
+        XCTAssertTrue(app.navigationBars.staticTexts["PreviewPlot.png"].waitForExistence(timeout: 5))
+    }
+
     func testLiveActivityPreviewShowsStreamingCard() {
         let app = launchApp(previewScenario: "live-activity")
 

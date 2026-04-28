@@ -14,6 +14,7 @@ struct MessageBubble: View {
     @State private var previewDocument: PreviewDocument?
     @State private var textPreviewDocument: TextPreviewDocument?
     private let client = APIClient()
+    private let maxPreviewFileBytes: Int64 = AttachmentDraftPolicy.defaultMaxAttachmentBytes
 
     var body: some View {
         bubbleSurface
@@ -156,6 +157,33 @@ struct MessageBubble: View {
 
         do {
             let downloadArtifact = normalizedArtifactForDownload(artifact)
+            let inspection = try? await client.inspectArtifactFile(
+                serverURL: serverURL,
+                token: apiToken,
+                artifact: downloadArtifact
+            )
+            if let inspection, let text = inspection.textPreview {
+                let previewURL = try await TextPreviewLoader.writePreviewTextToTemporaryFile(
+                    title: artifact.title,
+                    text: text
+                )
+                await MainActor.run {
+                    textPreviewDocument = TextPreviewDocument(
+                        url: previewURL,
+                        title: artifact.title,
+                        text: text,
+                        isTruncated: inspection.textPreviewTruncated,
+                        sizeBytes: inspection.sizeBytes
+                    )
+                }
+                return
+            }
+            if let size = inspection?.sizeBytes, size > maxPreviewFileBytes {
+                await MainActor.run {
+                    artifactOpenError = "\(artifact.title) is \(humanReadableAttachmentSize(size)). Preview files must be \(humanReadableAttachmentSize(maxPreviewFileBytes)) or smaller."
+                }
+                return
+            }
             let localURL = try await client.downloadArtifactToTemporaryFile(
                 serverURL: serverURL,
                 token: apiToken,
@@ -165,7 +193,12 @@ struct MessageBubble: View {
                 do {
                     let text = try await TextPreviewLoader.loadText(from: localURL)
                     await MainActor.run {
-                        textPreviewDocument = TextPreviewDocument(url: localURL, title: artifact.title, text: text)
+                        textPreviewDocument = TextPreviewDocument(
+                            url: localURL,
+                            title: artifact.title,
+                            text: text,
+                            sizeBytes: inspection?.sizeBytes
+                        )
                     }
                     return
                 } catch TextPreviewError.tooLarge {

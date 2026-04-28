@@ -174,3 +174,63 @@ def test_workspace_service_normalizes_backend_file_url_attachments(monkeypatch, 
 
     assert validated.path == str(sample)
     assert validated.url is None
+
+
+def test_workspace_service_inspects_text_file_with_bounded_preview(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+    sample = env.default_workdir / "notes.txt"
+    sample.parent.mkdir(parents=True, exist_ok=True)
+    sample.write_text("hello\nworld\nagain", encoding="utf-8")
+
+    inspected = service.inspect_file(str(sample), text_preview_bytes=11)
+
+    assert inspected.name == "notes.txt"
+    assert inspected.path == str(sample)
+    assert inspected.size_bytes == 17
+    assert inspected.mime == "text/plain"
+    assert inspected.artifact_type == "code"
+    assert inspected.text_preview == "hello\nworld"
+    assert inspected.text_preview_bytes == 11
+    assert inspected.text_preview_truncated is True
+    assert inspected.image_width is None
+    assert inspected.image_height is None
+
+
+def test_workspace_service_inspects_png_dimensions_without_text_preview(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+    image = env.default_workdir / "plot.png"
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + (13).to_bytes(4, "big")
+        + b"IHDR"
+        + (32).to_bytes(4, "big")
+        + (18).to_bytes(4, "big")
+        + b"\x08\x02\x00\x00\x00"
+    )
+
+    inspected = service.inspect_file(str(image))
+
+    assert inspected.mime == "image/png"
+    assert inspected.artifact_type == "image"
+    assert inspected.image_width == 32
+    assert inspected.image_height == 18
+    assert inspected.text_preview is None
+    assert inspected.text_preview_truncated is False
+
+
+def test_workspace_service_inspect_does_not_preview_profile_state_content(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path, VOICE_AGENT_FILE_ROOTS=str(tmp_path))
+    service = WorkspaceService(env)
+    profile_file = env.profile_state_root / "default-user" / "AGENTS.md"
+    profile_file.parent.mkdir(parents=True, exist_ok=True)
+    profile_file.write_text("private profile guidance", encoding="utf-8")
+
+    inspected = service.inspect_file(str(profile_file))
+
+    assert inspected.size_bytes == len("private profile guidance")
+    assert inspected.text_preview is None
+    assert inspected.text_preview_bytes == 0
+    assert inspected.text_preview_truncated is False

@@ -472,6 +472,67 @@ def test_file_fetch_rejects_outside_allowed_roots(make_client, tmp_path: Path):
     assert resp.status_code == 403
 
 
+def test_file_fetch_supports_range_requests(make_client, tmp_path: Path):
+    sample = tmp_path / "large.txt"
+    sample.write_text("abcdefghij", encoding="utf-8")
+    client, token = make_client(
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path)},
+    )
+    headers = auth_headers(token)
+    headers["Range"] = "bytes=2-5"
+
+    resp = client.get("/v1/files", headers=headers, params={"path": str(sample)})
+
+    assert resp.status_code == 206
+    assert resp.content == b"cdef"
+    assert resp.headers["content-range"] == "bytes 2-5/10"
+
+
+def test_file_inspect_endpoint_returns_metadata_and_text_preview(make_client, tmp_path: Path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("# Title\n\nbody text", encoding="utf-8")
+    client, token = make_client(
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path)},
+    )
+
+    resp = client.get(
+        "/v1/files/inspect",
+        headers=auth_headers(token),
+        params={"path": str(notes), "text_preview_bytes": "8"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["name"] == "notes.md"
+    assert payload["path"] == str(notes)
+    assert payload["size_bytes"] == 18
+    assert payload["mime"] in {"text/markdown", "text/x-markdown"}
+    assert payload["artifact_type"] == "code"
+    assert payload["text_preview"] == "# Title\n"
+    assert payload["text_preview_bytes"] == 8
+    assert payload["text_preview_truncated"] is True
+
+
+def test_file_inspect_endpoint_rejects_outside_allowed_roots(make_client, tmp_path: Path):
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside.txt"
+    allowed.mkdir(parents=True, exist_ok=True)
+    outside.write_text("nope", encoding="utf-8")
+    client, token = make_client(
+        provider="mock",
+        extra_env={
+            "VOICE_AGENT_FILE_ROOTS": str(allowed),
+            "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS": "true",
+        },
+    )
+
+    resp = client.get("/v1/files/inspect", headers=auth_headers(token), params={"path": str(outside)})
+
+    assert resp.status_code == 403
+
+
 def test_directory_listing_endpoint(make_client, tmp_path: Path):
     (tmp_path / "src").mkdir(parents=True, exist_ok=True)
     (tmp_path / "README.md").write_text("hello", encoding="utf-8")

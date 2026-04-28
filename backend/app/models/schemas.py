@@ -199,6 +199,19 @@ class DirectoryEntry(BaseModel):
     mime: str | None = None
 
 
+class FileInspectionResponse(BaseModel):
+    name: str
+    path: str
+    size_bytes: int
+    mime: str | None = None
+    artifact_type: Literal["image", "file", "code"]
+    text_preview: str | None = None
+    text_preview_bytes: int = 0
+    text_preview_truncated: bool = False
+    image_width: int | None = None
+    image_height: int | None = None
+
+
 class DirectoryListingResponse(BaseModel):
     path: str
     entries: list[DirectoryEntry]

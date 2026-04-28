@@ -274,6 +274,39 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(VoiceAgentDirectoryBrowser.artifactType(for: entry), "code")
     }
 
+    func testFileInspectionResponseDecodesPreviewMetadata() throws {
+        let json = """
+        {
+          "name":"plot.png",
+          "path":"/repo/plot.png",
+          "size_bytes":128,
+          "mime":"image/png",
+          "artifact_type":"image",
+          "text_preview":null,
+          "text_preview_bytes":0,
+          "text_preview_truncated":false,
+          "image_width":640,
+          "image_height":360
+        }
+        """
+
+        let inspected = try JSONDecoder().decode(FileInspectionResponse.self, from: Data(json.utf8))
+
+        XCTAssertEqual(inspected.name, "plot.png")
+        XCTAssertEqual(inspected.sizeBytes, 128)
+        XCTAssertEqual(inspected.artifactType, "image")
+        XCTAssertEqual(inspected.imageWidth, 640)
+        XCTAssertEqual(inspected.imageHeight, 360)
+    }
+
+    func testTextPreviewHelpersNumberLinesAndCountMatches() {
+        let text = "alpha\nbeta\nalpha"
+
+        XCTAssertEqual(_test_numberedPreviewText(text), "1  alpha\n2  beta\n3  alpha")
+        XCTAssertEqual(_test_textPreviewMatchCount(text, query: "alpha"), 2)
+        XCTAssertEqual(_test_textPreviewMatchCount(text, query: "missing"), 0)
+    }
+
     func testRunRecordDecoding() throws {
         let json = """
         {
@@ -1743,6 +1776,38 @@ final class VoiceAgentModelTests: XCTestCase {
         )
 
         XCTAssertEqual(suggested, "Run-report.pdf")
+    }
+
+    func testArtifactInspectURLUsesBackendPathAndPreviewLimit() {
+        let artifact = ChatArtifact(
+            type: "code",
+            title: "AGENTS.md",
+            path: "/Users/test/Mobile%20Documents/session/AGENTS.md",
+            mime: "text/markdown",
+            url: nil
+        )
+
+        let resolved = APIClient()._test_resolveArtifactInspectURL(
+            serverURL: "http://127.0.0.1:8000",
+            artifact: artifact,
+            textPreviewBytes: 4096
+        )
+
+        XCTAssertEqual(resolved?.path, "/v1/files/inspect")
+        XCTAssertEqual(
+            URLComponents(url: resolved!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "path" })?
+                .value,
+            "/Users/test/Mobile Documents/session/AGENTS.md"
+        )
+        XCTAssertEqual(
+            URLComponents(url: resolved!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "text_preview_bytes" })?
+                .value,
+            "4096"
+        )
     }
 
     func testSlashCommandStateForBareSlashShowsCatalog() {

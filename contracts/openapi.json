@@ -644,6 +644,93 @@
         "title": "ExecutionEvent",
         "type": "object"
       },
+      "FileInspectionResponse": {
+        "properties": {
+          "artifact_type": {
+            "enum": [
+              "image",
+              "file",
+              "code"
+            ],
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "image_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Height"
+          },
+          "image_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Width"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "text_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Preview"
+          },
+          "text_preview_bytes": {
+            "default": 0,
+            "title": "Text Preview Bytes",
+            "type": "integer"
+          },
+          "text_preview_truncated": {
+            "default": false,
+            "title": "Text Preview Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "size_bytes",
+          "artifact_type"
+        ],
+        "title": "FileInspectionResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2238,6 +2325,58 @@
           }
         },
         "summary": "Get File"
+      }
+    },
+    "/v1/files/inspect": {
+      "get": {
+        "operationId": "inspect_file_v1_files_inspect_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "text_preview_bytes",
+            "required": false,
+            "schema": {
+              "default": 65536,
+              "maximum": 262144,
+              "minimum": 0,
+              "title": "Text Preview Bytes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileInspectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect File"
       }
     },
     "/v1/pair/exchange": {

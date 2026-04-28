@@ -24,6 +24,10 @@ extension VoiceAgentViewModel {
         guard !entry.isDirectory else {
             throw APIError.invalidURL
         }
+        if PreviewScenario.current != nil,
+           FileManager.default.fileExists(atPath: entry.path) {
+            return URL(fileURLWithPath: entry.path)
+        }
         let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedServerURL.isEmpty, !token.isEmpty else {
             throw APIError.missingCredentials
@@ -39,6 +43,41 @@ extension VoiceAgentViewModel {
             serverURL: normalizedServerURL,
             token: token,
             artifact: artifact
+        )
+    }
+
+    func inspectDirectoryFileForPreview(
+        _ entry: DirectoryEntry,
+        textPreviewBytes: Int = 64 * 1024
+    ) async throws -> FileInspectionResponse {
+        guard !entry.isDirectory else {
+            throw APIError.invalidURL
+        }
+        if PreviewScenario.current != nil,
+           FileManager.default.fileExists(atPath: entry.path) {
+            return try await LocalFileInspection.inspect(
+                url: URL(fileURLWithPath: entry.path),
+                name: entry.name,
+                mime: entry.mime,
+                textPreviewBytes: textPreviewBytes
+            )
+        }
+        let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedServerURL.isEmpty, !token.isEmpty else {
+            throw APIError.missingCredentials
+        }
+        let artifact = ChatArtifact(
+            type: VoiceAgentDirectoryBrowser.artifactType(for: entry),
+            title: entry.name,
+            path: entry.path,
+            mime: entry.mime,
+            url: nil
+        )
+        return try await client.inspectArtifactFile(
+            serverURL: normalizedServerURL,
+            token: token,
+            artifact: artifact,
+            textPreviewBytes: textPreviewBytes
         )
     }
 

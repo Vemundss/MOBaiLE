@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import QuickLook
 import SwiftUI
 import UIKit
@@ -560,26 +561,89 @@ struct TextPreviewDocument: Identifiable {
     let url: URL
     let title: String
     let text: String
+    let isTruncated: Bool
+    let sizeBytes: Int64?
+
+    init(
+        url: URL,
+        title: String,
+        text: String,
+        isTruncated: Bool = false,
+        sizeBytes: Int64? = nil
+    ) {
+        self.url = url
+        self.title = title
+        self.text = text
+        self.isTruncated = isTruncated
+        self.sizeBytes = sizeBytes
+    }
 }
 
 struct TextFilePreviewSheet: View {
     let document: TextPreviewDocument
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
+    @State private var showsLineNumbers = false
+    @State private var wrapsLines = true
+    @State private var searchText = ""
+
+    private var displayText: String {
+        showsLineNumbers ? TextPreviewFormatter.numberedText(document.text) : document.text
+    }
+
+    private var searchMatchCount: Int {
+        TextPreviewFormatter.matchCount(in: document.text, query: searchText)
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView([.vertical, .horizontal]) {
-                Text(document.text)
-                    .font(.system(.footnote, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
+            VStack(spacing: 0) {
+                if document.isTruncated {
+                    Label("Preview truncated", systemImage: "text.page.badge.magnifyingglass")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color(.secondarySystemGroupedBackground))
+                }
+
+                ScrollView(wrapsLines ? [.vertical] : [.vertical, .horizontal]) {
+                    Text(displayText)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(
+                            maxWidth: wrapsLines ? .infinity : nil,
+                            alignment: .leading
+                        )
+                        .padding()
+                }
+                .background(Color(.systemBackground))
+
+                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("\(searchMatchCount) \(searchMatchCount == 1 ? "match" : "matches")")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color(.secondarySystemGroupedBackground))
+                }
             }
-            .background(Color(.systemBackground))
             .navigationTitle(document.title)
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find in file")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Toggle("Line Numbers", isOn: $showsLineNumbers)
+                        Toggle("Wrap Lines", isOn: $wrapsLines)
+                    } label: {
+                        Image(systemName: "text.alignleft")
+                    }
+                    .accessibilityLabel("Text preview options")
+                }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     ShareLink(item: document.url) {
                         Image(systemName: "square.and.arrow.up")
@@ -607,8 +671,32 @@ struct TextFilePreviewSheet: View {
     }
 }
 
+enum TextPreviewFormatter {
+    static func numberedText(_ text: String) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let width = String(max(lines.count, 1)).count
+        return lines.enumerated().map { index, line in
+            "\(String(index + 1).leftPadded(toLength: width))  \(line)"
+        }.joined(separator: "\n")
+    }
+
+    static func matchCount(in text: String, query: String) -> Int {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return 0 }
+        var count = 0
+        var searchRange = text.startIndex..<text.endIndex
+        while let range = text.range(of: needle, options: [.caseInsensitive], range: searchRange) {
+            count += 1
+            searchRange = range.upperBound..<text.endIndex
+        }
+        return count
+    }
+}
+
 enum TextPreviewLoader {
     private static let maxPreviewBytes = 2 * 1024 * 1024
+    private static let previewTextPrefix = "mobaile-text-preview-"
+    private static let stalePreviewFileAge: TimeInterval = 24 * 60 * 60
 
     static func canPreview(fileName: String, mimeType: String?) -> Bool {
         let lowerMime = (mimeType ?? "").lowercased()
@@ -639,7 +727,149 @@ enum TextPreviewLoader {
             throw TextPreviewError.unsupportedEncoding
         }.value
     }
+
+    static func writePreviewTextToTemporaryFile(title: String, text: String) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            cleanupStalePreviewTextFiles()
+            let titleURL = URL(fileURLWithPath: title)
+            let rawExtension = titleURL.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fileExtension = rawExtension.isEmpty ? ".txt" : ".\(rawExtension)"
+            let rawStem = titleURL.deletingPathExtension().lastPathComponent
+            let fileName = "\(previewTextPrefix)\(sanitizePreviewFileName(rawStem))-\(UUID().uuidString)\(fileExtension)"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+            try text.data(using: .utf8)?.write(to: url, options: .atomic)
+            return url
+        }.value
+    }
+
+    private static func sanitizePreviewFileName(_ raw: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let cleaned = raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let collapsed = String(cleaned).replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
+        let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "file" : trimmed
+    }
+
+    private static func cleanupStalePreviewTextFiles() {
+        let directory = FileManager.default.temporaryDirectory
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+        let now = Date()
+        for url in urls where url.lastPathComponent.hasPrefix(previewTextPrefix) {
+            let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if now.timeIntervalSince(modifiedAt) > stalePreviewFileAge {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
 }
+
+enum LocalFileInspection {
+    static func inspect(
+        url: URL,
+        name: String,
+        mime: String?,
+        textPreviewBytes: Int
+    ) async throws -> FileInspectionResponse {
+        try await Task.detached(priority: .userInitiated) {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            let size = Int64(values.fileSize ?? 0)
+            let resolvedMime = inferAttachmentMimeType(fileName: name, fallback: mime)
+            let kind = inferAttachmentKind(fileName: name, mimeType: resolvedMime)
+            let dimensions = imageDimensions(url: url, kind: kind)
+            let preview = textPreview(
+                url: url,
+                name: name,
+                mime: resolvedMime,
+                byteLimit: textPreviewBytes
+            )
+
+            return FileInspectionResponse(
+                name: name,
+                path: url.path,
+                sizeBytes: size,
+                mime: resolvedMime,
+                artifactType: artifactType(for: kind),
+                textPreview: preview.text,
+                textPreviewBytes: preview.bytes,
+                textPreviewTruncated: preview.truncated,
+                imageWidth: dimensions.width,
+                imageHeight: dimensions.height
+            )
+        }.value
+    }
+
+    private static func artifactType(for kind: DraftAttachment.Kind) -> String {
+        switch kind {
+        case .image:
+            return "image"
+        case .code:
+            return "code"
+        case .file:
+            return "file"
+        }
+    }
+
+    private static func textPreview(
+        url: URL,
+        name: String,
+        mime: String,
+        byteLimit: Int
+    ) -> (text: String?, bytes: Int, truncated: Bool) {
+        let limit = max(0, byteLimit)
+        guard limit > 0, TextPreviewLoader.canPreview(fileName: name, mimeType: mime) else {
+            return (nil, 0, false)
+        }
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: limit + 1) ?? Data()
+            let truncated = data.count > limit
+            let previewData = truncated ? data.prefix(limit) : data[...]
+            for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .isoLatin1] {
+                if let text = String(data: Data(previewData), encoding: encoding) {
+                    return (text, previewData.count, truncated)
+                }
+            }
+        } catch {
+            return (nil, 0, false)
+        }
+        return (nil, 0, false)
+    }
+
+    private static func imageDimensions(url: URL, kind: DraftAttachment.Kind) -> (width: Int?, height: Int?) {
+        guard kind == .image,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return (nil, nil)
+        }
+        let width = properties[kCGImagePropertyPixelWidth] as? Int
+        let height = properties[kCGImagePropertyPixelHeight] as? Int
+        return (width, height)
+    }
+}
+
+private extension String {
+    func leftPadded(toLength length: Int) -> String {
+        guard count < length else { return self }
+        return String(repeating: " ", count: length - count) + self
+    }
+}
+
+#if DEBUG
+func _test_numberedPreviewText(_ text: String) -> String {
+    TextPreviewFormatter.numberedText(text)
+}
+
+func _test_textPreviewMatchCount(_ text: String, query: String) -> Int {
+    TextPreviewFormatter.matchCount(in: text, query: query)
+}
+#endif
 
 enum TextPreviewError: Error, LocalizedError {
     case tooLarge

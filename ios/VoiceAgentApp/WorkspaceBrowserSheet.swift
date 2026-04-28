@@ -1,5 +1,7 @@
+import ImageIO
 import QuickLook
 import SwiftUI
+import UIKit
 
 struct WorkspaceBrowserSheet: View {
     @ObservedObject var vm: VoiceAgentViewModel
@@ -14,6 +16,8 @@ struct WorkspaceBrowserSheet: View {
     @State private var fileOpenError: String = ""
     @State private var previewDocument: PreviewDocument?
     @State private var textPreviewDocument: TextPreviewDocument?
+    @State private var thumbnailImages: [String: UIImage] = [:]
+    @State private var thumbnailLoadingPaths: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -433,10 +437,7 @@ struct WorkspaceBrowserSheet: View {
 
     private func directoryEntryRow(_ entry: DirectoryEntry) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: directoryEntryIconName(entry))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(directoryEntryTint(entry))
-                .frame(width: 20)
+            directoryEntryLeadingView(entry)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
@@ -470,7 +471,52 @@ struct WorkspaceBrowserSheet: View {
                 .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(directoryEntryAccessibilityLabel(entry))
+    }
+
+    @ViewBuilder
+    private func directoryEntryLeadingView(_ entry: DirectoryEntry) -> some View {
+        if let image = thumbnailImages[entry.path] {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .accessibilityHidden(true)
+        } else if thumbnailLoadingPaths.contains(entry.path) {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 32, height: 32)
+        } else {
+            Image(systemName: directoryEntryIconName(entry))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(directoryEntryTint(entry))
+                .frame(width: 32, height: 32)
+                .task(id: entry.path) {
+                    await loadDirectoryThumbnailIfNeeded(entry)
+                }
+        }
+    }
+
+    @MainActor
+    private func loadDirectoryThumbnailIfNeeded(_ entry: DirectoryEntry) async {
+        guard !entry.isDirectory,
+              isImageEntry(entry),
+              thumbnailImages[entry.path] == nil,
+              !thumbnailLoadingPaths.contains(entry.path) else {
+            return
+        }
+        thumbnailLoadingPaths.insert(entry.path)
+        defer { thumbnailLoadingPaths.remove(entry.path) }
+        do {
+            let localURL = try await vm.downloadDirectoryFileForPreview(entry)
+            if let image = await DirectoryImageThumbnailRenderer.thumbnail(from: localURL, maxPointSize: 32) {
+                thumbnailImages[entry.path] = image
+            }
+        } catch {
+            return
+        }
     }
 
     @MainActor
@@ -480,20 +526,42 @@ struct WorkspaceBrowserSheet: View {
             await vm.openDirectoryEntry(entry)
             return
         }
-        if let size = entry.sizeBytes, size > maxPreviewFileBytes {
-            fileOpenError = "\(entry.name) is \(humanReadableAttachmentSize(size)). Preview files must be \(humanReadableAttachmentSize(maxPreviewFileBytes)) or smaller."
-            return
-        }
-
         openingFilePath = entry.path
         defer { openingFilePath = nil }
 
         do {
+            let inspection = try? await vm.inspectDirectoryFileForPreview(entry)
+            if let inspection, let text = inspection.textPreview {
+                let previewURL = try await TextPreviewLoader.writePreviewTextToTemporaryFile(
+                    title: entry.name,
+                    text: text
+                )
+                textPreviewDocument = TextPreviewDocument(
+                    url: previewURL,
+                    title: entry.name,
+                    text: text,
+                    isTruncated: inspection.textPreviewTruncated,
+                    sizeBytes: inspection.sizeBytes
+                )
+                return
+            }
+
+            let size = inspection?.sizeBytes ?? entry.sizeBytes
+            if let size, size > maxPreviewFileBytes {
+                fileOpenError = "\(entry.name) is \(humanReadableAttachmentSize(size)). Preview files must be \(humanReadableAttachmentSize(maxPreviewFileBytes)) or smaller."
+                return
+            }
+
             let localURL = try await vm.downloadDirectoryFileForPreview(entry)
             if TextPreviewLoader.canPreview(fileName: localURL.lastPathComponent, mimeType: entry.mime) {
                 do {
                     let text = try await TextPreviewLoader.loadText(from: localURL)
-                    textPreviewDocument = TextPreviewDocument(url: localURL, title: entry.name, text: text)
+                    textPreviewDocument = TextPreviewDocument(
+                        url: localURL,
+                        title: entry.name,
+                        text: text,
+                        sizeBytes: size
+                    )
                     return
                 } catch TextPreviewError.tooLarge {
                     // Let Quick Look handle larger text files when iOS supports the format.
@@ -551,6 +619,12 @@ struct WorkspaceBrowserSheet: View {
         }
     }
 
+    private func isImageEntry(_ entry: DirectoryEntry) -> Bool {
+        guard !entry.isDirectory else { return false }
+        let lowerMime = (entry.mime ?? "").lowercased()
+        return lowerMime.hasPrefix("image/") || VoiceAgentDirectoryBrowser.artifactType(for: entry) == "image"
+    }
+
     private func directoryEntryTint(_ entry: DirectoryEntry) -> Color {
         guard !entry.isDirectory else { return .blue }
         switch VoiceAgentDirectoryBrowser.artifactType(for: entry) {
@@ -601,5 +675,29 @@ struct WorkspaceBrowserSheet: View {
             return "Open folder \(entry.name)"
         }
         return "Preview file \(entry.name), \(directoryEntryDetailText(entry))"
+    }
+}
+
+private enum DirectoryImageThumbnailRenderer {
+    static func thumbnail(from url: URL, maxPointSize: CGFloat) async -> UIImage? {
+        let scale = await MainActor.run { UIScreen.main.scale }
+        let pixelSize = max(1, Int(maxPointSize * scale))
+        return await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, [
+                kCGImageSourceShouldCache: false
+            ] as CFDictionary) else {
+                return nil
+            }
+            let options = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: pixelSize,
+                kCGImageSourceShouldCacheImmediately: true,
+            ] as CFDictionary
+            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
+                return nil
+            }
+            return UIImage(cgImage: image)
+        }.value
     }
 }

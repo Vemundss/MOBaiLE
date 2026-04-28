@@ -964,6 +964,32 @@ struct DirectoryEntry: Decodable, Identifiable {
     }
 }
 
+struct FileInspectionResponse: Decodable {
+    let name: String
+    let path: String
+    let sizeBytes: Int64
+    let mime: String?
+    let artifactType: String
+    let textPreview: String?
+    let textPreviewBytes: Int
+    let textPreviewTruncated: Bool
+    let imageWidth: Int?
+    let imageHeight: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case path
+        case sizeBytes = "size_bytes"
+        case mime
+        case artifactType = "artifact_type"
+        case textPreview = "text_preview"
+        case textPreviewBytes = "text_preview_bytes"
+        case textPreviewTruncated = "text_preview_truncated"
+        case imageWidth = "image_width"
+        case imageHeight = "image_height"
+    }
+}
+
 struct DirectoryListingResponse: Decodable {
     let path: String
     let entries: [DirectoryEntry]
