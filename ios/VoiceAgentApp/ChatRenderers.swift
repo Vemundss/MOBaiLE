@@ -173,7 +173,8 @@ struct MessageBubble: View {
                         title: artifact.title,
                         text: text,
                         isTruncated: inspection.textPreviewTruncated,
-                        sizeBytes: inspection.sizeBytes
+                        sizeBytes: inspection.sizeBytes,
+                        modifiedAt: inspection.modifiedAt
                     )
                 }
                 return
@@ -187,7 +188,8 @@ struct MessageBubble: View {
             let localURL = try await client.downloadArtifactToTemporaryFile(
                 serverURL: serverURL,
                 token: apiToken,
-                artifact: downloadArtifact
+                artifact: downloadArtifact,
+                cacheVersion: inspection?.previewCacheVersion
             )
             if TextPreviewLoader.canPreview(fileName: localURL.lastPathComponent, mimeType: artifact.mime) {
                 do {
@@ -197,7 +199,8 @@ struct MessageBubble: View {
                             url: localURL,
                             title: artifact.title,
                             text: text,
-                            sizeBytes: inspection?.sizeBytes
+                            sizeBytes: inspection?.sizeBytes,
+                            modifiedAt: inspection?.modifiedAt
                         )
                     }
                     return

@@ -510,6 +510,7 @@ def test_file_inspect_endpoint_returns_metadata_and_text_preview(make_client, tm
     assert payload["size_bytes"] == 18
     assert payload["mime"] in {"text/markdown", "text/x-markdown"}
     assert payload["artifact_type"] == "code"
+    assert isinstance(payload["modified_at"], str)
     assert payload["text_preview"] == "# Title\n"
     assert payload["text_preview_bytes"] == 8
     assert payload["text_preview_truncated"] is True
@@ -550,6 +551,7 @@ def test_directory_listing_endpoint(make_client, tmp_path: Path):
     readme = next(item for item in payload["entries"] if item["name"] == "README.md")
     assert readme["size_bytes"] == 5
     assert readme["mime"] in {"text/markdown", "text/x-markdown"}
+    assert isinstance(readme["modified_at"], str)
     assert payload["truncated"] is False
 
 

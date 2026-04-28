@@ -710,13 +710,14 @@ final class APIClient {
     func downloadArtifactToTemporaryFile(
         serverURL: String,
         token: String,
-        artifact: ChatArtifact
+        artifact: ChatArtifact,
+        cacheVersion: String? = nil
     ) async throws -> URL {
         try await withCandidateServerURL(serverURL) { baseURL in
             guard let requestURL = resolveArtifactURL(serverURL: baseURL, artifact: artifact) else {
                 throw APIError.invalidURL
             }
-            let cacheKey = requestURL.absoluteString
+            let cacheKey = PreviewDownloadCache.cacheKey(for: requestURL, cacheVersion: cacheVersion)
             if let cachedURL = await previewDownloadCache.file(for: cacheKey) {
                 return cachedURL
             }
@@ -1148,6 +1149,10 @@ extension APIClient {
             textPreviewBytes: textPreviewBytes
         )
     }
+
+    func _test_previewDownloadCacheKey(url: URL, cacheVersion: String?) -> String {
+        PreviewDownloadCache.cacheKey(for: url, cacheVersion: cacheVersion)
+    }
 }
 #endif
 
@@ -1162,6 +1167,14 @@ private actor PreviewDownloadCache {
     private let staleFileAge: TimeInterval = 24 * 60 * 60
     private var entries: [String: Entry] = [:]
     private var lastCleanup: Date?
+
+    static func cacheKey(for url: URL, cacheVersion: String?) -> String {
+        guard let cacheVersion,
+              !cacheVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return url.absoluteString
+        }
+        return "\(url.absoluteString)#\(cacheVersion)"
+    }
 
     func file(for key: String) -> URL? {
         cleanupIfNeeded()

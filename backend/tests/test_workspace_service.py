@@ -190,6 +190,7 @@ def test_workspace_service_inspects_text_file_with_bounded_preview(monkeypatch, 
     assert inspected.size_bytes == 17
     assert inspected.mime == "text/plain"
     assert inspected.artifact_type == "code"
+    assert inspected.modified_at is not None
     assert inspected.text_preview == "hello\nworld"
     assert inspected.text_preview_bytes == 11
     assert inspected.text_preview_truncated is True
@@ -234,3 +235,31 @@ def test_workspace_service_inspect_does_not_preview_profile_state_content(monkey
     assert inspected.text_preview is None
     assert inspected.text_preview_bytes == 0
     assert inspected.text_preview_truncated is False
+
+
+def test_workspace_service_inspect_does_not_preview_secret_like_files(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+    secret_file = env.default_workdir / ".env.local"
+    secret_file.parent.mkdir(parents=True, exist_ok=True)
+    secret_file.write_text("TOKEN=private", encoding="utf-8")
+
+    inspected = service.inspect_file(str(secret_file))
+
+    assert inspected.size_bytes == len("TOKEN=private")
+    assert inspected.text_preview is None
+    assert inspected.text_preview_bytes == 0
+    assert inspected.text_preview_truncated is False
+
+
+def test_workspace_service_listing_includes_modified_time(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+    sample = env.default_workdir / "notes.txt"
+    sample.parent.mkdir(parents=True, exist_ok=True)
+    sample.write_text("hello", encoding="utf-8")
+
+    listing = service.list_directory(str(env.default_workdir))
+
+    entry = next(item for item in listing.entries if item.name == "notes.txt")
+    assert entry.modified_at is not None

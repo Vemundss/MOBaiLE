@@ -20,7 +20,10 @@ extension VoiceAgentViewModel {
         await openDirectory(path: entry.path)
     }
 
-    func downloadDirectoryFileForPreview(_ entry: DirectoryEntry) async throws -> URL {
+    func downloadDirectoryFileForPreview(
+        _ entry: DirectoryEntry,
+        cacheVersion: String? = nil
+    ) async throws -> URL {
         guard !entry.isDirectory else {
             throw APIError.invalidURL
         }
@@ -42,7 +45,8 @@ extension VoiceAgentViewModel {
         return try await client.downloadArtifactToTemporaryFile(
             serverURL: normalizedServerURL,
             token: token,
-            artifact: artifact
+            artifact: artifact,
+            cacheVersion: cacheVersion ?? entry.previewCacheVersion
         )
     }
 

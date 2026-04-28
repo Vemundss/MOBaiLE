@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -197,6 +198,7 @@ class DirectoryEntry(BaseModel):
     is_directory: bool
     size_bytes: int | None = None
     mime: str | None = None
+    modified_at: datetime | None = None
 
 
 class FileInspectionResponse(BaseModel):
@@ -205,6 +207,7 @@ class FileInspectionResponse(BaseModel):
     size_bytes: int
     mime: str | None = None
     artifact_type: Literal["image", "file", "code"]
+    modified_at: datetime
     text_preview: str | None = None
     text_preview_bytes: int = 0
     text_preview_truncated: bool = False

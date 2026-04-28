@@ -917,14 +917,16 @@ enum VoiceAgentPreviewFactory {
                 path: scriptURL.path,
                 isDirectory: false,
                 sizeBytes: fileSize(at: scriptURL),
-                mime: "text/x-python"
+                mime: "text/x-python",
+                modifiedAt: "2026-04-28T20:00:00Z"
             ),
             DirectoryEntry(
                 name: "PreviewPlot.png",
                 path: imageURL.path,
                 isDirectory: false,
                 sizeBytes: fileSize(at: imageURL),
-                mime: "image/png"
+                mime: "image/png",
+                modifiedAt: "2026-04-28T20:01:00Z"
             ),
         ]
     }

@@ -931,6 +931,12 @@ struct DirectoryEntry: Decodable, Identifiable {
     let isDirectory: Bool
     let sizeBytes: Int64?
     let mime: String?
+    let modifiedAt: String?
+
+    var previewCacheVersion: String? {
+        guard let modifiedAt else { return nil }
+        return "\(modifiedAt):\(sizeBytes ?? -1)"
+    }
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -938,6 +944,7 @@ struct DirectoryEntry: Decodable, Identifiable {
         case isDirectory = "is_directory"
         case sizeBytes = "size_bytes"
         case mime
+        case modifiedAt = "modified_at"
     }
 
     init(
@@ -945,13 +952,15 @@ struct DirectoryEntry: Decodable, Identifiable {
         path: String,
         isDirectory: Bool,
         sizeBytes: Int64? = nil,
-        mime: String? = nil
+        mime: String? = nil,
+        modifiedAt: String? = nil
     ) {
         self.name = name
         self.path = path
         self.isDirectory = isDirectory
         self.sizeBytes = sizeBytes
         self.mime = mime
+        self.modifiedAt = modifiedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -961,6 +970,7 @@ struct DirectoryEntry: Decodable, Identifiable {
         isDirectory = try container.decode(Bool.self, forKey: .isDirectory)
         sizeBytes = try container.decodeIfPresent(Int64.self, forKey: .sizeBytes)
         mime = try container.decodeIfPresent(String.self, forKey: .mime)
+        modifiedAt = try container.decodeIfPresent(String.self, forKey: .modifiedAt)
     }
 }
 
@@ -970,11 +980,19 @@ struct FileInspectionResponse: Decodable {
     let sizeBytes: Int64
     let mime: String?
     let artifactType: String
+    let modifiedAt: String?
     let textPreview: String?
     let textPreviewBytes: Int
     let textPreviewTruncated: Bool
     let imageWidth: Int?
     let imageHeight: Int?
+
+    var previewCacheVersion: String? {
+        if let modifiedAt {
+            return "\(modifiedAt):\(sizeBytes)"
+        }
+        return "size:\(sizeBytes)"
+    }
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -982,6 +1000,7 @@ struct FileInspectionResponse: Decodable {
         case sizeBytes = "size_bytes"
         case mime
         case artifactType = "artifact_type"
+        case modifiedAt = "modified_at"
         case textPreview = "text_preview"
         case textPreviewBytes = "text_preview_bytes"
         case textPreviewTruncated = "text_preview_truncated"

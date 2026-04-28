@@ -5,6 +5,7 @@ import mimetypes
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -34,6 +35,7 @@ class _SortableDirectoryEntry:
     is_directory: bool
     size_bytes: int | None = None
     mime: str | None = None
+    modified_at: datetime | None = None
 
 
 class WorkspaceService:
@@ -52,7 +54,8 @@ class WorkspaceService:
         text_preview_bytes: int = DEFAULT_TEXT_PREVIEW_BYTES,
     ) -> FileInspectionResponse:
         target = self._resolve_file_target(raw_path)
-        size_bytes = target.stat().st_size
+        stat = target.stat()
+        size_bytes = stat.st_size
         mime = mimetypes.guess_type(target.name)[0]
         artifact_type = artifact_type_for_upload(target.name, mime)
         text_preview, preview_byte_count, text_truncated = self._text_preview(
@@ -69,6 +72,7 @@ class WorkspaceService:
             size_bytes=size_bytes,
             mime=mime,
             artifact_type=artifact_type,
+            modified_at=self._modified_at_from_stat(stat),
             text_preview=text_preview,
             text_preview_bytes=preview_byte_count,
             text_preview_truncated=text_truncated,
@@ -104,6 +108,7 @@ class WorkspaceService:
                 is_directory=child.is_directory,
                 size_bytes=child.size_bytes,
                 mime=child.mime,
+                modified_at=child.modified_at,
             )
             for child in visible_children[:limit]
         ]
@@ -124,9 +129,16 @@ class WorkspaceService:
 
         size_bytes: int | None = None
         mime: str | None = None
+        modified_at: datetime | None = None
+        try:
+            stat = child.stat(follow_symlinks=False)
+            modified_at = self._modified_at_from_stat(stat)
+        except OSError:
+            stat = None
+
         if not is_directory:
             try:
-                size_bytes = child.stat(follow_symlinks=False).st_size
+                size_bytes = stat.st_size if stat is not None else child.stat(follow_symlinks=False).st_size
             except OSError:
                 size_bytes = None
             mime = mimetypes.guess_type(child.name)[0]
@@ -138,6 +150,7 @@ class WorkspaceService:
             is_directory=is_directory,
             size_bytes=size_bytes,
             mime=mime,
+            modified_at=modified_at,
         )
 
     def _is_internal_uploads_directory(self, parent: Path, child: os.DirEntry[str]) -> bool:
@@ -293,8 +306,13 @@ class WorkspaceService:
         return any(token in lower_mime for token in ("json", "xml", "yaml", "toml"))
 
     def _is_sensitive_preview_path(self, target: Path) -> bool:
-        sensitive_names = {".env", "pairing.json", "pairing-qr.png"}
-        if target.name in sensitive_names:
+        lower_name = target.name.lower()
+        sensitive_names = {"pairing.json", "pairing-qr.png", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
+        if (
+            lower_name in sensitive_names
+            or lower_name.startswith(".env")
+            or lower_name.endswith((".pem", ".key", ".p12", ".pfx"))
+        ):
             return True
         sensitive_roots = [
             self.environment.backend_root / "data",
@@ -302,6 +320,10 @@ class WorkspaceService:
             self.environment.legacy_session_state_root,
         ]
         return any(self._is_relative_to(target, root.resolve()) for root in sensitive_roots)
+
+    @staticmethod
+    def _modified_at_from_stat(stat: os.stat_result) -> datetime:
+        return datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
 
     def _image_dimensions(self, target: Path, *, mime: str | None) -> tuple[int | None, int | None]:
         lower_mime = (mime or "").lower()

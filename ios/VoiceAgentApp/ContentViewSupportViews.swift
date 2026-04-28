@@ -563,19 +563,22 @@ struct TextPreviewDocument: Identifiable {
     let text: String
     let isTruncated: Bool
     let sizeBytes: Int64?
+    let modifiedAt: String?
 
     init(
         url: URL,
         title: String,
         text: String,
         isTruncated: Bool = false,
-        sizeBytes: Int64? = nil
+        sizeBytes: Int64? = nil,
+        modifiedAt: String? = nil
     ) {
         self.url = url
         self.title = title
         self.text = text
         self.isTruncated = isTruncated
         self.sizeBytes = sizeBytes
+        self.modifiedAt = modifiedAt
     }
 }
 
@@ -592,14 +595,31 @@ struct TextFilePreviewSheet: View {
     }
 
     private var searchMatchCount: Int {
-        TextPreviewFormatter.matchCount(in: document.text, query: searchText)
+        TextPreviewFormatter.matchCount(in: displayText, query: searchText)
+    }
+
+    private var metadataText: String? {
+        FileMetadataFormatter.previewMetadataText(
+            sizeBytes: document.sizeBytes,
+            modifiedAt: document.modifiedAt
+        )
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if let metadataText {
+                    Text(metadataText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color(.secondarySystemGroupedBackground))
+                }
+
                 if document.isTruncated {
-                    Label("Preview truncated", systemImage: "text.page.badge.magnifyingglass")
+                    Label("Preview truncated to the first \(humanReadableAttachmentSize(Int64(document.text.utf8.count)))", systemImage: "text.page.badge.magnifyingglass")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -609,7 +629,7 @@ struct TextFilePreviewSheet: View {
                 }
 
                 ScrollView(wrapsLines ? [.vertical] : [.vertical, .horizontal]) {
-                    Text(displayText)
+                    Text(TextPreviewFormatter.highlightedText(displayText, query: searchText))
                         .font(.system(.footnote, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(
@@ -681,15 +701,74 @@ enum TextPreviewFormatter {
     }
 
     static func matchCount(in text: String, query: String) -> Int {
+        matchRanges(in: text, query: query).count
+    }
+
+    static func matchRanges(in text: String, query: String) -> [Range<String.Index>] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty else { return 0 }
-        var count = 0
+        guard !needle.isEmpty, !text.isEmpty else { return [] }
+        var ranges: [Range<String.Index>] = []
         var searchRange = text.startIndex..<text.endIndex
         while let range = text.range(of: needle, options: [.caseInsensitive], range: searchRange) {
-            count += 1
+            ranges.append(range)
             searchRange = range.upperBound..<text.endIndex
         }
-        return count
+        return ranges
+    }
+
+    static func highlightedText(_ text: String, query: String) -> AttributedString {
+        var attributed = AttributedString(text)
+        for range in matchRanges(in: text, query: query) {
+            guard let attributedRange = Range(range, in: attributed) else { continue }
+            attributed[attributedRange].backgroundColor = Color.yellow.opacity(0.35)
+            attributed[attributedRange].foregroundColor = Color.primary
+        }
+        return attributed
+    }
+}
+
+enum FileMetadataFormatter {
+    static func previewMetadataText(sizeBytes: Int64?, modifiedAt: String?) -> String? {
+        var parts: [String] = []
+        if let sizeBytes {
+            parts.append(humanReadableAttachmentSize(sizeBytes))
+        }
+        if let modified = modifiedLabel(modifiedAt, compact: false) {
+            parts.append(modified)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    static func modifiedShortLabel(_ modifiedAt: String?) -> String? {
+        modifiedLabel(modifiedAt, compact: true)
+    }
+
+    private static func modifiedLabel(_ modifiedAt: String?, compact: Bool) -> String? {
+        guard let modifiedAt,
+              let date = parseISODate(modifiedAt) else {
+            return nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeStyle = .short
+        if compact {
+            let template = Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year)
+                ? "dMMMHHmm"
+                : "dMMMyyyyHHmm"
+            formatter.setLocalizedDateFormatFromTemplate(template)
+            return formatter.string(from: date)
+        }
+        formatter.dateStyle = .medium
+        return "Modified \(formatter.string(from: date))"
+    }
+
+    private static func parseISODate(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) {
+            return date
+        }
+        return ISO8601DateFormatter().date(from: value)
     }
 }
 
@@ -777,11 +856,12 @@ enum LocalFileInspection {
         textPreviewBytes: Int
     ) async throws -> FileInspectionResponse {
         try await Task.detached(priority: .userInitiated) {
-            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
             let size = Int64(values.fileSize ?? 0)
             let resolvedMime = inferAttachmentMimeType(fileName: name, fallback: mime)
             let kind = inferAttachmentKind(fileName: name, mimeType: resolvedMime)
             let dimensions = imageDimensions(url: url, kind: kind)
+            let modifiedAt = values.contentModificationDate.map { ISO8601DateFormatter().string(from: $0) }
             let preview = textPreview(
                 url: url,
                 name: name,
@@ -795,6 +875,7 @@ enum LocalFileInspection {
                 sizeBytes: size,
                 mime: resolvedMime,
                 artifactType: artifactType(for: kind),
+                modifiedAt: modifiedAt ?? ISO8601DateFormatter().string(from: Date()),
                 textPreview: preview.text,
                 textPreviewBytes: preview.bytes,
                 textPreviewTruncated: preview.truncated,
@@ -868,6 +949,10 @@ func _test_numberedPreviewText(_ text: String) -> String {
 
 func _test_textPreviewMatchCount(_ text: String, query: String) -> Int {
     TextPreviewFormatter.matchCount(in: text, query: query)
+}
+
+func _test_textPreviewMatchedSnippets(_ text: String, query: String) -> [String] {
+    TextPreviewFormatter.matchRanges(in: text, query: query).map { String(text[$0]) }
 }
 #endif
 

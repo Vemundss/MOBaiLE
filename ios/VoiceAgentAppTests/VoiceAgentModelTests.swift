@@ -264,13 +264,15 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     func testDirectoryEntryDecodesPreviewMetadata() throws {
-        let json = #"{"name":"README.md","path":"/repo/README.md","is_directory":false,"size_bytes":42,"mime":"text/markdown"}"#
+        let json = #"{"name":"README.md","path":"/repo/README.md","is_directory":false,"size_bytes":42,"mime":"text/markdown","modified_at":"2026-04-28T20:10:00Z"}"#
 
         let entry = try JSONDecoder().decode(DirectoryEntry.self, from: Data(json.utf8))
 
         XCTAssertEqual(entry.name, "README.md")
         XCTAssertEqual(entry.sizeBytes, 42)
         XCTAssertEqual(entry.mime, "text/markdown")
+        XCTAssertEqual(entry.modifiedAt, "2026-04-28T20:10:00Z")
+        XCTAssertEqual(entry.previewCacheVersion, "2026-04-28T20:10:00Z:42")
         XCTAssertEqual(VoiceAgentDirectoryBrowser.artifactType(for: entry), "code")
     }
 
@@ -282,6 +284,7 @@ final class VoiceAgentModelTests: XCTestCase {
           "size_bytes":128,
           "mime":"image/png",
           "artifact_type":"image",
+          "modified_at":"2026-04-28T20:11:00Z",
           "text_preview":null,
           "text_preview_bytes":0,
           "text_preview_truncated":false,
@@ -295,8 +298,33 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(inspected.name, "plot.png")
         XCTAssertEqual(inspected.sizeBytes, 128)
         XCTAssertEqual(inspected.artifactType, "image")
+        XCTAssertEqual(inspected.modifiedAt, "2026-04-28T20:11:00Z")
+        XCTAssertEqual(inspected.previewCacheVersion, "2026-04-28T20:11:00Z:128")
         XCTAssertEqual(inspected.imageWidth, 640)
         XCTAssertEqual(inspected.imageHeight, 360)
+    }
+
+    func testFileInspectionResponseToleratesMissingModifiedAt() throws {
+        let json = """
+        {
+          "name":"notes.txt",
+          "path":"/repo/notes.txt",
+          "size_bytes":12,
+          "mime":"text/plain",
+          "artifact_type":"code",
+          "text_preview":"hello",
+          "text_preview_bytes":5,
+          "text_preview_truncated":false,
+          "image_width":null,
+          "image_height":null
+        }
+        """
+
+        let inspected = try JSONDecoder().decode(FileInspectionResponse.self, from: Data(json.utf8))
+
+        XCTAssertNil(inspected.modifiedAt)
+        XCTAssertEqual(inspected.previewCacheVersion, "size:12")
+        XCTAssertEqual(inspected.textPreview, "hello")
     }
 
     func testTextPreviewHelpersNumberLinesAndCountMatches() {
@@ -304,6 +332,8 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertEqual(_test_numberedPreviewText(text), "1  alpha\n2  beta\n3  alpha")
         XCTAssertEqual(_test_textPreviewMatchCount(text, query: "alpha"), 2)
+        XCTAssertEqual(_test_textPreviewMatchedSnippets("Alpha\nbeta\nalpha", query: "alpha"), ["Alpha", "alpha"])
+        XCTAssertEqual(_test_textPreviewMatchCount(_test_numberedPreviewText(text), query: "1"), 1)
         XCTAssertEqual(_test_textPreviewMatchCount(text, query: "missing"), 0)
     }
 
@@ -1807,6 +1837,17 @@ final class VoiceAgentModelTests: XCTestCase {
                 .first(where: { $0.name == "text_preview_bytes" })?
                 .value,
             "4096"
+        )
+    }
+
+    func testArtifactPreviewCacheKeyIncludesInspectionVersion() {
+        let url = URL(string: "http://127.0.0.1:8000/v1/files?path=/repo/PreviewPlot.png")!
+
+        let key = APIClient()._test_previewDownloadCacheKey(url: url, cacheVersion: "2026-04-28T20:11:00Z:128")
+
+        XCTAssertEqual(
+            key,
+            "http://127.0.0.1:8000/v1/files?path=/repo/PreviewPlot.png#2026-04-28T20:11:00Z:128"
         )
     }
 

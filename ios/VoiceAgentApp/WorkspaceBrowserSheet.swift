@@ -16,8 +16,8 @@ struct WorkspaceBrowserSheet: View {
     @State private var fileOpenError: String = ""
     @State private var previewDocument: PreviewDocument?
     @State private var textPreviewDocument: TextPreviewDocument?
-    @State private var thumbnailImages: [String: UIImage] = [:]
-    @State private var thumbnailLoadingPaths: Set<String> = []
+    @State private var thumbnailImages: [DirectoryThumbnailCacheKey: UIImage] = [:]
+    @State private var thumbnailLoadingKeys: Set<DirectoryThumbnailCacheKey> = []
 
     var body: some View {
         NavigationStack {
@@ -448,7 +448,7 @@ struct WorkspaceBrowserSheet: View {
                 Text(directoryEntryDetailText(entry))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
 
             if openingFilePath == entry.path {
@@ -477,14 +477,15 @@ struct WorkspaceBrowserSheet: View {
 
     @ViewBuilder
     private func directoryEntryLeadingView(_ entry: DirectoryEntry) -> some View {
-        if let image = thumbnailImages[entry.path] {
+        let thumbnailKey = DirectoryThumbnailCacheKey(entry)
+        if let image = thumbnailImages[thumbnailKey] {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
                 .frame(width: 32, height: 32)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .accessibilityHidden(true)
-        } else if thumbnailLoadingPaths.contains(entry.path) {
+        } else if thumbnailLoadingKeys.contains(thumbnailKey) {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: 32, height: 32)
@@ -493,7 +494,7 @@ struct WorkspaceBrowserSheet: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(directoryEntryTint(entry))
                 .frame(width: 32, height: 32)
-                .task(id: entry.path) {
+                .task(id: thumbnailKey) {
                     await loadDirectoryThumbnailIfNeeded(entry)
                 }
         }
@@ -501,18 +502,23 @@ struct WorkspaceBrowserSheet: View {
 
     @MainActor
     private func loadDirectoryThumbnailIfNeeded(_ entry: DirectoryEntry) async {
+        let thumbnailKey = DirectoryThumbnailCacheKey(entry)
         guard !entry.isDirectory,
               isImageEntry(entry),
-              thumbnailImages[entry.path] == nil,
-              !thumbnailLoadingPaths.contains(entry.path) else {
+              thumbnailImages[thumbnailKey] == nil,
+              !thumbnailLoadingKeys.contains(thumbnailKey) else {
             return
         }
-        thumbnailLoadingPaths.insert(entry.path)
-        defer { thumbnailLoadingPaths.remove(entry.path) }
+        thumbnailLoadingKeys.insert(thumbnailKey)
+        defer { thumbnailLoadingKeys.remove(thumbnailKey) }
         do {
-            let localURL = try await vm.downloadDirectoryFileForPreview(entry)
+            let localURL = try await vm.downloadDirectoryFileForPreview(
+                entry,
+                cacheVersion: entry.previewCacheVersion
+            )
             if let image = await DirectoryImageThumbnailRenderer.thumbnail(from: localURL, maxPointSize: 32) {
-                thumbnailImages[entry.path] = image
+                thumbnailImages = thumbnailImages.filter { $0.key.path != entry.path }
+                thumbnailImages[thumbnailKey] = image
             }
         } catch {
             return
@@ -541,7 +547,8 @@ struct WorkspaceBrowserSheet: View {
                     title: entry.name,
                     text: text,
                     isTruncated: inspection.textPreviewTruncated,
-                    sizeBytes: inspection.sizeBytes
+                    sizeBytes: inspection.sizeBytes,
+                    modifiedAt: inspection.modifiedAt
                 )
                 return
             }
@@ -552,7 +559,8 @@ struct WorkspaceBrowserSheet: View {
                 return
             }
 
-            let localURL = try await vm.downloadDirectoryFileForPreview(entry)
+            let cacheVersion = inspection?.previewCacheVersion ?? entry.previewCacheVersion
+            let localURL = try await vm.downloadDirectoryFileForPreview(entry, cacheVersion: cacheVersion)
             if TextPreviewLoader.canPreview(fileName: localURL.lastPathComponent, mimeType: entry.mime) {
                 do {
                     let text = try await TextPreviewLoader.loadText(from: localURL)
@@ -560,7 +568,8 @@ struct WorkspaceBrowserSheet: View {
                         url: localURL,
                         title: entry.name,
                         text: text,
-                        sizeBytes: size
+                        sizeBytes: size,
+                        modifiedAt: inspection?.modifiedAt ?? entry.modifiedAt
                     )
                     return
                 } catch TextPreviewError.tooLarge {
@@ -643,6 +652,9 @@ struct WorkspaceBrowserSheet: View {
         if let size = entry.sizeBytes {
             parts.append(humanReadableAttachmentSize(size))
         }
+        if let modified = FileMetadataFormatter.modifiedShortLabel(entry.modifiedAt) {
+            parts.append(modified)
+        }
         if let mime = entry.mime?.trimmingCharacters(in: .whitespacesAndNewlines), !mime.isEmpty {
             parts.append(mime)
         }
@@ -675,6 +687,16 @@ struct WorkspaceBrowserSheet: View {
             return "Open folder \(entry.name)"
         }
         return "Preview file \(entry.name), \(directoryEntryDetailText(entry))"
+    }
+}
+
+private struct DirectoryThumbnailCacheKey: Hashable {
+    let path: String
+    let version: String?
+
+    init(_ entry: DirectoryEntry) {
+        path = entry.path
+        version = entry.previewCacheVersion
     }
 }
 

@@ -463,6 +463,18 @@
             ],
             "title": "Mime"
           },
+          "modified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified At"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -688,6 +700,11 @@
             ],
             "title": "Mime"
           },
+          "modified_at": {
+            "format": "date-time",
+            "title": "Modified At",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -726,7 +743,8 @@
           "name",
           "path",
           "size_bytes",
-          "artifact_type"
+          "artifact_type",
+          "modified_at"
         ],
         "title": "FileInspectionResponse",
         "type": "object"
