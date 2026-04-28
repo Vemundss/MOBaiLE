@@ -42,3 +42,15 @@ def test_debug_info_plist_claims_standard_pairing_scheme() -> None:
 
     assert "$(MOBAILE_URL_SCHEME)" in schemes
     assert "mobaile" in schemes
+
+
+def test_debug_info_plist_allows_insecure_http_for_tailscale_magicdns() -> None:
+    info_plist_path = _repo_root() / "ios" / "VoiceAgentApp" / "Info-Debug.plist"
+    payload = plistlib.loads(info_plist_path.read_bytes())
+
+    ats = payload["NSAppTransportSecurity"]
+    assert ats["NSAllowsLocalNetworking"] is True
+
+    tailscale_exception = ats["NSExceptionDomains"]["ts.net"]
+    assert tailscale_exception["NSExceptionAllowsInsecureHTTPLoads"] is True
+    assert tailscale_exception["NSIncludesSubdomains"] is True
