@@ -365,7 +365,12 @@ struct ContentView: View {
                                 if message.role == "user" {
                                     Spacer(minLength: 52)
                                 }
-                                MessageBubble(message: message, serverURL: vm.serverURL, apiToken: vm.apiToken)
+                                MessageBubble(
+                                    message: message,
+                                    serverURL: vm.serverURL,
+                                    apiToken: vm.apiToken,
+                                    workspacePath: runtimeDirectoryLabel
+                                )
                                 if message.role != "user" {
                                     Spacer(minLength: 52)
                                 }

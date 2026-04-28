@@ -549,6 +549,112 @@ struct FilePreviewSheet: View {
     }
 }
 
+struct PreviewDocument: Identifiable {
+    let id = UUID()
+    let url: URL
+    let title: String
+}
+
+struct TextPreviewDocument: Identifiable {
+    let id = UUID()
+    let url: URL
+    let title: String
+    let text: String
+}
+
+struct TextFilePreviewSheet: View {
+    let document: TextPreviewDocument
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView([.vertical, .horizontal]) {
+                Text(document.text)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .background(Color(.systemBackground))
+            .navigationTitle(document.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    ShareLink(item: document.url) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("Share \(document.title)")
+
+                    Button {
+                        UIPasteboard.general.string = document.text
+                        copied = true
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 1_200_000_000)
+                            copied = false
+                        }
+                    } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    .accessibilityLabel(copied ? "Copied" : "Copy text")
+
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+enum TextPreviewLoader {
+    private static let maxPreviewBytes = 2 * 1024 * 1024
+
+    static func canPreview(fileName: String, mimeType: String?) -> Bool {
+        let lowerMime = (mimeType ?? "").lowercased()
+        if lowerMime.hasPrefix("text/") || lowerMime.contains("json") || lowerMime.contains("xml") {
+            return true
+        }
+        return inferAttachmentKind(
+            fileName: fileName,
+            mimeType: inferAttachmentMimeType(fileName: fileName, fallback: mimeType)
+        ) == .code
+    }
+
+    static func loadText(from url: URL) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+            if let size = values?.fileSize, size > maxPreviewBytes {
+                throw TextPreviewError.tooLarge
+            }
+            let data = try Data(contentsOf: url)
+            if data.count > maxPreviewBytes {
+                throw TextPreviewError.tooLarge
+            }
+            for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .isoLatin1] {
+                if let text = String(data: data, encoding: encoding) {
+                    return text
+                }
+            }
+            throw TextPreviewError.unsupportedEncoding
+        }.value
+    }
+}
+
+enum TextPreviewError: Error, LocalizedError {
+    case tooLarge
+    case unsupportedEncoding
+
+    var errorDescription: String? {
+        switch self {
+        case .tooLarge:
+            return "This text file is too large for the inline preview."
+        case .unsupportedEncoding:
+            return "This text file uses an encoding the app can't display."
+        }
+    }
+}
+
 private struct FileQuickLookPreview: UIViewControllerRepresentable {
     let url: URL
 

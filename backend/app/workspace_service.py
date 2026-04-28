@@ -28,6 +28,8 @@ class _SortableDirectoryEntry:
     name: str
     path: str
     is_directory: bool
+    size_bytes: int | None = None
+    mime: str | None = None
 
 
 class WorkspaceService:
@@ -65,6 +67,8 @@ class WorkspaceService:
                 name=child.name,
                 path=child.path,
                 is_directory=child.is_directory,
+                size_bytes=child.size_bytes,
+                mime=child.mime,
             )
             for child in visible_children[:limit]
         ]
@@ -83,11 +87,22 @@ class WorkspaceService:
         except OSError:
             is_directory = False
 
+        size_bytes: int | None = None
+        mime: str | None = None
+        if not is_directory:
+            try:
+                size_bytes = child.stat(follow_symlinks=False).st_size
+            except OSError:
+                size_bytes = None
+            mime = mimetypes.guess_type(child.name)[0]
+
         return _SortableDirectoryEntry(
             sort_key=(0 if is_directory else 1, child.name.lower(), child.name),
             name=child.name,
             path=child.path,
             is_directory=is_directory,
+            size_bytes=size_bytes,
+            mime=mime,
         )
 
     def _is_internal_uploads_directory(self, parent: Path, child: os.DirEntry[str]) -> bool:
@@ -154,15 +169,15 @@ class WorkspaceService:
             if not path and not url:
                 raise HTTPException(status_code=400, detail="attachment must include a file path or backend file URL")
             if path:
-                self._resolve_file_target(path)
-                validated.append(artifact)
+                target = self._resolve_file_target(path)
+                validated.append(artifact.model_copy(update={"path": str(target)}))
                 continue
 
             backend_path = self._path_from_backend_file_url(url)
             if backend_path is None:
                 raise HTTPException(status_code=400, detail="attachment URL must point to /v1/files on this backend")
-            self._resolve_file_target(backend_path)
-            validated.append(artifact)
+            target = self._resolve_file_target(backend_path)
+            validated.append(artifact.model_copy(update={"path": str(target), "url": None}))
         return validated
 
     def _resolve_file_target(self, raw_path: str) -> Path:

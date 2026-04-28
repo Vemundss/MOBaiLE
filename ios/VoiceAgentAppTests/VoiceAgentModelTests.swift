@@ -263,6 +263,17 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertFalse(VoiceAgentDirectoryBrowser.canNavigateUp(from: "/"))
     }
 
+    func testDirectoryEntryDecodesPreviewMetadata() throws {
+        let json = #"{"name":"README.md","path":"/repo/README.md","is_directory":false,"size_bytes":42,"mime":"text/markdown"}"#
+
+        let entry = try JSONDecoder().decode(DirectoryEntry.self, from: Data(json.utf8))
+
+        XCTAssertEqual(entry.name, "README.md")
+        XCTAssertEqual(entry.sizeBytes, 42)
+        XCTAssertEqual(entry.mime, "text/markdown")
+        XCTAssertEqual(VoiceAgentDirectoryBrowser.artifactType(for: entry), "code")
+    }
+
     func testRunRecordDecoding() throws {
         let json = """
         {
@@ -390,6 +401,16 @@ final class VoiceAgentModelTests: XCTestCase {
             serverURL: "https://relay.example.com"
         )
         XCTAssertEqual(resolved, "https://relay.example.com/v1/files?path=%2FUsers%2Ftest%2Fplot.png")
+    }
+
+    func testResolveImageURLUsesWorkspaceForRelativePath() {
+        let resolved = _test_resolveImageURL(
+            "plots/plot.png",
+            serverURL: "http://127.0.0.1:8000",
+            workspacePath: "/Users/test/project"
+        )
+
+        XCTAssertEqual(resolved, "http://127.0.0.1:8000/v1/files?path=/Users/test/project/plots/plot.png")
     }
 
     func testAssistantHeadingNormalizationKeepsOutputTitleSeparateFromBody() {
@@ -1634,6 +1655,45 @@ final class VoiceAgentModelTests: XCTestCase {
         """
         let extracted = _test_extractInlineArtifactTitles(text, serverURL: "http://127.0.0.1:8000")
         XCTAssertEqual(extracted, ["notes.txt", "report.pdf"])
+    }
+
+    func testExtractInlineArtifactPathsUsesWorkspaceForRelativeLinks() {
+        let text = """
+        [notes.txt](notes.txt)
+        [nested.md](docs/nested.md)
+        """
+
+        let paths = _test_extractInlineArtifactPaths(
+            text,
+            serverURL: "http://127.0.0.1:8000",
+            workspacePath: "/Users/test/project"
+        )
+
+        XCTAssertEqual(paths, [
+            "/Users/test/project/notes.txt",
+            "/Users/test/project/docs/nested.md",
+        ])
+    }
+
+    func testImageMimeArtifactRendersAsImageSegmentEvenWhenTypeIsFile() {
+        let json = """
+        {
+          "type":"assistant_response",
+          "version":"1.0",
+          "summary":"Generated preview",
+          "sections":[],
+          "agenda_items":[],
+          "artifacts":[{"type":"file","title":"plot.png","path":"plots/plot.png","mime":"image/png"}]
+        }
+        """
+
+        let kinds = _test_messageSegmentKindNames(
+            json,
+            serverURL: "http://127.0.0.1:8000",
+            workspacePath: "/Users/test/project"
+        )
+
+        XCTAssertTrue(kinds.contains("image"))
     }
 
     func testExtractInlineArtifactTitlesIgnoresMarkdownLinksInsideCodeFences() {

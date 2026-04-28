@@ -57,4 +57,20 @@ enum VoiceAgentDirectoryBrowser {
             return partial
         }
     }
+
+    static func artifactType(for entry: DirectoryEntry) -> String {
+        guard !entry.isDirectory else { return "file" }
+        switch inferAttachmentKind(fileName: entry.name, mimeType: resolvedMimeType(for: entry)) {
+        case .image:
+            return "image"
+        case .code:
+            return "code"
+        case .file:
+            return "file"
+        }
+    }
+
+    static func resolvedMimeType(for entry: DirectoryEntry) -> String {
+        inferAttachmentMimeType(fileName: entry.name, fallback: entry.mime)
+    }
 }

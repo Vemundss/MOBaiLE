@@ -8,9 +8,11 @@ struct MessageBubble: View {
     let message: ConversationMessage
     let serverURL: String
     let apiToken: String
+    let workspacePath: String?
     @State private var artifactOpenError: String = ""
     @State private var openingArtifactID: String?
     @State private var previewDocument: PreviewDocument?
+    @State private var textPreviewDocument: TextPreviewDocument?
     private let client = APIClient()
 
     var body: some View {
@@ -35,6 +37,9 @@ struct MessageBubble: View {
         .sheet(item: $previewDocument) { preview in
             FilePreviewSheet(url: preview.url, title: preview.title)
         }
+        .sheet(item: $textPreviewDocument) { preview in
+            TextFilePreviewSheet(document: preview)
+        }
     }
 
     private var isUser: Bool {
@@ -46,9 +51,14 @@ struct MessageBubble: View {
     }
 
     private var segments: [MessageSegment] {
-        let parsed = parseSegments(from: message.text, serverURL: serverURL, massageForDisplay: !isUser)
+        let parsed = parseSegments(
+            from: message.text,
+            serverURL: serverURL,
+            workspacePath: workspacePath,
+            massageForDisplay: !isUser
+        )
         let explicitAttachments = message.attachments.map { artifact in
-            ChatArtifactResolution.messageSegment(for: artifact, serverURL: serverURL)
+            ChatArtifactResolution.messageSegment(for: artifact, serverURL: serverURL, workspacePath: workspacePath)
         }
         guard !explicitAttachments.isEmpty else { return parsed }
         if parsed.isEmpty {
@@ -79,6 +89,7 @@ struct MessageBubble: View {
                         ArtifactCard(
                             artifact: item,
                             serverURL: serverURL,
+                            workspacePath: workspacePath,
                             isOpening: openingArtifactID == item.id,
                             onOpen: {
                                 Task {
@@ -144,15 +155,33 @@ struct MessageBubble: View {
         }
 
         do {
+            let downloadArtifact = normalizedArtifactForDownload(artifact)
             let localURL = try await client.downloadArtifactToTemporaryFile(
                 serverURL: serverURL,
                 token: apiToken,
-                artifact: artifact
+                artifact: downloadArtifact
             )
-            await MainActor.run {
-                if QLPreviewController.canPreview(localURL as NSURL) {
+            if TextPreviewLoader.canPreview(fileName: localURL.lastPathComponent, mimeType: artifact.mime) {
+                do {
+                    let text = try await TextPreviewLoader.loadText(from: localURL)
+                    await MainActor.run {
+                        textPreviewDocument = TextPreviewDocument(url: localURL, title: artifact.title, text: text)
+                    }
+                    return
+                } catch TextPreviewError.tooLarge {
+                    // Let Quick Look handle larger text files when iOS supports the format.
+                } catch {
+                    if !QLPreviewController.canPreview(localURL as NSURL) {
+                        throw error
+                    }
+                }
+            }
+            if QLPreviewController.canPreview(localURL as NSURL) {
+                await MainActor.run {
                     previewDocument = PreviewDocument(url: localURL, title: artifact.title)
-                } else {
+                }
+            } else {
+                await MainActor.run {
                     artifactOpenError = "This file type can't be previewed on iPhone."
                 }
             }
@@ -161,6 +190,26 @@ struct MessageBubble: View {
                 artifactOpenError = error.localizedDescription
             }
         }
+    }
+
+    private func normalizedArtifactForDownload(_ artifact: ChatArtifact) -> ChatArtifact {
+        guard let path = artifact.path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty,
+              let resolved = ChatArtifactResolution.resolveFileURL(
+                  from: path,
+                  serverURL: serverURL,
+                  workspacePath: workspacePath
+              ),
+              let url = URL(string: resolved),
+              let backendPath = ChatArtifactResolution.backendFilePath(from: url) else {
+            return artifact
+        }
+        return ChatArtifact(
+            type: artifact.type,
+            title: artifact.title,
+            path: backendPath,
+            mime: artifact.mime,
+            url: nil
+        )
     }
 }
 
@@ -499,6 +548,7 @@ private struct LiveActivityCard: View {
 private struct ArtifactCard: View {
     let artifact: ChatArtifact
     let serverURL: String
+    let workspacePath: String?
     let isOpening: Bool
     let onOpen: () -> Void
 
@@ -532,7 +582,7 @@ private struct ArtifactCard: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Text("Open")
+                        Text("Preview")
                             .font(.caption.weight(.semibold))
                     }
                 }
@@ -563,12 +613,12 @@ private struct ArtifactCard: View {
     }
 
     private var iconName: String {
-        switch artifact.type.lowercased() {
-        case "image":
+        switch inferredKind {
+        case .image:
             return "photo"
-        case "code":
+        case .code:
             return "chevron.left.forwardslash.chevron.right"
-        default:
+        case .file:
             return "doc"
         }
     }
@@ -578,14 +628,19 @@ private struct ArtifactCard: View {
     }
 
     private var resolvedURL: URL? {
-        ChatArtifactResolution.resolvedURL(for: artifact, serverURL: serverURL)
+        ChatArtifactResolution.resolvedURL(for: artifact, serverURL: serverURL, workspacePath: workspacePath)
     }
-}
 
-private struct PreviewDocument: Identifiable {
-    let id = UUID()
-    let url: URL
-    let title: String
+    private var inferredKind: DraftAttachment.Kind {
+        let reference = artifact.path ?? artifact.url ?? artifact.title
+        let lastPathComponent = URL(fileURLWithPath: reference).lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fileName = lastPathComponent.isEmpty ? artifact.title : lastPathComponent
+        return inferAttachmentKind(
+            fileName: fileName,
+            mimeType: inferAttachmentMimeType(fileName: fileName, fallback: artifact.mime)
+        )
+    }
 }
 
 struct MessageSegment: Identifiable {
@@ -650,7 +705,12 @@ struct EmailDigestItem: Identifiable {
     let sender: String?
 }
 
-private func parseSegments(from text: String, serverURL: String, massageForDisplay: Bool = true) -> [MessageSegment] {
+private func parseSegments(
+    from text: String,
+    serverURL: String,
+    workspacePath: String? = nil,
+    massageForDisplay: Bool = true
+) -> [MessageSegment] {
     var segments: [MessageSegment] = []
 
     if let envelope = parseChatEnvelope(from: text) {
@@ -690,7 +750,11 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
             segments.append(MessageSegment(kind: .section(title: title, body: body), content: body))
         }
         for artifact in envelope.artifacts {
-            segments.append(ChatArtifactResolution.messageSegment(for: artifact, serverURL: serverURL))
+            segments.append(ChatArtifactResolution.messageSegment(
+                for: artifact,
+                serverURL: serverURL,
+                workspacePath: workspacePath
+            ))
         }
         if !envelope.agendaItems.isEmpty {
             segments.append(MessageSegment(kind: .agenda(items: envelope.agendaItems), content: "agenda"))
@@ -701,7 +765,11 @@ private func parseSegments(from text: String, serverURL: String, massageForDispl
     var remaining = massageForDisplay ? massageAssistantTextForDisplay(text) : text
     var inlineMediaSegments: [MessageSegment] = []
 
-    let inlineMedia = ChatArtifactResolution.extractInlineMediaReferences(from: remaining, serverURL: serverURL)
+    let inlineMedia = ChatArtifactResolution.extractInlineMediaReferences(
+        from: remaining,
+        serverURL: serverURL,
+        workspacePath: workspacePath
+    )
     if !inlineMedia.isEmpty {
         remaining = ChatArtifactResolution.removingInlineMediaReferences(from: remaining, references: inlineMedia)
         inlineMediaSegments = inlineMedia.map(\.segment)
@@ -1135,6 +1203,7 @@ private struct RemoteImageView: View {
             return
         }
         isLoading = true
+        loadedImage = nil
         didFail = false
         failureMessage = "Image failed to load"
         do {
@@ -1178,7 +1247,13 @@ private struct RemoteImageView: View {
     }
 
     private var previewTitle: String {
-        let raw = URL(string: urlString)?.lastPathComponent ?? "Image"
+        let raw: String
+        if let url = URL(string: urlString),
+           let backendPath = ChatArtifactResolution.backendFilePath(from: url) {
+            raw = URL(fileURLWithPath: backendPath).lastPathComponent
+        } else {
+            raw = URL(string: urlString)?.lastPathComponent ?? "Image"
+        }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Image" : trimmed
     }
@@ -1329,10 +1404,33 @@ func _test_massagedAssistantTextForDisplay(_ text: String) -> String {
     massageAssistantTextForDisplay(text)
 }
 
-func _test_messageSegmentIDs(_ text: String, serverURL: String) -> [String] {
-    parseSegments(from: text, serverURL: serverURL).map(\.id)
+func _test_messageSegmentIDs(_ text: String, serverURL: String, workspacePath: String? = nil) -> [String] {
+    parseSegments(from: text, serverURL: serverURL, workspacePath: workspacePath).map(\.id)
 }
 
-func _test_messageSegmentContents(_ text: String, serverURL: String) -> [String] {
-    parseSegments(from: text, serverURL: serverURL).map(\.content)
+func _test_messageSegmentContents(_ text: String, serverURL: String, workspacePath: String? = nil) -> [String] {
+    parseSegments(from: text, serverURL: serverURL, workspacePath: workspacePath).map(\.content)
+}
+
+func _test_messageSegmentKindNames(_ text: String, serverURL: String, workspacePath: String? = nil) -> [String] {
+    parseSegments(from: text, serverURL: serverURL, workspacePath: workspacePath).map { segment in
+        switch segment.kind {
+        case .markdown:
+            return "markdown"
+        case .code:
+            return "code"
+        case .status:
+            return "status"
+        case .image:
+            return "image"
+        case .section:
+            return "section"
+        case .artifact:
+            return "artifact"
+        case .agenda:
+            return "agenda"
+        case .emailDigest:
+            return "emailDigest"
+        }
+    }
 }

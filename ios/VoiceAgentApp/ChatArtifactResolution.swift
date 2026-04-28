@@ -7,28 +7,32 @@ enum ChatArtifactResolution {
         let segment: MessageSegment
     }
 
-    static func messageSegment(for artifact: ChatArtifact, serverURL: String) -> MessageSegment {
-        if artifact.type.lowercased() == "image",
+    static func messageSegment(for artifact: ChatArtifact, serverURL: String, workspacePath: String? = nil) -> MessageSegment {
+        if isImageArtifact(artifact),
            let raw = artifact.url ?? artifact.path,
-           let url = resolveImageURL(from: raw, serverURL: serverURL) {
+           let url = resolveImageURL(from: raw, serverURL: serverURL, workspacePath: workspacePath) {
             return MessageSegment(kind: .image(url: url), content: url)
         }
         return MessageSegment(kind: .artifact(item: artifact), content: artifact.title)
     }
 
-    static func resolvedURL(for artifact: ChatArtifact, serverURL: String) -> URL? {
+    static func resolvedURL(for artifact: ChatArtifact, serverURL: String, workspacePath: String? = nil) -> URL? {
         if let raw = artifact.url, let parsed = URL(string: raw) {
             return parsed
         }
         if let path = artifact.path,
-           let resolved = resolveImageURL(from: path, serverURL: serverURL),
+           let resolved = resolveFileURL(from: path, serverURL: serverURL, workspacePath: workspacePath),
            let url = URL(string: resolved) {
             return url
         }
         return nil
     }
 
-    static func extractInlineMediaReferences(from text: String, serverURL: String) -> [InlineMediaReference] {
+    static func extractInlineMediaReferences(
+        from text: String,
+        serverURL: String,
+        workspacePath: String? = nil
+    ) -> [InlineMediaReference] {
         var references: [InlineMediaReference] = []
         let nsRange = NSRange(text.startIndex..., in: text)
         let fencedCodeRanges = codeFenceRanges(in: text)
@@ -38,7 +42,7 @@ enum ChatArtifactResolution {
                 guard !overlapsAnyRange(match.range, ranges: fencedCodeRanges) else { continue }
                 guard let valueRange = Range(match.range(at: 1), in: text) else { continue }
                 let raw = String(text[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let resolved = resolveImageURL(from: raw, serverURL: serverURL) else { continue }
+                guard let resolved = resolveImageURL(from: raw, serverURL: serverURL, workspacePath: workspacePath) else { continue }
                 references.append(
                     InlineMediaReference(
                         range: match.range,
@@ -57,7 +61,12 @@ enum ChatArtifactResolution {
                 }
                 let title = String(text[titleRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let raw = String(text[targetRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let artifact = resolveInlineArtifact(title: title, rawReference: raw, serverURL: serverURL) else {
+                guard let artifact = resolveInlineArtifact(
+                    title: title,
+                    rawReference: raw,
+                    serverURL: serverURL,
+                    workspacePath: workspacePath
+                ) else {
                     continue
                 }
                 references.append(
@@ -86,7 +95,7 @@ enum ChatArtifactResolution {
         return collapseNewlines(output).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func resolveImageURL(from raw: String, serverURL: String) -> String? {
+    static func resolveImageURL(from raw: String, serverURL: String, workspacePath: String? = nil) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
         if lower.contains("path/to/") || lower.contains("absolute/path") {
@@ -102,8 +111,31 @@ enum ChatArtifactResolution {
             }
             return url.absoluteString
         }
-        let imagePath = extractImagePath(from: trimmed)
+        let imagePath = absolutizedPath(extractImagePath(from: trimmed), workspacePath: workspacePath)
         guard let encoded = imagePath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        return "\(normalizedServerURL(serverURL))/v1/files?path=\(encoded)"
+    }
+
+    static func resolveFileURL(from raw: String, serverURL: String, workspacePath: String? = nil) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower.contains("path/to/") || lower.contains("absolute/path") {
+            return nil
+        }
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+            guard let rawURL = URL(string: trimmed) else {
+                return nil
+            }
+            let url = rewriteProtectedBackendURL(rawURL, serverURL: serverURL) ?? rawURL
+            guard isBackendFileURL(url, serverURL: serverURL) else {
+                return nil
+            }
+            return url.absoluteString
+        }
+        let filePath = absolutizedPath(extractArtifactPath(from: trimmed), workspacePath: workspacePath)
+        guard let encoded = filePath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return nil
         }
         return "\(normalizedServerURL(serverURL))/v1/files?path=\(encoded)"
@@ -123,12 +155,14 @@ enum ChatArtifactResolution {
                 .trimmingCharacters(in: CharacterSet(charactersIn: "`'\" "))
                 .replacingOccurrences(of: "file://", with: "")
         )
-        let absolutePattern = #"/[^`'\"()\n]+?\.(?:png|jpg|jpeg|gif|webp)"#
-        if let regex = try? NSRegularExpression(pattern: absolutePattern, options: [.caseInsensitive]) {
-            let range = NSRange(stripped.startIndex..., in: stripped)
-            if let match = regex.firstMatch(in: stripped, options: [], range: range),
-               let pathRange = Range(match.range, in: stripped) {
-                return String(stripped[pathRange])
+        if stripped.hasPrefix("/") {
+            let absolutePattern = #"/[^`'\"()\n]+?\.(?:png|jpg|jpeg|gif|webp)"#
+            if let regex = try? NSRegularExpression(pattern: absolutePattern, options: [.caseInsensitive]) {
+                let range = NSRange(stripped.startIndex..., in: stripped)
+                if let match = regex.firstMatch(in: stripped, options: [], range: range),
+                   let pathRange = Range(match.range, in: stripped) {
+                    return String(stripped[pathRange])
+                }
             }
         }
 
@@ -174,7 +208,12 @@ enum ChatArtifactResolution {
         return rawPath.removingPercentEncoding ?? rawPath
     }
 
-    private static func resolveInlineArtifact(title: String, rawReference: String, serverURL: String) -> ChatArtifact? {
+    private static func resolveInlineArtifact(
+        title: String,
+        rawReference: String,
+        serverURL: String,
+        workspacePath: String?
+    ) -> ChatArtifact? {
         let trimmed = rawReference.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
         if lower.contains("path/to/") || lower.contains("absolute/path") {
@@ -202,7 +241,7 @@ enum ChatArtifactResolution {
             )
         }
 
-        let path = extractArtifactPath(from: trimmed)
+        let path = absolutizedPath(extractArtifactPath(from: trimmed), workspacePath: workspacePath)
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         let mime = inferArtifactMimeType(from: fileName)
         return ChatArtifact(
@@ -227,6 +266,23 @@ enum ChatArtifactResolution {
         return trimmed.removingPercentEncoding ?? trimmed
     }
 
+    private static func isImageArtifact(_ artifact: ChatArtifact) -> Bool {
+        if artifact.type.lowercased() == "image" {
+            return true
+        }
+        let lowerMime = (artifact.mime ?? "").lowercased()
+        if lowerMime.hasPrefix("image/") {
+            return true
+        }
+        let reference = artifact.path ?? artifact.url ?? artifact.title
+        switch URL(fileURLWithPath: reference).pathExtension.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "heif":
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func inferArtifactType(fileName: String, mimeType: String?) -> String {
         let lowerMime = (mimeType ?? "").lowercased()
         if lowerMime.hasPrefix("image/") {
@@ -236,12 +292,32 @@ enum ChatArtifactResolution {
             return "code"
         }
         switch URL(fileURLWithPath: fileName).pathExtension.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "heif":
+            return "image"
         case "c", "cc", "cpp", "css", "go", "h", "hpp", "html", "java", "js", "json", "kt", "md", "mjs",
              "php", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml":
             return "code"
         default:
             return "file"
         }
+    }
+
+    private static func absolutizedPath(_ rawPath: String, workspacePath: String?) -> String {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("/"),
+              !trimmed.hasPrefix("~") else {
+            return trimmed
+        }
+        let base = (workspacePath ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty, base != "~", base != "." else {
+            return trimmed
+        }
+        if base == "/" {
+            return "/" + trimmed
+        }
+        let normalizedBase = base.hasSuffix("/") ? String(base.dropLast()) : base
+        return normalizedBase + "/" + trimmed
     }
 
     private static func isBackendFileURL(_ url: URL, serverURL: String) -> Bool {
@@ -323,8 +399,12 @@ func _test_extractImagePath(_ text: String) -> String {
     ChatArtifactResolution.extractImagePath(from: text)
 }
 
-func _test_resolveImageURL(_ raw: String, serverURL: String) -> String? {
-    ChatArtifactResolution.resolveImageURL(from: raw, serverURL: serverURL)
+func _test_resolveImageURL(_ raw: String, serverURL: String, workspacePath: String? = nil) -> String? {
+    ChatArtifactResolution.resolveImageURL(from: raw, serverURL: serverURL, workspacePath: workspacePath)
+}
+
+func _test_resolveFileURL(_ raw: String, serverURL: String, workspacePath: String? = nil) -> String? {
+    ChatArtifactResolution.resolveFileURL(from: raw, serverURL: serverURL, workspacePath: workspacePath)
 }
 
 func _test_resolveArtifactURL(path: String, serverURL: String) -> String? {
@@ -332,8 +412,12 @@ func _test_resolveArtifactURL(path: String, serverURL: String) -> String? {
     return APIClient()._test_resolveArtifactURL(serverURL: serverURL, artifact: artifact)?.absoluteString
 }
 
-func _test_extractInlineArtifactTitles(_ text: String, serverURL: String) -> [String] {
-    ChatArtifactResolution.extractInlineMediaReferences(from: text, serverURL: serverURL).map { reference in
+func _test_extractInlineArtifactTitles(_ text: String, serverURL: String, workspacePath: String? = nil) -> [String] {
+    ChatArtifactResolution.extractInlineMediaReferences(
+        from: text,
+        serverURL: serverURL,
+        workspacePath: workspacePath
+    ).map { reference in
         switch reference.segment.kind {
         case let .artifact(item):
             return item.title
@@ -342,6 +426,19 @@ func _test_extractInlineArtifactTitles(_ text: String, serverURL: String) -> [St
         default:
             return reference.segment.content
         }
+    }
+}
+
+func _test_extractInlineArtifactPaths(_ text: String, serverURL: String, workspacePath: String? = nil) -> [String] {
+    ChatArtifactResolution.extractInlineMediaReferences(
+        from: text,
+        serverURL: serverURL,
+        workspacePath: workspacePath
+    ).compactMap { reference in
+        if case let .artifact(item) = reference.segment.kind {
+            return item.path
+        }
+        return nil
     }
 }
 #endif

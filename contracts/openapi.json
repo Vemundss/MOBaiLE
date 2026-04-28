@@ -452,6 +452,17 @@
             "title": "Is Directory",
             "type": "boolean"
           },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -459,6 +470,17 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
           }
         },
         "required": [

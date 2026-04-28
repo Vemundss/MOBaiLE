@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+from app.models.schemas import ChatArtifact
 from app.runtime_environment import RuntimeEnvironment
 from app.workspace_service import WorkspaceService
 
@@ -38,6 +39,10 @@ def test_workspace_service_lists_directories_before_files(monkeypatch, tmp_path:
     assert "src" in names
     assert "README.md" in names
     assert names.index("src") < names.index("README.md")
+    readme = next(entry for entry in listing.entries if entry.name == "README.md")
+    assert readme.size_bytes == 5
+    assert readme.mime in {"text/markdown", "text/x-markdown"}
+    assert next(entry for entry in listing.entries if entry.name == "src").size_bytes is None
     assert listing.truncated is False
 
 
@@ -150,3 +155,22 @@ def test_workspace_service_rejects_empty_uploads(monkeypatch, tmp_path: Path) ->
             content_type="text/plain",
             file_bytes=b"",
         )
+
+
+def test_workspace_service_normalizes_backend_file_url_attachments(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    service = WorkspaceService(env)
+    sample = env.default_workdir / "notes.txt"
+    sample.parent.mkdir(parents=True, exist_ok=True)
+    sample.write_text("hello", encoding="utf-8")
+
+    [validated] = service.validate_attachment_artifacts([
+        ChatArtifact(
+            type="file",
+            title="notes.txt",
+            url=f"https://stale-host.example/v1/files?path={sample}",
+        )
+    ])
+
+    assert validated.path == str(sample)
+    assert validated.url is None

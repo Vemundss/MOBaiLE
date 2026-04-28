@@ -1,3 +1,4 @@
+import QuickLook
 import SwiftUI
 
 struct WorkspaceBrowserSheet: View {
@@ -8,6 +9,11 @@ struct WorkspaceBrowserSheet: View {
     @Binding var isCreatingDirectory: Bool
     let onDismiss: () -> Void
     private let directoryBrowserPanelID = "workspace-directory-browser-panel"
+    private let maxPreviewFileBytes: Int64 = AttachmentDraftPolicy.defaultMaxAttachmentBytes
+    @State private var openingFilePath: String?
+    @State private var fileOpenError: String = ""
+    @State private var previewDocument: PreviewDocument?
+    @State private var textPreviewDocument: TextPreviewDocument?
 
     var body: some View {
         NavigationStack {
@@ -41,6 +47,20 @@ struct WorkspaceBrowserSheet: View {
                    !vm.isLoadingDirectoryBrowser {
                     await vm.refreshDirectoryBrowser()
                 }
+            }
+            .alert("Open failed", isPresented: Binding(
+                get: { !fileOpenError.isEmpty },
+                set: { if !$0 { fileOpenError = "" } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(fileOpenError)
+            }
+            .sheet(item: $previewDocument) { preview in
+                FilePreviewSheet(url: preview.url, title: preview.title)
+            }
+            .sheet(item: $textPreviewDocument) { preview in
+                TextFilePreviewSheet(document: preview)
             }
         }
     }
@@ -98,7 +118,7 @@ struct WorkspaceBrowserSheet: View {
                         } else {
                             ForEach(vm.directoryBreadcrumbs) { crumb in
                                 Button(crumb.title) {
-                                    Task { await vm.openDirectory(path: crumb.path) }
+                                    Task { await openDirectoryFromBrowserControls(path: crumb.path) }
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
@@ -107,7 +127,7 @@ struct WorkspaceBrowserSheet: View {
                     }
                 }
                 Button {
-                    Task { await vm.navigateDirectoryUp() }
+                    Task { await navigateDirectoryUpFromBrowserControls() }
                 } label: {
                     Image(systemName: "arrow.up")
                 }
@@ -245,7 +265,7 @@ struct WorkspaceBrowserSheet: View {
                 tint: .green,
                 actionTitle: "Show"
             ) {
-                Task { await vm.openDirectory(path: selectedWorkspacePath) }
+                Task { await openDirectoryFromBrowserControls(path: selectedWorkspacePath) }
             }
 
             if !backendRootPath.isEmpty, backendRootPath != selectedWorkspacePath {
@@ -256,7 +276,7 @@ struct WorkspaceBrowserSheet: View {
                     tint: .secondary,
                     actionTitle: "Go"
                 ) {
-                    Task { await vm.openDirectory(path: backendRootPath) }
+                    Task { await openDirectoryFromBrowserControls(path: backendRootPath) }
                 }
             }
         }
@@ -279,7 +299,7 @@ struct WorkspaceBrowserSheet: View {
                     tint: path == selectedWorkspacePath ? .green : .blue,
                     actionTitle: "Open"
                 ) {
-                    Task { await vm.openDirectory(path: path) }
+                    Task { await openDirectoryFromBrowserControls(path: path) }
                 }
             }
         }
@@ -388,36 +408,12 @@ struct WorkspaceBrowserSheet: View {
             LazyVStack(spacing: 8) {
                 ForEach(vm.filteredDirectoryBrowserEntries) { entry in
                     Button {
-                        Task { await vm.openDirectoryEntry(entry) }
+                        Task { await openDirectoryEntryOrPreviewFile(entry) }
                     } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(entry.isDirectory ? .blue : .secondary)
-                            Text(entry.name)
-                                .font(.footnote.monospaced())
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if entry.isDirectory {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color(.systemBackground))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
-                        )
+                        directoryEntryRow(entry)
                     }
                     .buttonStyle(.plain)
-                    .disabled(!entry.isDirectory)
-                    .opacity(entry.isDirectory ? 1 : 0.82)
+                    .disabled(vm.isLoadingDirectoryBrowser || openingFilePath == entry.path)
                 }
             }
         }
@@ -433,5 +429,177 @@ struct WorkspaceBrowserSheet: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func directoryEntryRow(_ entry: DirectoryEntry) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: directoryEntryIconName(entry))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(directoryEntryTint(entry))
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.name)
+                    .font(.footnote.monospaced())
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(directoryEntryDetailText(entry))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            if openingFilePath == entry.path {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: entry.isDirectory ? "chevron.right" : "doc.text.magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityLabel(directoryEntryAccessibilityLabel(entry))
+    }
+
+    @MainActor
+    private func openDirectoryEntryOrPreviewFile(_ entry: DirectoryEntry) async {
+        dismissCreateDirectoryEditor()
+        if entry.isDirectory {
+            await vm.openDirectoryEntry(entry)
+            return
+        }
+        if let size = entry.sizeBytes, size > maxPreviewFileBytes {
+            fileOpenError = "\(entry.name) is \(humanReadableAttachmentSize(size)). Preview files must be \(humanReadableAttachmentSize(maxPreviewFileBytes)) or smaller."
+            return
+        }
+
+        openingFilePath = entry.path
+        defer { openingFilePath = nil }
+
+        do {
+            let localURL = try await vm.downloadDirectoryFileForPreview(entry)
+            if TextPreviewLoader.canPreview(fileName: localURL.lastPathComponent, mimeType: entry.mime) {
+                do {
+                    let text = try await TextPreviewLoader.loadText(from: localURL)
+                    textPreviewDocument = TextPreviewDocument(url: localURL, title: entry.name, text: text)
+                    return
+                } catch TextPreviewError.tooLarge {
+                    // Let Quick Look handle larger text files when iOS supports the format.
+                } catch {
+                    if !QLPreviewController.canPreview(localURL as NSURL) {
+                        throw error
+                    }
+                }
+            }
+            if QLPreviewController.canPreview(localURL as NSURL) {
+                previewDocument = PreviewDocument(url: localURL, title: entry.name)
+            } else {
+                fileOpenError = "This file type can't be previewed on iPhone."
+            }
+        } catch {
+            fileOpenError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func openDirectoryFromBrowserControls(path: String) async {
+        dismissCreateDirectoryEditor()
+        await vm.openDirectory(path: path)
+    }
+
+    @MainActor
+    private func navigateDirectoryUpFromBrowserControls() async {
+        dismissCreateDirectoryEditor()
+        await vm.navigateDirectoryUp()
+    }
+
+    @MainActor
+    private func dismissCreateDirectoryEditor() {
+        guard isCreatingDirectory || !newDirectoryName.isEmpty else { return }
+        isCreatingDirectory = false
+        newDirectoryName = ""
+    }
+
+    private func directoryEntryIconName(_ entry: DirectoryEntry) -> String {
+        guard !entry.isDirectory else { return "folder.fill" }
+        let lowerMime = (entry.mime ?? "").lowercased()
+        if lowerMime.hasPrefix("image/") {
+            return "photo"
+        }
+        if lowerMime.contains("pdf") {
+            return "doc.richtext"
+        }
+        switch VoiceAgentDirectoryBrowser.artifactType(for: entry) {
+        case "image":
+            return "photo"
+        case "code":
+            return "chevron.left.forwardslash.chevron.right"
+        default:
+            return "doc.text"
+        }
+    }
+
+    private func directoryEntryTint(_ entry: DirectoryEntry) -> Color {
+        guard !entry.isDirectory else { return .blue }
+        switch VoiceAgentDirectoryBrowser.artifactType(for: entry) {
+        case "image":
+            return .purple
+        case "code":
+            return .green
+        default:
+            return .secondary
+        }
+    }
+
+    private func directoryEntryDetailText(_ entry: DirectoryEntry) -> String {
+        guard !entry.isDirectory else { return "Folder" }
+        var parts = [directoryEntryKindLabel(entry)]
+        if let size = entry.sizeBytes {
+            parts.append(humanReadableAttachmentSize(size))
+        }
+        if let mime = entry.mime?.trimmingCharacters(in: .whitespacesAndNewlines), !mime.isEmpty {
+            parts.append(mime)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func directoryEntryKindLabel(_ entry: DirectoryEntry) -> String {
+        let lowerMime = (entry.mime ?? "").lowercased()
+        if lowerMime.hasPrefix("image/") {
+            return "Image"
+        }
+        if lowerMime.contains("pdf") {
+            return "PDF"
+        }
+        if lowerMime.contains("zip") {
+            return "Archive"
+        }
+        switch VoiceAgentDirectoryBrowser.artifactType(for: entry) {
+        case "image":
+            return "Image"
+        case "code":
+            return "Text/code"
+        default:
+            return "File"
+        }
+    }
+
+    private func directoryEntryAccessibilityLabel(_ entry: DirectoryEntry) -> String {
+        if entry.isDirectory {
+            return "Open folder \(entry.name)"
+        }
+        return "Preview file \(entry.name), \(directoryEntryDetailText(entry))"
     }
 }

@@ -929,11 +929,38 @@ struct DirectoryEntry: Decodable, Identifiable {
     let name: String
     let path: String
     let isDirectory: Bool
+    let sizeBytes: Int64?
+    let mime: String?
 
     enum CodingKeys: String, CodingKey {
         case name
         case path
         case isDirectory = "is_directory"
+        case sizeBytes = "size_bytes"
+        case mime
+    }
+
+    init(
+        name: String,
+        path: String,
+        isDirectory: Bool,
+        sizeBytes: Int64? = nil,
+        mime: String? = nil
+    ) {
+        self.name = name
+        self.path = path
+        self.isDirectory = isDirectory
+        self.sizeBytes = sizeBytes
+        self.mime = mime
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        path = try container.decode(String.self, forKey: .path)
+        isDirectory = try container.decode(Bool.self, forKey: .isDirectory)
+        sizeBytes = try container.decodeIfPresent(Int64.self, forKey: .sizeBytes)
+        mime = try container.decodeIfPresent(String.self, forKey: .mime)
     }
 }
 

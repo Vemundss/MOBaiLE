@@ -20,6 +20,28 @@ extension VoiceAgentViewModel {
         await openDirectory(path: entry.path)
     }
 
+    func downloadDirectoryFileForPreview(_ entry: DirectoryEntry) async throws -> URL {
+        guard !entry.isDirectory else {
+            throw APIError.invalidURL
+        }
+        let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedServerURL.isEmpty, !token.isEmpty else {
+            throw APIError.missingCredentials
+        }
+        let artifact = ChatArtifact(
+            type: VoiceAgentDirectoryBrowser.artifactType(for: entry),
+            title: entry.name,
+            path: entry.path,
+            mime: entry.mime,
+            url: nil
+        )
+        return try await client.downloadArtifactToTemporaryFile(
+            serverURL: normalizedServerURL,
+            token: token,
+            artifact: artifact
+        )
+    }
+
     func navigateDirectoryUp() async {
         let current = directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !current.isEmpty else {

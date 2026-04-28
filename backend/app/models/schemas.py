@@ -195,6 +195,8 @@ class DirectoryEntry(BaseModel):
     name: str
     path: str
     is_directory: bool
+    size_bytes: int | None = None
+    mime: str | None = None
 
 
 class DirectoryListingResponse(BaseModel):

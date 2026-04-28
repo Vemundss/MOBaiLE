@@ -486,6 +486,9 @@ def test_directory_listing_endpoint(make_client, tmp_path: Path):
     assert payload["entries"][0]["name"] == "src"
     names = [item["name"] for item in payload["entries"]]
     assert "README.md" in names
+    readme = next(item for item in payload["entries"] if item["name"] == "README.md")
+    assert readme["size_bytes"] == 5
+    assert readme["mime"] in {"text/markdown", "text/x-markdown"}
     assert payload["truncated"] is False
 
 
