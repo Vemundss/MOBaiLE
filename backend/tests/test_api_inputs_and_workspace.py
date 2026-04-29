@@ -513,7 +513,65 @@ def test_file_inspect_endpoint_returns_metadata_and_text_preview(make_client, tm
     assert isinstance(payload["modified_at"], str)
     assert payload["text_preview"] == "# Title\n"
     assert payload["text_preview_bytes"] == 8
+    assert payload["text_preview_offset"] == 0
+    assert payload["text_preview_next_offset"] == 8
     assert payload["text_preview_truncated"] is True
+
+
+def test_file_inspect_endpoint_supports_preview_offset_and_search(make_client, tmp_path: Path):
+    notes = tmp_path / "notes.md"
+    notes.write_text("alpha\nBeta match\nmore text\nbeta again", encoding="utf-8")
+    client, token = make_client(
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path)},
+    )
+
+    resp = client.get(
+        "/v1/files/inspect",
+        headers=auth_headers(token),
+        params={
+            "path": str(notes),
+            "text_preview_bytes": "9",
+            "text_preview_offset": "6",
+            "text_search": "BETA",
+        },
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["text_preview"] == "Beta matc"
+    assert payload["text_preview_bytes"] == 9
+    assert payload["text_preview_offset"] == 6
+    assert payload["text_preview_next_offset"] == 15
+    assert payload["text_search_query"] == "BETA"
+    assert payload["text_search_match_count"] == 2
+    assert payload["text_search_matches"] == [
+        {"line_number": 2, "line_text": "Beta match"},
+        {"line_number": 4, "line_text": "beta again"},
+    ]
+
+
+def test_file_inspect_endpoint_reports_sensitive_preview_block(make_client, tmp_path: Path):
+    secret = tmp_path / ".env.local"
+    secret.write_text("TOKEN=private", encoding="utf-8")
+    client, token = make_client(
+        provider="mock",
+        extra_env={"VOICE_AGENT_FILE_ROOTS": str(tmp_path)},
+    )
+
+    resp = client.get(
+        "/v1/files/inspect",
+        headers=auth_headers(token),
+        params={"path": str(secret), "text_search": "TOKEN"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["text_preview"] is None
+    assert payload["preview_blocked_reason"] == "sensitive_path"
+    assert payload["text_search_query"] == "TOKEN"
+    assert payload["text_search_match_count"] == 0
+    assert payload["text_search_matches"] == []
 
 
 def test_file_inspect_endpoint_rejects_outside_allowed_roots(make_client, tmp_path: Path):

@@ -505,8 +505,15 @@ def get_file(path: str = Query(..., min_length=1)) -> FileResponse:
 def inspect_file(
     path: str = Query(..., min_length=1),
     text_preview_bytes: int = Query(64 * 1024, ge=0, le=256 * 1024),
+    text_preview_offset: int = Query(0, ge=0),
+    text_search: str | None = Query(None, max_length=1024),
 ) -> FileInspectionResponse:
-    return WORKSPACE_SERVICE.inspect_file(path, text_preview_bytes=text_preview_bytes)
+    return WORKSPACE_SERVICE.inspect_file(
+        path,
+        text_preview_bytes=text_preview_bytes,
+        text_preview_offset=text_preview_offset,
+        text_search=text_search,
+    )
 
 
 @app.get("/v1/directories", response_model=DirectoryListingResponse)

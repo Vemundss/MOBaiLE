@@ -25,6 +25,9 @@ from app.runtime_environment import RuntimeEnvironment
 
 DEFAULT_TEXT_PREVIEW_BYTES = 64 * 1024
 MAX_TEXT_PREVIEW_BYTES = 256 * 1024
+MAX_TEXT_SEARCH_BYTES = 4 * 1024 * 1024
+MAX_TEXT_SEARCH_MATCHES = 50
+MAX_TEXT_SEARCH_LINE_CHARS = 500
 
 
 @dataclass(frozen=True)
@@ -52,18 +55,27 @@ class WorkspaceService:
         raw_path: str,
         *,
         text_preview_bytes: int = DEFAULT_TEXT_PREVIEW_BYTES,
+        text_preview_offset: int = 0,
+        text_search: str | None = None,
     ) -> FileInspectionResponse:
         target = self._resolve_file_target(raw_path)
         stat = target.stat()
         size_bytes = stat.st_size
         mime = mimetypes.guess_type(target.name)[0]
         artifact_type = artifact_type_for_upload(target.name, mime)
-        text_preview, preview_byte_count, text_truncated = self._text_preview(
+        text_preview, preview_byte_count, text_truncated, next_offset, blocked_reason = self._text_preview(
             target,
             artifact_type=artifact_type,
             mime=mime,
             size_bytes=size_bytes,
             requested_bytes=text_preview_bytes,
+            offset=text_preview_offset,
+        )
+        search_query, search_match_count, search_matches = self._text_search(
+            target,
+            artifact_type=artifact_type,
+            mime=mime,
+            text_search=text_search,
         )
         image_width, image_height = self._image_dimensions(target, mime=mime)
         return FileInspectionResponse(
@@ -75,7 +87,13 @@ class WorkspaceService:
             modified_at=self._modified_at_from_stat(stat),
             text_preview=text_preview,
             text_preview_bytes=preview_byte_count,
+            text_preview_offset=max(text_preview_offset, 0),
+            text_preview_next_offset=next_offset,
             text_preview_truncated=text_truncated,
+            preview_blocked_reason=blocked_reason,
+            text_search_query=search_query,
+            text_search_match_count=search_match_count,
+            text_search_matches=search_matches,
             image_width=image_width,
             image_height=image_height,
         )
@@ -276,34 +294,93 @@ class WorkspaceService:
         mime: str | None,
         size_bytes: int,
         requested_bytes: int,
-    ) -> tuple[str | None, int, bool]:
+        offset: int,
+    ) -> tuple[str | None, int, bool, int | None, str | None]:
+        blocked_reason = self._preview_blocked_reason(target)
+        if blocked_reason is not None:
+            return None, 0, False, None, blocked_reason
         if not self._can_preview_text(target, artifact_type=artifact_type, mime=mime):
-            return None, 0, False
+            return None, 0, False, None, None
         limit = min(max(requested_bytes, 0), MAX_TEXT_PREVIEW_BYTES)
+        offset = max(offset, 0)
         if limit == 0:
-            return "", 0, size_bytes > 0
+            return "", 0, size_bytes > offset, None, None
         try:
-            data = target.open("rb").read(limit + 1)
+            with target.open("rb") as handle:
+                handle.seek(offset)
+                data = handle.read(limit + 1)
         except OSError as exc:
             raise HTTPException(status_code=403, detail="permission denied for file path") from exc
         preview_data = data[:limit]
+        has_more = len(data) > limit or size_bytes > offset + len(preview_data)
+        next_offset = offset + len(preview_data) if has_more else None
         for encoding in ("utf-8", "utf-16", "utf-16-le", "utf-16-be", "iso-8859-1"):
             try:
                 text = preview_data.decode(encoding)
-                return text, len(preview_data), len(data) > limit or size_bytes > len(preview_data)
+                return text, len(preview_data), has_more, next_offset, None
             except UnicodeDecodeError:
                 continue
-        return preview_data.decode("utf-8", errors="replace"), len(preview_data), len(data) > limit
+        return preview_data.decode("utf-8", errors="replace"), len(preview_data), has_more, next_offset, None
+
+    def _text_search(
+        self,
+        target: Path,
+        *,
+        artifact_type: str,
+        mime: str | None,
+        text_search: str | None,
+    ) -> tuple[str | None, int | None, list[dict[str, int | str]]]:
+        query = (text_search or "").strip()
+        if not query:
+            return None, None, []
+        if self._preview_blocked_reason(target) is not None:
+            return query, 0, []
+        if not self._can_preview_text(target, artifact_type=artifact_type, mime=mime):
+            return query, 0, []
+        try:
+            data = target.open("rb").read(MAX_TEXT_SEARCH_BYTES)
+        except OSError as exc:
+            raise HTTPException(status_code=403, detail="permission denied for file path") from exc
+
+        text = self._decode_text_bytes(data)
+        needle = query.casefold()
+        matches: list[dict[str, int | str]] = []
+        match_count = 0
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if needle not in line.casefold():
+                continue
+            match_count += 1
+            if len(matches) >= MAX_TEXT_SEARCH_MATCHES:
+                continue
+            matches.append(
+                {
+                    "line_number": line_number,
+                    "line_text": line[:MAX_TEXT_SEARCH_LINE_CHARS],
+                }
+            )
+        return query, match_count, matches
+
+    @staticmethod
+    def _decode_text_bytes(data: bytes) -> str:
+        for encoding in ("utf-8", "utf-16", "utf-16-le", "utf-16-be", "iso-8859-1"):
+            try:
+                return data.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return data.decode("utf-8", errors="replace")
 
     def _can_preview_text(self, target: Path, *, artifact_type: str, mime: str | None) -> bool:
-        if self._is_sensitive_preview_path(target):
-            return False
         if artifact_type == "code":
             return True
         lower_mime = (mime or "").lower()
         if lower_mime.startswith("text/"):
             return True
         return any(token in lower_mime for token in ("json", "xml", "yaml", "toml"))
+
+    def _preview_blocked_reason(self, target: Path) -> str | None:
+        if self._is_sensitive_preview_path(target):
+            return "sensitive_path"
+        return None
 
     def _is_sensitive_preview_path(self, target: Path) -> bool:
         lower_name = target.name.lower()

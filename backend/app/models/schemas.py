@@ -201,6 +201,11 @@ class DirectoryEntry(BaseModel):
     modified_at: datetime | None = None
 
 
+class FileTextSearchMatch(BaseModel):
+    line_number: int
+    line_text: str
+
+
 class FileInspectionResponse(BaseModel):
     name: str
     path: str
@@ -210,7 +215,13 @@ class FileInspectionResponse(BaseModel):
     modified_at: datetime
     text_preview: str | None = None
     text_preview_bytes: int = 0
+    text_preview_offset: int = 0
+    text_preview_next_offset: int | None = None
     text_preview_truncated: bool = False
+    preview_blocked_reason: str | None = None
+    text_search_query: str | None = None
+    text_search_match_count: int | None = None
+    text_search_matches: list[FileTextSearchMatch] = Field(default_factory=list)
     image_width: int | None = None
     image_height: int | None = None
 

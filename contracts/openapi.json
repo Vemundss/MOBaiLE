@@ -713,6 +713,17 @@
             "title": "Path",
             "type": "string"
           },
+          "preview_blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Blocked Reason"
+          },
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
@@ -733,10 +744,55 @@
             "title": "Text Preview Bytes",
             "type": "integer"
           },
+          "text_preview_next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Preview Next Offset"
+          },
+          "text_preview_offset": {
+            "default": 0,
+            "title": "Text Preview Offset",
+            "type": "integer"
+          },
           "text_preview_truncated": {
             "default": false,
             "title": "Text Preview Truncated",
             "type": "boolean"
+          },
+          "text_search_match_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Search Match Count"
+          },
+          "text_search_matches": {
+            "items": {
+              "$ref": "#/components/schemas/FileTextSearchMatch"
+            },
+            "title": "Text Search Matches",
+            "type": "array"
+          },
+          "text_search_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Search Query"
           }
         },
         "required": [
@@ -747,6 +803,24 @@
           "modified_at"
         ],
         "title": "FileInspectionResponse",
+        "type": "object"
+      },
+      "FileTextSearchMatch": {
+        "properties": {
+          "line_number": {
+            "title": "Line Number",
+            "type": "integer"
+          },
+          "line_text": {
+            "title": "Line Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line_number",
+          "line_text"
+        ],
+        "title": "FileTextSearchMatch",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -2369,6 +2443,34 @@
               "minimum": 0,
               "title": "Text Preview Bytes",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "text_preview_offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Text Preview Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "text_search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Text Search"
             }
           }
         ],
