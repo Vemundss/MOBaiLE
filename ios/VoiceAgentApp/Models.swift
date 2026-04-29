@@ -984,6 +984,12 @@ struct FileInspectionResponse: Decodable {
     let textPreview: String?
     let textPreviewBytes: Int
     let textPreviewTruncated: Bool
+    let textPreviewOffset: Int
+    let textPreviewNextOffset: Int?
+    let previewBlockedReason: String?
+    let textSearchQuery: String?
+    let textSearchMatchCount: Int?
+    let textSearchMatches: [TextSearchMatch]
     let imageWidth: Int?
     let imageHeight: Int?
 
@@ -992,6 +998,44 @@ struct FileInspectionResponse: Decodable {
             return "\(modifiedAt):\(sizeBytes)"
         }
         return "size:\(sizeBytes)"
+    }
+
+    init(
+        name: String,
+        path: String,
+        sizeBytes: Int64,
+        mime: String?,
+        artifactType: String,
+        modifiedAt: String?,
+        textPreview: String?,
+        textPreviewBytes: Int,
+        textPreviewTruncated: Bool,
+        textPreviewOffset: Int = 0,
+        textPreviewNextOffset: Int? = nil,
+        previewBlockedReason: String? = nil,
+        textSearchQuery: String? = nil,
+        textSearchMatchCount: Int? = nil,
+        textSearchMatches: [TextSearchMatch] = [],
+        imageWidth: Int?,
+        imageHeight: Int?
+    ) {
+        self.name = name
+        self.path = path
+        self.sizeBytes = sizeBytes
+        self.mime = mime
+        self.artifactType = artifactType
+        self.modifiedAt = modifiedAt
+        self.textPreview = textPreview
+        self.textPreviewBytes = textPreviewBytes
+        self.textPreviewTruncated = textPreviewTruncated
+        self.textPreviewOffset = textPreviewOffset
+        self.textPreviewNextOffset = textPreviewNextOffset
+        self.previewBlockedReason = previewBlockedReason
+        self.textSearchQuery = textSearchQuery
+        self.textSearchMatchCount = textSearchMatchCount
+        self.textSearchMatches = textSearchMatches
+        self.imageWidth = imageWidth
+        self.imageHeight = imageHeight
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1004,8 +1048,46 @@ struct FileInspectionResponse: Decodable {
         case textPreview = "text_preview"
         case textPreviewBytes = "text_preview_bytes"
         case textPreviewTruncated = "text_preview_truncated"
+        case textPreviewOffset = "text_preview_offset"
+        case textPreviewNextOffset = "text_preview_next_offset"
+        case previewBlockedReason = "preview_blocked_reason"
+        case textSearchQuery = "text_search_query"
+        case textSearchMatchCount = "text_search_match_count"
+        case textSearchMatches = "text_search_matches"
         case imageWidth = "image_width"
         case imageHeight = "image_height"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        path = try container.decode(String.self, forKey: .path)
+        sizeBytes = try container.decode(Int64.self, forKey: .sizeBytes)
+        mime = try container.decodeIfPresent(String.self, forKey: .mime)
+        artifactType = try container.decode(String.self, forKey: .artifactType)
+        modifiedAt = try container.decodeIfPresent(String.self, forKey: .modifiedAt)
+        textPreview = try container.decodeIfPresent(String.self, forKey: .textPreview)
+        textPreviewBytes = try container.decodeIfPresent(Int.self, forKey: .textPreviewBytes) ?? 0
+        textPreviewTruncated = try container.decodeIfPresent(Bool.self, forKey: .textPreviewTruncated) ?? false
+        textPreviewOffset = try container.decodeIfPresent(Int.self, forKey: .textPreviewOffset) ?? 0
+        textPreviewNextOffset = try container.decodeIfPresent(Int.self, forKey: .textPreviewNextOffset)
+        previewBlockedReason = try container.decodeIfPresent(String.self, forKey: .previewBlockedReason)
+        textSearchQuery = try container.decodeIfPresent(String.self, forKey: .textSearchQuery)
+        textSearchMatchCount = try container.decodeIfPresent(Int.self, forKey: .textSearchMatchCount)
+        textSearchMatches = try container.decodeIfPresent([TextSearchMatch].self, forKey: .textSearchMatches) ?? []
+        imageWidth = try container.decodeIfPresent(Int.self, forKey: .imageWidth)
+        imageHeight = try container.decodeIfPresent(Int.self, forKey: .imageHeight)
+    }
+}
+
+struct TextSearchMatch: Decodable, Identifiable, Equatable {
+    var id: String { "\(lineNumber):\(lineText)" }
+    let lineNumber: Int
+    let lineText: String
+
+    enum CodingKeys: String, CodingKey {
+        case lineNumber = "line_number"
+        case lineText = "line_text"
     }
 }
 

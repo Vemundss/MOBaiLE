@@ -36,7 +36,7 @@ struct MessageBubble: View {
             Text(artifactOpenError)
         }
         .sheet(item: $previewDocument) { preview in
-            FilePreviewSheet(url: preview.url, title: preview.title)
+            FilePreviewSheet(url: preview.url, title: preview.title, originalPath: preview.originalPath)
         }
         .sheet(item: $textPreviewDocument) { preview in
             TextFilePreviewSheet(document: preview)
@@ -157,11 +157,22 @@ struct MessageBubble: View {
 
         do {
             let downloadArtifact = normalizedArtifactForDownload(artifact)
+            let previewSource = TextPreviewSource(
+                serverURL: serverURL,
+                token: apiToken,
+                artifact: downloadArtifact
+            )
             let inspection = try? await client.inspectArtifactFile(
                 serverURL: serverURL,
                 token: apiToken,
                 artifact: downloadArtifact
             )
+            if let blockedReason = inspection?.previewBlockedReason {
+                await MainActor.run {
+                    artifactOpenError = textPreviewBlockedMessage(for: blockedReason)
+                }
+                return
+            }
             if let inspection, let text = inspection.textPreview {
                 let previewURL = try await TextPreviewLoader.writePreviewTextToTemporaryFile(
                     title: artifact.title,
@@ -174,7 +185,15 @@ struct MessageBubble: View {
                         text: text,
                         isTruncated: inspection.textPreviewTruncated,
                         sizeBytes: inspection.sizeBytes,
-                        modifiedAt: inspection.modifiedAt
+                        modifiedAt: inspection.modifiedAt,
+                        previewOffset: inspection.textPreviewOffset,
+                        nextOffset: inspection.textPreviewNextOffset,
+                        previewBlockedReason: inspection.previewBlockedReason,
+                        searchMatches: inspection.textSearchMatches,
+                        searchMatchCount: inspection.textSearchMatchCount,
+                        language: FilePreviewLanguage.infer(fileName: artifact.title, mime: inspection.mime ?? artifact.mime),
+                        source: previewSource,
+                        originalPath: inspection.path
                     )
                 }
                 return
@@ -200,7 +219,10 @@ struct MessageBubble: View {
                             title: artifact.title,
                             text: text,
                             sizeBytes: inspection?.sizeBytes,
-                            modifiedAt: inspection?.modifiedAt
+                            modifiedAt: inspection?.modifiedAt,
+                            language: FilePreviewLanguage.infer(fileName: artifact.title, mime: inspection?.mime ?? artifact.mime),
+                            source: previewSource,
+                            originalPath: inspection?.path ?? artifact.path ?? artifact.url
                         )
                     }
                     return
@@ -214,7 +236,11 @@ struct MessageBubble: View {
             }
             if QLPreviewController.canPreview(localURL as NSURL) {
                 await MainActor.run {
-                    previewDocument = PreviewDocument(url: localURL, title: artifact.title)
+                    previewDocument = PreviewDocument(
+                        url: localURL,
+                        title: artifact.title,
+                        originalPath: inspection?.path ?? artifact.path ?? artifact.url
+                    )
                 }
             } else {
                 await MainActor.run {
@@ -246,6 +272,13 @@ struct MessageBubble: View {
             mime: artifact.mime,
             url: nil
         )
+    }
+
+    private func textPreviewBlockedMessage(for reason: String) -> String {
+        if reason == "sensitive_path" {
+            return "Text preview is blocked for sensitive paths on the host."
+        }
+        return "Text preview is blocked for this file."
     }
 }
 

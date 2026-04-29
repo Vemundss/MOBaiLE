@@ -532,7 +532,15 @@ struct DraftAttachmentChip: View {
 struct FilePreviewSheet: View {
     let url: URL
     let title: String?
+    let originalPath: String?
     @Environment(\.dismiss) private var dismiss
+    @State private var copiedPath = false
+
+    init(url: URL, title: String?, originalPath: String? = nil) {
+        self.url = url
+        self.title = title
+        self.originalPath = originalPath
+    }
 
     var body: some View {
         NavigationStack {
@@ -540,6 +548,27 @@ struct FilePreviewSheet: View {
                 .navigationTitle((title ?? url.lastPathComponent).trimmingCharacters(in: .whitespacesAndNewlines))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Share \(title ?? url.lastPathComponent)")
+
+                        if let pathForActions {
+                            Button {
+                                UIPasteboard.general.string = pathForActions
+                                copiedPath = true
+                                Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                                    copiedPath = false
+                                }
+                            } label: {
+                                Image(systemName: copiedPath ? "checkmark" : "link")
+                            }
+                            .accessibilityLabel(copiedPath ? "Copied path" : "Copy file path")
+                        }
+                    }
+
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") {
                             dismiss()
@@ -548,12 +577,34 @@ struct FilePreviewSheet: View {
                 }
         }
     }
+
+    private var pathForActions: String? {
+        let raw = (originalPath ?? url.path).trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? nil : raw
+    }
 }
 
 struct PreviewDocument: Identifiable {
     let id = UUID()
     let url: URL
     let title: String
+    let originalPath: String?
+
+    init(url: URL, title: String, originalPath: String? = nil) {
+        self.url = url
+        self.title = title
+        self.originalPath = originalPath
+    }
+}
+
+struct TextPreviewSource {
+    let serverURL: String
+    let token: String
+    let artifact: ChatArtifact
+
+    var originalPath: String? {
+        artifact.path ?? artifact.url
+    }
 }
 
 struct TextPreviewDocument: Identifiable {
@@ -564,6 +615,14 @@ struct TextPreviewDocument: Identifiable {
     let isTruncated: Bool
     let sizeBytes: Int64?
     let modifiedAt: String?
+    let previewOffset: Int
+    let nextOffset: Int?
+    let previewBlockedReason: String?
+    let searchMatches: [TextSearchMatch]
+    let searchMatchCount: Int?
+    let language: String?
+    let source: TextPreviewSource?
+    let originalPath: String?
 
     init(
         url: URL,
@@ -571,7 +630,15 @@ struct TextPreviewDocument: Identifiable {
         text: String,
         isTruncated: Bool = false,
         sizeBytes: Int64? = nil,
-        modifiedAt: String? = nil
+        modifiedAt: String? = nil,
+        previewOffset: Int = 0,
+        nextOffset: Int? = nil,
+        previewBlockedReason: String? = nil,
+        searchMatches: [TextSearchMatch] = [],
+        searchMatchCount: Int? = nil,
+        language: String? = nil,
+        source: TextPreviewSource? = nil,
+        originalPath: String? = nil
     ) {
         self.url = url
         self.title = title
@@ -579,6 +646,14 @@ struct TextPreviewDocument: Identifiable {
         self.isTruncated = isTruncated
         self.sizeBytes = sizeBytes
         self.modifiedAt = modifiedAt
+        self.previewOffset = previewOffset
+        self.nextOffset = nextOffset
+        self.previewBlockedReason = previewBlockedReason
+        self.searchMatches = searchMatches
+        self.searchMatchCount = searchMatchCount
+        self.language = language ?? FilePreviewLanguage.infer(fileName: title, mime: nil)
+        self.source = source
+        self.originalPath = originalPath ?? source?.originalPath
     }
 }
 
@@ -586,12 +661,32 @@ struct TextFilePreviewSheet: View {
     let document: TextPreviewDocument
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
+    @State private var copiedPath = false
     @State private var showsLineNumbers = false
     @State private var wrapsLines = true
     @State private var searchText = ""
+    @State private var previewText: String
+    @State private var nextOffset: Int?
+    @State private var previewIsTruncated: Bool
+    @State private var serverSearchQuery: String?
+    @State private var serverSearchMatches: [TextSearchMatch]
+    @State private var serverSearchMatchCount: Int?
+    @State private var isLoadingMore = false
+    @State private var isSearchingFullFile = false
+    @State private var previewActionError: String?
+
+    init(document: TextPreviewDocument) {
+        self.document = document
+        _previewText = State(initialValue: document.text)
+        _nextOffset = State(initialValue: document.nextOffset)
+        _previewIsTruncated = State(initialValue: document.isTruncated || document.nextOffset != nil)
+        _serverSearchQuery = State(initialValue: nil)
+        _serverSearchMatches = State(initialValue: document.searchMatches)
+        _serverSearchMatchCount = State(initialValue: document.searchMatchCount)
+    }
 
     private var displayText: String {
-        showsLineNumbers ? TextPreviewFormatter.numberedText(document.text) : document.text
+        showsLineNumbers ? TextPreviewFormatter.numberedText(previewText) : previewText
     }
 
     private var searchMatchCount: Int {
@@ -603,6 +698,34 @@ struct TextFilePreviewSheet: View {
             sizeBytes: document.sizeBytes,
             modifiedAt: document.modifiedAt
         )
+    }
+
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasServerSearchForCurrentQuery: Bool {
+        guard let serverSearchQuery else { return false }
+        return serverSearchQuery.caseInsensitiveCompare(trimmedSearchText) == .orderedSame
+    }
+
+    private var canSearchFullFile: Bool {
+        document.source != nil && !trimmedSearchText.isEmpty
+    }
+
+    private var searchSummaryText: String {
+        if hasServerSearchForCurrentQuery, let serverSearchMatchCount {
+            if serverSearchMatchCount > serverSearchMatches.count {
+                return "Showing \(serverSearchMatches.count) of \(serverSearchMatchCount) full-file matches"
+            }
+            return "\(serverSearchMatchCount) full-file \(serverSearchMatchCount == 1 ? "match" : "matches")"
+        }
+        return "\(searchMatchCount) visible \(searchMatchCount == 1 ? "match" : "matches")"
+    }
+
+    private var pathForActions: String? {
+        let raw = (document.originalPath ?? document.url.path).trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? nil : raw
     }
 
     var body: some View {
@@ -618,18 +741,44 @@ struct TextFilePreviewSheet: View {
                         .background(Color(.secondarySystemGroupedBackground))
                 }
 
-                if document.isTruncated {
-                    Label("Preview truncated to the first \(humanReadableAttachmentSize(Int64(document.text.utf8.count)))", systemImage: "text.page.badge.magnifyingglass")
+                if let blockedReason = document.previewBlockedReason {
+                    Label(blockedReason == "sensitive_path" ? "Sensitive path preview blocked" : "Text preview blocked", systemImage: "lock.shield")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal)
                         .padding(.vertical, 8)
                         .background(Color(.secondarySystemGroupedBackground))
+                } else if previewIsTruncated {
+                    HStack(spacing: 10) {
+                        Label("Preview loaded \(humanReadableAttachmentSize(Int64(previewText.utf8.count)))", systemImage: "text.page.badge.magnifyingglass")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        if nextOffset != nil {
+                            Button {
+                                Task { await loadMorePreview() }
+                            } label: {
+                                if isLoadingMore {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Text("Load More")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(document.source == nil || isLoadingMore)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemGroupedBackground))
                 }
 
                 ScrollView(wrapsLines ? [.vertical] : [.vertical, .horizontal]) {
-                    Text(TextPreviewFormatter.highlightedText(displayText, query: searchText))
+                    Text(TextPreviewFormatter.highlightedText(displayText, query: searchText, language: document.language))
                         .font(.system(.footnote, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(
@@ -640,19 +789,72 @@ struct TextFilePreviewSheet: View {
                 }
                 .background(Color(.systemBackground))
 
-                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("\(searchMatchCount) \(searchMatchCount == 1 ? "match" : "matches")")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .background(Color(.secondarySystemGroupedBackground))
+                if !trimmedSearchText.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            Text(searchSummaryText)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                            if canSearchFullFile {
+                                Button {
+                                    Task { await searchFullFile() }
+                                } label: {
+                                    if isSearchingFullFile {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Text("Search Full File")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(isSearchingFullFile)
+                            }
+                        }
+
+                        if hasServerSearchForCurrentQuery, !serverSearchMatches.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(serverSearchMatches.prefix(8))) { match in
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text("\(match.lineNumber)")
+                                            .font(.caption2.monospacedDigit().weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(minWidth: 28, alignment: .trailing)
+                                        Text(TextPreviewFormatter.highlightedText(match.lineText, query: searchText, language: document.language))
+                                            .font(.caption.monospaced())
+                                            .lineLimit(2)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemGroupedBackground))
                 }
             }
             .navigationTitle(document.title)
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find in file")
+            .onChange(of: searchText) {
+                let trimmed = trimmedSearchText
+                if trimmed.isEmpty || serverSearchQuery?.caseInsensitiveCompare(trimmed) != .orderedSame {
+                    serverSearchMatches = []
+                    serverSearchMatchCount = nil
+                    serverSearchQuery = nil
+                }
+            }
+            .alert("Preview failed", isPresented: Binding(
+                get: { previewActionError != nil },
+                set: { if !$0 { previewActionError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(previewActionError ?? "")
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
@@ -665,28 +867,89 @@ struct TextFilePreviewSheet: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    ShareLink(item: document.url) {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                    .accessibilityLabel("Share \(document.title)")
+                    Menu {
+                        ShareLink(item: document.url) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                        }
 
-                    Button {
-                        UIPasteboard.general.string = document.text
-                        copied = true
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 1_200_000_000)
-                            copied = false
+                        Button {
+                            UIPasteboard.general.string = previewText
+                            copied = true
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                                copied = false
+                            }
+                        } label: {
+                            Label(copied ? "Copied Text" : "Copy Text", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        }
+
+                        if let pathForActions {
+                            Button {
+                                UIPasteboard.general.string = pathForActions
+                                copiedPath = true
+                                Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                                    copiedPath = false
+                                }
+                            } label: {
+                                Label(copiedPath ? "Copied Path" : "Copy File Path", systemImage: copiedPath ? "checkmark" : "link")
+                            }
                         }
                     } label: {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        Image(systemName: "ellipsis.circle")
                     }
-                    .accessibilityLabel(copied ? "Copied" : "Copy text")
+                    .accessibilityLabel("File actions")
 
                     Button("Done") {
                         dismiss()
                     }
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func loadMorePreview() async {
+        guard let source = document.source, let nextOffset else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+
+        do {
+            let inspection = try await APIClient().inspectArtifactFile(
+                serverURL: source.serverURL,
+                token: source.token,
+                artifact: source.artifact,
+                textPreviewOffset: nextOffset
+            )
+            previewText += inspection.textPreview ?? ""
+            self.nextOffset = inspection.textPreviewNextOffset
+            previewIsTruncated = inspection.textPreviewNextOffset != nil || inspection.textPreviewTruncated
+        } catch {
+            previewActionError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func searchFullFile() async {
+        guard let source = document.source else { return }
+        let query = trimmedSearchText
+        guard !query.isEmpty else { return }
+
+        isSearchingFullFile = true
+        defer { isSearchingFullFile = false }
+
+        do {
+            let inspection = try await APIClient().inspectArtifactFile(
+                serverURL: source.serverURL,
+                token: source.token,
+                artifact: source.artifact,
+                textSearch: query
+            )
+            serverSearchQuery = inspection.textSearchQuery ?? query
+            serverSearchMatchCount = inspection.textSearchMatchCount
+            serverSearchMatches = inspection.textSearchMatches
+        } catch {
+            previewActionError = error.localizedDescription
         }
     }
 }
@@ -716,14 +979,133 @@ enum TextPreviewFormatter {
         return ranges
     }
 
-    static func highlightedText(_ text: String, query: String) -> AttributedString {
-        var attributed = AttributedString(text)
+    static func highlightedText(_ text: String, query: String, language: String? = nil) -> AttributedString {
+        var attributed = FilePreviewLanguage.highlightedText(text, language: language)
         for range in matchRanges(in: text, query: query) {
             guard let attributedRange = Range(range, in: attributed) else { continue }
             attributed[attributedRange].backgroundColor = Color.yellow.opacity(0.35)
             attributed[attributedRange].foregroundColor = Color.primary
         }
         return attributed
+    }
+}
+
+enum FilePreviewLanguage {
+    static func infer(fileName: String, mime: String?) -> String? {
+        let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        switch ext {
+        case "c", "cc", "cpp", "h", "hpp":
+            return "c"
+        case "css":
+            return "css"
+        case "csv", "tsv":
+            return "csv"
+        case "go":
+            return "go"
+        case "htm", "html":
+            return "html"
+        case "java", "kt":
+            return "java"
+        case "js", "mjs", "ts", "tsx":
+            return "javascript"
+        case "json", "jsonl", "ndjson":
+            return "json"
+        case "log":
+            return "log"
+        case "markdown", "md", "mdown", "mdtext", "mdwn", "mkd":
+            return "markdown"
+        case "php":
+            return "php"
+        case "py":
+            return "python"
+        case "rb":
+            return "ruby"
+        case "rs":
+            return "rust"
+        case "sh", "bash", "zsh":
+            return "shell"
+        case "sql":
+            return "sql"
+        case "swift":
+            return "swift"
+        case "toml", "yaml", "yml":
+            return "yaml"
+        case "xml", "svg":
+            return "xml"
+        default:
+            break
+        }
+
+        let lowerMime = (mime ?? "").lowercased()
+        if lowerMime.contains("json") { return "json" }
+        if lowerMime.contains("markdown") { return "markdown" }
+        if lowerMime.contains("csv") || lowerMime.contains("tab-separated") { return "csv" }
+        if lowerMime.contains("xml") || lowerMime.contains("svg") { return "xml" }
+        if lowerMime.hasPrefix("text/") { return "text" }
+        return nil
+    }
+
+    static func highlightedText(_ text: String, language: String?) -> AttributedString {
+        var attributed = AttributedString(text)
+        guard let language else { return attributed }
+
+        switch language {
+        case "json":
+            applyPattern(#""[^"\n]+"(?=\s*:)"#, in: text, to: &attributed, color: .purple)
+            applyPattern(#""(?:\\.|[^"\\])*""#, in: text, to: &attributed, color: .red)
+            applyPattern(#"\b(true|false|null)\b"#, in: text, to: &attributed, color: .blue)
+            applyPattern(#"\b\d+(?:\.\d+)?\b"#, in: text, to: &attributed, color: .orange)
+        case "markdown":
+            applyPattern(#"(?m)^#{1,6}\s.+$"#, in: text, to: &attributed, color: .blue)
+            applyPattern(#"`[^`\n]+`"#, in: text, to: &attributed, color: .purple)
+            applyPattern(#"\*\*[^*\n]+\*\*"#, in: text, to: &attributed, color: .primary)
+            applyPattern(#"(?m)^\s*[-*+]\s+"#, in: text, to: &attributed, color: .secondary)
+        case "csv", "log", "text":
+            break
+        case "yaml":
+            applyPattern(#"(?m)^[A-Za-z0-9_.-]+(?=\s*:)"#, in: text, to: &attributed, color: .purple)
+            applyPattern(#"(?m)#.*$"#, in: text, to: &attributed, color: .secondary)
+            applyPattern(#""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#, in: text, to: &attributed, color: .red)
+        case "shell", "python", "ruby":
+            applyPattern(#"(?m)#.*$"#, in: text, to: &attributed, color: .secondary)
+            applyPattern(#""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#, in: text, to: &attributed, color: .red)
+            applyPattern(commonKeywordPattern, in: text, to: &attributed, color: .blue)
+        case "html", "xml":
+            applyPattern(#"</?[A-Za-z0-9_.:-]+"#, in: text, to: &attributed, color: .blue)
+            applyPattern(#"\b[A-Za-z0-9_.:-]+(?=\=)"#, in: text, to: &attributed, color: .purple)
+            applyPattern(#""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#, in: text, to: &attributed, color: .red)
+        case "css":
+            applyPattern(#"(?m)/\*[\s\S]*?\*/"#, in: text, to: &attributed, color: .secondary)
+            applyPattern(#"[.#]?[A-Za-z0-9_-]+(?=\s*\{)"#, in: text, to: &attributed, color: .blue)
+            applyPattern(#"\b[A-Za-z-]+(?=\s*:)"#, in: text, to: &attributed, color: .purple)
+        default:
+            applyPattern(#"(?m)//.*$"#, in: text, to: &attributed, color: .secondary)
+            applyPattern(#"(?m)#.*$"#, in: text, to: &attributed, color: .secondary)
+            applyPattern(#""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#, in: text, to: &attributed, color: .red)
+            applyPattern(commonKeywordPattern, in: text, to: &attributed, color: .blue)
+            applyPattern(#"\b\d+(?:\.\d+)?\b"#, in: text, to: &attributed, color: .orange)
+        }
+
+        return attributed
+    }
+
+    private static let commonKeywordPattern = #"\b(async|await|break|case|catch|class|const|continue|def|do|else|enum|except|extension|false|final|for|from|func|function|guard|if|import|in|let|nil|null|private|public|return|self|static|struct|switch|throw|throws|true|try|var|while)\b"#
+
+    private static func applyPattern(
+        _ pattern: String,
+        in text: String,
+        to attributed: inout AttributedString,
+        color: Color
+    ) {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return }
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        for match in expression.matches(in: text, range: nsRange) {
+            guard let textRange = Range(match.range, in: text),
+                  let attributedRange = Range(textRange, in: attributed) else {
+                continue
+            }
+            attributed[attributedRange].foregroundColor = color
+        }
     }
 }
 
@@ -853,7 +1235,9 @@ enum LocalFileInspection {
         url: URL,
         name: String,
         mime: String?,
-        textPreviewBytes: Int
+        textPreviewBytes: Int,
+        textPreviewOffset: Int = 0,
+        textSearch: String? = nil
     ) async throws -> FileInspectionResponse {
         try await Task.detached(priority: .userInitiated) {
             let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
@@ -866,7 +1250,14 @@ enum LocalFileInspection {
                 url: url,
                 name: name,
                 mime: resolvedMime,
-                byteLimit: textPreviewBytes
+                byteLimit: textPreviewBytes,
+                offset: textPreviewOffset
+            )
+            let search = textSearchMatches(
+                url: url,
+                name: name,
+                mime: resolvedMime,
+                query: textSearch
             )
 
             return FileInspectionResponse(
@@ -879,6 +1270,11 @@ enum LocalFileInspection {
                 textPreview: preview.text,
                 textPreviewBytes: preview.bytes,
                 textPreviewTruncated: preview.truncated,
+                textPreviewOffset: max(textPreviewOffset, 0),
+                textPreviewNextOffset: preview.nextOffset,
+                textSearchQuery: search.query,
+                textSearchMatchCount: search.matchCount,
+                textSearchMatches: search.matches,
                 imageWidth: dimensions.width,
                 imageHeight: dimensions.height
             )
@@ -900,27 +1296,75 @@ enum LocalFileInspection {
         url: URL,
         name: String,
         mime: String,
-        byteLimit: Int
-    ) -> (text: String?, bytes: Int, truncated: Bool) {
+        byteLimit: Int,
+        offset: Int
+    ) -> (text: String?, bytes: Int, truncated: Bool, nextOffset: Int?) {
         let limit = max(0, byteLimit)
+        let safeOffset = max(0, offset)
         guard limit > 0, TextPreviewLoader.canPreview(fileName: name, mimeType: mime) else {
-            return (nil, 0, false)
+            return (nil, 0, false, nil)
         }
         do {
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
+            try handle.seek(toOffset: UInt64(safeOffset))
             let data = try handle.read(upToCount: limit + 1) ?? Data()
             let truncated = data.count > limit
             let previewData = truncated ? data.prefix(limit) : data[...]
             for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .isoLatin1] {
                 if let text = String(data: Data(previewData), encoding: encoding) {
-                    return (text, previewData.count, truncated)
+                    let nextOffset = truncated ? safeOffset + previewData.count : nil
+                    return (text, previewData.count, truncated, nextOffset)
                 }
             }
         } catch {
-            return (nil, 0, false)
+            return (nil, 0, false, nil)
         }
-        return (nil, 0, false)
+        return (nil, 0, false, nil)
+    }
+
+    private static func textSearchMatches(
+        url: URL,
+        name: String,
+        mime: String,
+        query: String?
+    ) -> (query: String?, matchCount: Int?, matches: [TextSearchMatch]) {
+        let needle = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !needle.isEmpty, TextPreviewLoader.canPreview(fileName: name, mimeType: mime) else {
+            return (nil, nil, [])
+        }
+
+        do {
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+            if let size = values?.fileSize, size > 8 * 1024 * 1024 {
+                return (needle, 0, [])
+            }
+            let data = try Data(contentsOf: url)
+            guard let text = decodedText(from: data) else {
+                return (needle, 0, [])
+            }
+            var count = 0
+            var matches: [TextSearchMatch] = []
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            for (index, line) in lines.enumerated() where line.range(of: needle, options: [.caseInsensitive]) != nil {
+                count += 1
+                if matches.count < 50 {
+                    matches.append(TextSearchMatch(lineNumber: index + 1, lineText: String(line)))
+                }
+            }
+            return (needle, count, matches)
+        } catch {
+            return (needle, 0, [])
+        }
+    }
+
+    private static func decodedText(from data: Data) -> String? {
+        for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .isoLatin1] {
+            if let text = String(data: data, encoding: encoding) {
+                return text
+            }
+        }
+        return nil
     }
 
     private static func imageDimensions(url: URL, kind: DraftAttachment.Kind) -> (width: Int?, height: Int?) {

@@ -276,6 +276,67 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(VoiceAgentDirectoryBrowser.artifactType(for: entry), "code")
     }
 
+    func testAttachmentKindClassifiesInspectableTextFormatsAsCode() {
+        let fileNames = [
+            "report.csv",
+            "table.tsv",
+            "server.log",
+            "events.jsonl",
+            "events.ndjson",
+            "README.markdown",
+            "CHANGELOG.mdown",
+            "notes.mkd",
+        ]
+
+        for fileName in fileNames {
+            XCTAssertEqual(
+                inferAttachmentKind(fileName: fileName, mimeType: "application/octet-stream"),
+                .code,
+                fileName
+            )
+        }
+    }
+
+    func testAttachmentKindClassifiesCommonPreviewImagesAsImage() {
+        let fileNames = [
+            "diagram.svg",
+            "photo.heic",
+            "photo.heif",
+        ]
+
+        for fileName in fileNames {
+            XCTAssertEqual(
+                inferAttachmentKind(fileName: fileName, mimeType: "application/octet-stream"),
+                .image,
+                fileName
+            )
+        }
+    }
+
+    func testDirectoryBrowserArtifactTypeUsesExtensionWhenMimeIsGeneric() {
+        let entries = [
+            DirectoryEntry(name: "events.jsonl", path: "/repo/events.jsonl", isDirectory: false, mime: "application/octet-stream"),
+            DirectoryEntry(name: "diagram.svg", path: "/repo/diagram.svg", isDirectory: false, mime: "application/octet-stream"),
+            DirectoryEntry(name: "brief.pdf", path: "/repo/brief.pdf", isDirectory: false, mime: "application/octet-stream"),
+        ]
+
+        XCTAssertEqual(entries.map { VoiceAgentDirectoryBrowser.artifactType(for: $0) }, [
+            "code",
+            "image",
+            "file",
+        ])
+    }
+
+    func testAttachmentMimeTypeFallsBackByExtensionAndTrimsProvidedMime() {
+        XCTAssertEqual(inferAttachmentMimeType(fileName: "events.ndjson"), "application/x-ndjson")
+        XCTAssertEqual(inferAttachmentMimeType(fileName: "table.tsv"), "text/tab-separated-values")
+        XCTAssertEqual(inferAttachmentMimeType(fileName: "brief.pdf"), "application/pdf")
+        XCTAssertEqual(inferAttachmentMimeType(fileName: "photo.heif"), "image/heif")
+        XCTAssertEqual(inferAttachmentMimeType(fileName: "unknown.nope"), "application/octet-stream")
+        XCTAssertEqual(inferAttachmentMimeType(fileName: "server.log", fallback: "  text/plain  "), "text/plain")
+        XCTAssertEqual(inferAttachmentMimeType(fileName: "notes.markdown", fallback: " "), "text/markdown")
+    }
+
     func testFileInspectionResponseDecodesPreviewMetadata() throws {
         let json = """
         {
@@ -287,7 +348,15 @@ final class VoiceAgentModelTests: XCTestCase {
           "modified_at":"2026-04-28T20:11:00Z",
           "text_preview":null,
           "text_preview_bytes":0,
+          "text_preview_offset":32,
+          "text_preview_next_offset":96,
           "text_preview_truncated":false,
+          "preview_blocked_reason":null,
+          "text_search_query":"needle",
+          "text_search_match_count":1,
+          "text_search_matches":[
+            {"line_number":4,"line_text":"needle match"}
+          ],
           "image_width":640,
           "image_height":360
         }
@@ -302,6 +371,13 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(inspected.previewCacheVersion, "2026-04-28T20:11:00Z:128")
         XCTAssertEqual(inspected.imageWidth, 640)
         XCTAssertEqual(inspected.imageHeight, 360)
+        XCTAssertEqual(inspected.textPreviewOffset, 32)
+        XCTAssertEqual(inspected.textPreviewNextOffset, 96)
+        XCTAssertEqual(inspected.textSearchQuery, "needle")
+        XCTAssertEqual(inspected.textSearchMatchCount, 1)
+        XCTAssertEqual(inspected.textSearchMatches, [
+            TextSearchMatch(lineNumber: 4, lineText: "needle match")
+        ])
     }
 
     func testFileInspectionResponseToleratesMissingModifiedAt() throws {
@@ -335,6 +411,49 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(_test_textPreviewMatchedSnippets("Alpha\nbeta\nalpha", query: "alpha"), ["Alpha", "alpha"])
         XCTAssertEqual(_test_textPreviewMatchCount(_test_numberedPreviewText(text), query: "1"), 1)
         XCTAssertEqual(_test_textPreviewMatchCount(text, query: "missing"), 0)
+    }
+
+    func testFilePreviewLanguageInfersCommonInspectableFormats() {
+        XCTAssertEqual(FilePreviewLanguage.infer(fileName: "script.py", mime: nil), "python")
+        XCTAssertEqual(FilePreviewLanguage.infer(fileName: "events.jsonl", mime: "application/octet-stream"), "json")
+        XCTAssertEqual(FilePreviewLanguage.infer(fileName: "diagram.svg", mime: nil), "xml")
+        XCTAssertEqual(FilePreviewLanguage.infer(fileName: "table.tsv", mime: nil), "csv")
+        XCTAssertEqual(FilePreviewLanguage.infer(fileName: "notes.unknown", mime: "text/plain"), "text")
+    }
+
+    func testLocalFileInspectionSupportsPreviewPaginationAndSearch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("server.log")
+        try "alpha\nneedle one\nbeta\nneedle two\n".write(to: url, atomically: true, encoding: .utf8)
+
+        let firstPage = try await LocalFileInspection.inspect(
+            url: url,
+            name: "server.log",
+            mime: nil,
+            textPreviewBytes: 6,
+            textSearch: "needle"
+        )
+
+        XCTAssertEqual(firstPage.textPreview, "alpha\n")
+        XCTAssertEqual(firstPage.textPreviewOffset, 0)
+        XCTAssertEqual(firstPage.textPreviewNextOffset, 6)
+        XCTAssertTrue(firstPage.textPreviewTruncated)
+        XCTAssertEqual(firstPage.textSearchMatchCount, 2)
+        XCTAssertEqual(firstPage.textSearchMatches.map(\.lineNumber), [2, 4])
+        XCTAssertEqual(firstPage.textSearchMatches.first?.lineText, "needle one")
+
+        let secondPage = try await LocalFileInspection.inspect(
+            url: url,
+            name: "server.log",
+            mime: nil,
+            textPreviewBytes: 6,
+            textPreviewOffset: 6
+        )
+
+        XCTAssertEqual(secondPage.textPreviewOffset, 6)
+        XCTAssertEqual(secondPage.textPreview, "needle")
     }
 
     func testRunRecordDecoding() throws {
@@ -1820,7 +1939,9 @@ final class VoiceAgentModelTests: XCTestCase {
         let resolved = APIClient()._test_resolveArtifactInspectURL(
             serverURL: "http://127.0.0.1:8000",
             artifact: artifact,
-            textPreviewBytes: 4096
+            textPreviewBytes: 4096,
+            textPreviewOffset: 8192,
+            textSearch: "needle"
         )
 
         XCTAssertEqual(resolved?.path, "/v1/files/inspect")
@@ -1837,6 +1958,20 @@ final class VoiceAgentModelTests: XCTestCase {
                 .first(where: { $0.name == "text_preview_bytes" })?
                 .value,
             "4096"
+        )
+        XCTAssertEqual(
+            URLComponents(url: resolved!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "text_preview_offset" })?
+                .value,
+            "8192"
+        )
+        XCTAssertEqual(
+            URLComponents(url: resolved!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "text_search" })?
+                .value,
+            "needle"
         )
     }
 

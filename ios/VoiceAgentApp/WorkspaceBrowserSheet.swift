@@ -17,7 +17,10 @@ struct WorkspaceBrowserSheet: View {
     @State private var previewDocument: PreviewDocument?
     @State private var textPreviewDocument: TextPreviewDocument?
     @State private var thumbnailImages: [DirectoryThumbnailCacheKey: UIImage] = [:]
+    @State private var thumbnailCacheOrder: [DirectoryThumbnailCacheKey] = []
     @State private var thumbnailLoadingKeys: Set<DirectoryThumbnailCacheKey> = []
+    private let directoryAutoRefreshIntervalNanoseconds: UInt64 = 5_000_000_000
+    private let maxDirectoryThumbnailCacheCount = 80
 
     var body: some View {
         NavigationStack {
@@ -52,6 +55,9 @@ struct WorkspaceBrowserSheet: View {
                     await vm.refreshDirectoryBrowser()
                 }
             }
+            .task(id: directoryAutoRefreshKey) {
+                await autoRefreshDirectoryBrowser(path: directoryAutoRefreshKey)
+            }
             .alert("Open failed", isPresented: Binding(
                 get: { !fileOpenError.isEmpty },
                 set: { if !$0 { fileOpenError = "" } }
@@ -61,7 +67,7 @@ struct WorkspaceBrowserSheet: View {
                 Text(fileOpenError)
             }
             .sheet(item: $previewDocument) { preview in
-                FilePreviewSheet(url: preview.url, title: preview.title)
+                FilePreviewSheet(url: preview.url, title: preview.title, originalPath: preview.originalPath)
             }
             .sheet(item: $textPreviewDocument) { preview in
                 TextFilePreviewSheet(document: preview)
@@ -418,6 +424,9 @@ struct WorkspaceBrowserSheet: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(vm.isLoadingDirectoryBrowser || openingFilePath == entry.path)
+                    .contextMenu {
+                        directoryEntryCopyActions(entry)
+                    }
                 }
             }
         }
@@ -517,12 +526,70 @@ struct WorkspaceBrowserSheet: View {
                 cacheVersion: entry.previewCacheVersion
             )
             if let image = await DirectoryImageThumbnailRenderer.thumbnail(from: localURL, maxPointSize: 32) {
-                thumbnailImages = thumbnailImages.filter { $0.key.path != entry.path }
-                thumbnailImages[thumbnailKey] = image
+                storeDirectoryThumbnail(image, for: thumbnailKey)
             }
         } catch {
             return
         }
+    }
+
+    @MainActor
+    private func storeDirectoryThumbnail(_ image: UIImage, for thumbnailKey: DirectoryThumbnailCacheKey) {
+        thumbnailImages = thumbnailImages.filter { $0.key.path != thumbnailKey.path }
+        thumbnailImages[thumbnailKey] = image
+        thumbnailCacheOrder.removeAll { $0.path == thumbnailKey.path || $0 == thumbnailKey }
+        thumbnailCacheOrder.append(thumbnailKey)
+
+        while thumbnailCacheOrder.count > maxDirectoryThumbnailCacheCount {
+            let evictedKey = thumbnailCacheOrder.removeFirst()
+            thumbnailImages.removeValue(forKey: evictedKey)
+        }
+    }
+
+    @ViewBuilder
+    private func directoryEntryCopyActions(_ entry: DirectoryEntry) -> some View {
+        Button {
+            UIPasteboard.general.string = entry.path
+        } label: {
+            Label(entry.isDirectory ? "Copy Folder Path" : "Copy File Path", systemImage: "doc.on.doc")
+        }
+
+        Button {
+            UIPasteboard.general.string = entry.name
+        } label: {
+            Label(entry.isDirectory ? "Copy Folder Name" : "Copy File Name", systemImage: "textformat")
+        }
+    }
+
+    private var directoryAutoRefreshKey: String {
+        let path = vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? "__workspace_browser_default__" : path
+    }
+
+    @MainActor
+    private func autoRefreshDirectoryBrowser(path: String) async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: directoryAutoRefreshIntervalNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  shouldAutoRefreshDirectoryBrowser(path: path) else {
+                continue
+            }
+            await vm.refreshDirectoryBrowser()
+        }
+    }
+
+    @MainActor
+    private func shouldAutoRefreshDirectoryBrowser(path: String) -> Bool {
+        PreviewScenario.current == nil &&
+        directoryAutoRefreshKey == path &&
+        !vm.isLoadingDirectoryBrowser &&
+        openingFilePath == nil &&
+        previewDocument == nil &&
+        textPreviewDocument == nil
     }
 
     @MainActor
@@ -537,6 +604,11 @@ struct WorkspaceBrowserSheet: View {
 
         do {
             let inspection = try? await vm.inspectDirectoryFileForPreview(entry)
+            if let blockedReason = inspection?.previewBlockedReason {
+                fileOpenError = textPreviewBlockedMessage(for: blockedReason)
+                return
+            }
+            let previewSource = textPreviewSource(for: entry)
             if let inspection, let text = inspection.textPreview {
                 let previewURL = try await TextPreviewLoader.writePreviewTextToTemporaryFile(
                     title: entry.name,
@@ -548,7 +620,15 @@ struct WorkspaceBrowserSheet: View {
                     text: text,
                     isTruncated: inspection.textPreviewTruncated,
                     sizeBytes: inspection.sizeBytes,
-                    modifiedAt: inspection.modifiedAt
+                    modifiedAt: inspection.modifiedAt,
+                    previewOffset: inspection.textPreviewOffset,
+                    nextOffset: inspection.textPreviewNextOffset,
+                    previewBlockedReason: inspection.previewBlockedReason,
+                    searchMatches: inspection.textSearchMatches,
+                    searchMatchCount: inspection.textSearchMatchCount,
+                    language: FilePreviewLanguage.infer(fileName: entry.name, mime: inspection.mime ?? entry.mime),
+                    source: previewSource,
+                    originalPath: inspection.path
                 )
                 return
             }
@@ -569,7 +649,10 @@ struct WorkspaceBrowserSheet: View {
                         title: entry.name,
                         text: text,
                         sizeBytes: size,
-                        modifiedAt: inspection?.modifiedAt ?? entry.modifiedAt
+                        modifiedAt: inspection?.modifiedAt ?? entry.modifiedAt,
+                        language: FilePreviewLanguage.infer(fileName: entry.name, mime: inspection?.mime ?? entry.mime),
+                        source: previewSource,
+                        originalPath: inspection?.path ?? entry.path
                     )
                     return
                 } catch TextPreviewError.tooLarge {
@@ -581,13 +664,45 @@ struct WorkspaceBrowserSheet: View {
                 }
             }
             if QLPreviewController.canPreview(localURL as NSURL) {
-                previewDocument = PreviewDocument(url: localURL, title: entry.name)
+                previewDocument = PreviewDocument(
+                    url: localURL,
+                    title: entry.name,
+                    originalPath: inspection?.path ?? entry.path
+                )
             } else {
                 fileOpenError = "This file type can't be previewed on iPhone."
             }
         } catch {
             fileOpenError = error.localizedDescription
         }
+    }
+
+    private func textPreviewSource(for entry: DirectoryEntry) -> TextPreviewSource? {
+        guard !entry.isDirectory else { return nil }
+        if PreviewScenario.current != nil, FileManager.default.fileExists(atPath: entry.path) {
+            return nil
+        }
+        let serverURL = vm.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = vm.apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !serverURL.isEmpty, !token.isEmpty else { return nil }
+        return TextPreviewSource(
+            serverURL: serverURL,
+            token: token,
+            artifact: ChatArtifact(
+                type: VoiceAgentDirectoryBrowser.artifactType(for: entry),
+                title: entry.name,
+                path: entry.path,
+                mime: entry.mime,
+                url: nil
+            )
+        )
+    }
+
+    private func textPreviewBlockedMessage(for reason: String) -> String {
+        if reason == "sensitive_path" {
+            return "Text preview is blocked for sensitive paths on the host."
+        }
+        return "Text preview is blocked for this file."
     }
 
     @MainActor

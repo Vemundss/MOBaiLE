@@ -52,7 +52,9 @@ extension VoiceAgentViewModel {
 
     func inspectDirectoryFileForPreview(
         _ entry: DirectoryEntry,
-        textPreviewBytes: Int = 64 * 1024
+        textPreviewBytes: Int = 64 * 1024,
+        textPreviewOffset: Int = 0,
+        textSearch: String? = nil
     ) async throws -> FileInspectionResponse {
         guard !entry.isDirectory else {
             throw APIError.invalidURL
@@ -63,7 +65,9 @@ extension VoiceAgentViewModel {
                 url: URL(fileURLWithPath: entry.path),
                 name: entry.name,
                 mime: entry.mime,
-                textPreviewBytes: textPreviewBytes
+                textPreviewBytes: textPreviewBytes,
+                textPreviewOffset: textPreviewOffset,
+                textSearch: textSearch
             )
         }
         let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -81,7 +85,9 @@ extension VoiceAgentViewModel {
             serverURL: normalizedServerURL,
             token: token,
             artifact: artifact,
-            textPreviewBytes: textPreviewBytes
+            textPreviewBytes: textPreviewBytes,
+            textPreviewOffset: textPreviewOffset,
+            textSearch: textSearch
         )
     }
 

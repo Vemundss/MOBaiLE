@@ -740,13 +740,17 @@ final class APIClient {
         serverURL: String,
         token: String,
         artifact: ChatArtifact,
-        textPreviewBytes: Int = 64 * 1024
+        textPreviewBytes: Int = 64 * 1024,
+        textPreviewOffset: Int = 0,
+        textSearch: String? = nil
     ) async throws -> FileInspectionResponse {
         try await withCandidateServerURL(serverURL) { baseURL in
             guard let url = resolveArtifactInspectURL(
                 serverURL: baseURL,
                 artifact: artifact,
-                textPreviewBytes: textPreviewBytes
+                textPreviewBytes: textPreviewBytes,
+                textPreviewOffset: textPreviewOffset,
+                textSearch: textSearch
             ) else {
                 throw APIError.invalidURL
             }
@@ -964,7 +968,9 @@ final class APIClient {
     private func resolveArtifactInspectURL(
         serverURL: String,
         artifact: ChatArtifact,
-        textPreviewBytes: Int
+        textPreviewBytes: Int,
+        textPreviewOffset: Int = 0,
+        textSearch: String? = nil
     ) -> URL? {
         guard let resolvedURL = resolveArtifactURL(serverURL: serverURL, artifact: artifact),
               let path = artifactFileReference(for: artifact, url: resolvedURL)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -976,7 +982,12 @@ final class APIClient {
         components.queryItems = [
             URLQueryItem(name: "path", value: path),
             URLQueryItem(name: "text_preview_bytes", value: String(max(0, textPreviewBytes))),
+            URLQueryItem(name: "text_preview_offset", value: String(max(0, textPreviewOffset))),
         ]
+        if let textSearch = textSearch?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !textSearch.isEmpty {
+            components.queryItems?.append(URLQueryItem(name: "text_search", value: textSearch))
+        }
         return components.url
     }
 
@@ -1141,12 +1152,16 @@ extension APIClient {
     func _test_resolveArtifactInspectURL(
         serverURL: String,
         artifact: ChatArtifact,
-        textPreviewBytes: Int = 64 * 1024
+        textPreviewBytes: Int = 64 * 1024,
+        textPreviewOffset: Int = 0,
+        textSearch: String? = nil
     ) -> URL? {
         resolveArtifactInspectURL(
             serverURL: serverURL,
             artifact: artifact,
-            textPreviewBytes: textPreviewBytes
+            textPreviewBytes: textPreviewBytes,
+            textPreviewOffset: textPreviewOffset,
+            textSearch: textSearch
         )
     }
 

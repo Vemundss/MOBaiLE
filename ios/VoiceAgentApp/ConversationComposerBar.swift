@@ -135,7 +135,11 @@ struct ConversationComposerBar: View {
         .animation(.easeInOut(duration: 0.18), value: shouldShowRecordingNotice)
         .animation(.easeInOut(duration: 0.18), value: vm.voiceInteractionNoticeText)
         .sheet(item: $previewAttachment) { attachment in
-            FilePreviewSheet(url: attachment.localFileURL, title: attachment.fileName)
+            FilePreviewSheet(
+                url: attachment.localFileURL,
+                title: attachment.fileName,
+                originalPath: attachment.localFileURL.path
+            )
         }
         .alert("Preview unavailable", isPresented: Binding(
             get: { !attachmentPreviewError.isEmpty },
