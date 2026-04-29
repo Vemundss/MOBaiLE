@@ -3,24 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MOBaiLE | Your computer, in your pocket.</title>
+    <title>MOBaiLE | Run your own computer from iPhone</title>
     <meta
       name="description"
-      content="MOBaiLE lets you start a task from iPhone, run it on your own Mac or Linux machine, and stay in one live thread while you are away from the keyboard."
+      content="MOBaiLE pairs your iPhone with your own Mac or Linux machine so you can send text or voice tasks and follow each run in one live thread."
     />
     <style>
       :root {
-        --bg: #f3efe7;
-        --paper: rgba(255, 251, 246, 0.88);
-        --panel: rgba(255, 255, 255, 0.76);
-        --text: #1f1d1a;
-        --muted: #61594e;
+        --bg: #edf4f2;
+        --paper: rgba(249, 252, 251, 0.92);
+        --panel: rgba(255, 255, 255, 0.82);
+        --text: #121820;
+        --muted: #52616b;
         --line: rgba(31, 29, 26, 0.12);
-        --accent: #0f5c4d;
-        --accent-strong: #09382f;
-        --blue: #1f77e3;
-        --warm: #c97b2c;
-        --shadow: 0 24px 64px rgba(43, 33, 20, 0.14);
+        --accent: #0a6a5b;
+        --accent-strong: #073c35;
+        --blue: #1268d3;
+        --warm: #b86619;
+        --shadow: 0 24px 64px rgba(16, 33, 42, 0.14);
       }
 
       * {
@@ -31,21 +31,10 @@
         margin: 0;
         min-height: 100vh;
         font-family:
-          "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino,
-          Georgia, serif;
+          ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
         color: var(--text);
-        background:
-          radial-gradient(
-            circle at top left,
-            rgba(201, 123, 44, 0.24),
-            transparent 34%
-          ),
-          radial-gradient(
-            circle at top right,
-            rgba(15, 92, 77, 0.2),
-            transparent 28%
-          ),
-          linear-gradient(180deg, #faf6ef 0%, var(--bg) 50%, #efe5d8 100%);
+        background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 54%, #e9eef4 100%);
         padding: 24px;
       }
 
@@ -96,16 +85,16 @@
 
       h1 {
         margin: 18px 0 14px;
-        max-width: 7.6ch;
+        max-width: 10.6ch;
         font-size: clamp(42px, 6.2vw, 76px);
-        line-height: 0.98;
-        letter-spacing: -0.05em;
+        line-height: 1.02;
+        letter-spacing: 0;
         text-wrap: balance;
       }
 
       .lede {
         margin: 0;
-        max-width: 33ch;
+        max-width: 36ch;
         font-size: clamp(18px, 2vw, 22px);
         line-height: 1.55;
         color: var(--muted);
@@ -187,17 +176,7 @@
         justify-content: center;
         padding: 22px;
         border-radius: 28px;
-        background:
-          radial-gradient(
-            circle at top right,
-            rgba(15, 92, 77, 0.16),
-            transparent 34%
-          ),
-          linear-gradient(
-            180deg,
-            rgba(255, 253, 250, 0.95),
-            rgba(240, 233, 223, 0.92)
-          );
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(230, 242, 239, 0.92));
         border: 1px solid rgba(31, 29, 26, 0.08);
         min-height: 100%;
         overflow: hidden;
@@ -259,8 +238,8 @@
       h2 {
         margin: 0;
         font-size: clamp(34px, 5vw, 52px);
-        line-height: 0.98;
-        letter-spacing: -0.045em;
+        line-height: 1.04;
+        letter-spacing: 0;
       }
 
       .section-copy {
@@ -447,15 +426,14 @@
       <section class="hero">
         <div class="hero-copy">
           <div class="eyebrow">Paired iPhone control for your own machine</div>
-          <h1>Your computer, in your pocket.</h1>
+          <h1>Run your own computer from iPhone.</h1>
           <p class="lede">
-            Start a task from iPhone, run it on your own Mac or Linux machine,
-            and keep planning, execution, results, and follow-up in one live
-            thread while you are away from the keyboard.
+            Pair a Mac or Linux host, send a prompt by text or voice, and keep
+            planning, execution, results, and follow-up in one live thread.
           </p>
           <div class="tag-row">
             <span class="tag blue">Voice and text</span>
-            <span class="tag green">Runs on your machine</span>
+            <span class="tag green">Mac or Linux host</span>
             <span class="tag gold">Live run stream</span>
           </div>
           <div class="actions">
@@ -494,37 +472,37 @@
       <section class="section">
         <div class="section-header">
           <div class="eyebrow">Why it feels different</div>
-          <h2>Useful when your laptop is the inconvenient device.</h2>
+          <h2>A phone interface for work that still runs on your machine.</h2>
           <p class="section-copy">
-            MOBaiLE is not a toy cloud shell and it is not an opaque autopilot.
-            It is a handheld control surface for the computer you already use,
-            with a thread you can actually follow.
+            MOBaiLE keeps the powerful part on the host and makes the phone
+            good at capture, follow-up, and recovery. You get remote control
+            without hiding where the work is happening.
           </p>
         </div>
         <div class="grid">
           <article class="card">
-            <h3>Runs on your real machine</h3>
+            <h3>Uses your real workspace</h3>
             <p>
               Your repo, shell, auth, files, and network stay where the work
               already happens.
             </p>
           </article>
           <article class="card">
-            <h3>Keeps one visible thread</h3>
+            <h3>Keeps the run readable</h3>
             <p>
               Prompt, progress, result, and next step stay together instead of
               collapsing into a final notification.
             </p>
           </article>
           <article class="card">
-            <h3>Feels natural on phone</h3>
+            <h3>Fits quick mobile moments</h3>
             <p>
               Voice mode, silence-based send, widgets, haptics, and Shortcuts
               make it usable away from the desk.
             </p>
           </article>
           <article class="card">
-            <h3>Keeps trust explicit</h3>
+            <h3>Makes access explicit</h3>
             <p>
               Safe mode, full-access mode, pairing, and the network path stay
               visible instead of hidden behind vague claims.
@@ -604,7 +582,7 @@
       <section class="section">
         <div class="section-header">
           <div class="eyebrow">Product tour</div>
-          <h2>Three moments that matter.</h2>
+          <h2>Three moments that make the app feel dependable.</h2>
           <p class="section-copy">
             The experience needs to feel legible at a glance: getting oriented,
             following a run, and sending the next voice task without losing
@@ -693,7 +671,7 @@
       </section>
 
       <footer>
-        Public pages for MOBaiLE. Last updated: April 16, 2026.
+        Public pages for MOBaiLE. Last updated: April 29, 2026.
         <a href="privacy-policy.html">Privacy</a> ·
         <a href="support.html">Support</a> ·
         <a href="https://github.com/Vemundss/MOBaiLE">GitHub</a>

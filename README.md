@@ -4,15 +4,15 @@
   <img src="ios/VoiceAgentApp/mobaile_logo.png" alt="MOBaiLE logo" width="180" />
 </p>
 
-<p align="center"><strong>Your own computer, in your pocket.</strong></p>
+<p align="center"><strong>Run your own computer from iPhone.</strong></p>
 
 <p align="center">
-  Start a task from iPhone, run it on your own Mac or Linux machine, and keep the whole execution thread visible while you are away from the keyboard.
+  Pair MOBaiLE with a Mac or Linux machine you control, send a prompt by text or voice, and follow the run in one live thread.
 </p>
 
 <p align="center">
-  MOBaiLE is the handheld control surface. Your computer does the work with your real repo, CLI tools, auth, files, and network.
-  This repo contains both the iPhone app and the computer-side setup if you want to build or self-host it.
+  The phone is the control surface. Your computer keeps the repo, shell, credentials, files, and network access.
+  This repo contains the iPhone app, the paired backend, and the setup scripts for building or self-hosting it.
 </p>
 
 <p align="center">
@@ -27,9 +27,9 @@
   <a href="scripts/README.md"><strong>Scripts</strong></a>
 </p>
 
-> The phone starts and follows the run. Your Mac or Linux machine does the work.
+> Your phone starts and follows the run. Your Mac or Linux machine does the work.
 
-## Install on the computer you want to control
+## Get a run back in minutes
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vemundss/MOBaiLE/main/scripts/install.sh | bash
@@ -53,19 +53,19 @@ Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USA
   <img src="docs/readme-hero.png" alt="MOBaiLE hero showing a ready chat, a live run thread, and voice mode on iPhone" width="1200" />
 </p>
 
-## Why people reach for it
+## Why people use it
 
-- **It uses your real machine.** Work against your actual repo, shell, auth, files, and network instead of moving everything into a separate hosted environment.
-- **It keeps the run readable.** Prompt, live progress, result, and follow-up stay in one thread instead of collapsing into a final notification.
-- **It works when the laptop is the inconvenient device.** Voice mode, silence-based send, widgets, haptics, audio cues, and Shortcuts make it usable while walking, commuting, or away from the desk.
-- **It preserves momentum.** Pair once, stay in the same workspace thread, and keep the next step grounded in what just happened.
+- **Use the environment that already has the work.** Run against your actual repo, shell, credentials, files, and network instead of copying context into a hosted IDE.
+- **Follow the work, not just the final answer.** Prompt, live progress, result, artifacts, and follow-up stay in one readable thread.
+- **Start the next step when the laptop is awkward.** Voice mode, silence-based send, widgets, haptics, audio cues, and Shortcuts make quick work practical away from the desk.
+- **Keep context attached to the workspace.** Pair once, stay in the same workspace thread, and make the next run inherit what just happened.
 
 ## Keep trust boundaries explicit
 
 - **The phone does not run the code.** It sends prompts, audio, attachments, and session metadata to the backend you control.
-- **Security mode stays visible.** Use `safe` on a cautious host, or `full-access` on a trusted private machine.
-- **Pairing is deliberate.** MOBaiLE uses a pairing QR and one-time `pair_code`; the long-lived API token stays on the host.
-- **The network path is inspectable.** Pairing prefers Tailscale or configured public URLs, and the backend remains yours to operate.
+- **Access mode stays visible.** Use `safe` on a cautious host, or `full-access` on a trusted private machine.
+- **Pairing is deliberate.** MOBaiLE uses a QR and one-time `pair_code`; the long-lived API token stays on the host.
+- **The network path is inspectable.** Pairing prefers Tailscale or a configured public URL, and the backend remains yours to operate.
 
 ## Three moments that matter
 
@@ -75,15 +75,15 @@ Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USA
   <img src="docs/readme-screens/recording.png" alt="Voice capture controls that stay attached to the current thread" width="250" />
 </p>
 
-- **Start in the right workspace.** See the paired runtime, working directory, and chat switcher before you send the first prompt.
-- **Follow the run live.** Result, summary, and next recommended action stay together in the same thread.
-- **Keep talking without losing context.** Voice mode reopens the mic after each reply, while attachments and typed follow-ups stay in the same conversation.
+- **Start in the right workspace.** See the paired runtime, working directory, and chat switcher before sending the first prompt.
+- **Follow the run live.** Progress, result, summary, artifacts, and next recommended action stay together in the same thread.
+- **Keep talking without losing context.** Voice mode reopens the mic after each reply while attachments and typed follow-ups stay in the same conversation.
 
 ## Good First Prompts
 
 - `create a hello python script and run it`
 - `inspect this repo and tell me where onboarding feels rough`
-- `check my calendar today and summarize conflicts`
+- `run the backend smoke test and summarize what passed`
 - `fix the failing test and explain the patch`
 
 <details>

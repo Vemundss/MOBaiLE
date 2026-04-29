@@ -187,14 +187,15 @@ def draw_pill(
 
 
 def create_hero() -> None:
-    canvas = gradient_canvas((1600, 900), (252, 245, 238), (238, 247, 243))
-    add_blur_blob(canvas, (1050, 40, 1490, 430), (219, 240, 231), 180, 32)
-    add_blur_blob(canvas, (1060, 450, 1540, 910), (243, 231, 206), 120, 44)
-    add_blur_blob(canvas, (-40, 540, 320, 900), (255, 221, 186), 110, 36)
+    canvas = gradient_canvas((1600, 900), (246, 250, 253), (225, 241, 238))
 
     draw = ImageDraw.Draw(canvas)
+    draw.polygon([(940, 0), (1600, 0), (1600, 310), (1180, 238)], fill=(211, 240, 233, 170))
+    draw.polygon([(0, 680), (410, 900), (0, 900)], fill=(224, 239, 255, 190))
+    draw.rounded_rectangle((54, 54, 1546, 846), radius=46, outline=(255, 255, 255, 190), width=2)
+
     badge_font = load_font(FONT_ROUNDED, 28)
-    title_font = load_font(FONT_BOLD, 84)
+    title_font = load_font(FONT_BOLD, 78)
     body_font = load_font(FONT_BODY, 31)
     pill_font = load_font(FONT_BODY, 24)
     note_font = load_font(FONT_BODY, 23)
@@ -204,22 +205,22 @@ def create_hero() -> None:
         "MOBaiLE",
         (120, 110),
         badge_font,
-        fill=(35, 90, 73),
-        background=(221, 240, 231),
+        fill=(7, 60, 53),
+        background=(221, 244, 237),
     )
 
-    title = "Your own computer,\nin your pocket."
+    title = "Run your computer\nfrom iPhone."
     draw.multiline_text(
         (120, 190),
         title,
         font=title_font,
-        fill=(26, 28, 33),
-        spacing=4,
+        fill=(18, 24, 32),
+        spacing=8,
     )
 
     body = (
-        "Send a task from iPhone, run it on your Mac or Linux machine, "
-        "and keep the whole execution thread visible while you're away from the keyboard."
+        "Pair a Mac or Linux host, send a prompt by text or voice, "
+        "and follow the run in one live thread."
     )
     next_y = draw_wrapped_text(
         draw,
@@ -242,7 +243,7 @@ def create_hero() -> None:
     )
     pill_rect = draw_pill(
         draw,
-        "Runs on your machine",
+        "Mac or Linux host",
         (pill_rect[2] + 12, pill_y),
         pill_font,
         fill=(35, 90, 73),
@@ -257,7 +258,7 @@ def create_hero() -> None:
         background=(249, 236, 207),
     )
 
-    note = "Pair once, stay in context, and keep every follow-up in the same thread."
+    note = "The phone starts and follows. Your computer keeps the repo, shell, credentials, files, and network."
     draw_wrapped_text(
         draw,
         note,
@@ -334,11 +335,11 @@ def draw_feature_card(
         line_spacing=8,
     )
 
-    panel = build_screen_panel(screen, (214, 368), background=(248, 249, 252))
+    panel = build_screen_panel(screen, (184, 316), background=(248, 249, 252))
     paste_shadowed_panel(
         canvas,
         panel,
-        center=(x0 + (x1 - x0) // 2, max(body_end_y + 120, y0 + 360)),
+        center=(x0 + (x1 - x0) // 2, max(body_end_y + 180, y0 + 410)),
         angle=0,
         shadow_blur=18,
         shadow_offset=(0, 14),
@@ -346,11 +347,12 @@ def draw_feature_card(
 
 
 def create_showcase() -> None:
-    canvas = gradient_canvas((1600, 920), (248, 244, 238), (246, 250, 249))
-    add_blur_blob(canvas, (70, 80, 420, 430), (251, 228, 194), 120, 26)
-    add_blur_blob(canvas, (1180, 40, 1550, 360), (221, 239, 231), 140, 28)
+    canvas = gradient_canvas((1600, 920), (246, 250, 253), (229, 242, 239))
 
     draw = ImageDraw.Draw(canvas)
+    draw.polygon([(1120, 0), (1600, 0), (1600, 250), (1280, 190)], fill=(211, 240, 233, 160))
+    draw.polygon([(0, 700), (360, 920), (0, 920)], fill=(224, 239, 255, 185))
+
     eyebrow_font = load_font(FONT_ROUNDED, 24)
     title_font = load_font(FONT_BOLD, 58)
     body_font = load_font(FONT_BODY, 28)
@@ -365,10 +367,10 @@ def create_showcase() -> None:
         padding_x=18,
         padding_y=10,
     )
-    draw.text((90, 140), "Three moments that matter", font=title_font, fill=(28, 30, 35))
+    draw.text((90, 140), "A phone UI for real work", font=title_font, fill=(28, 30, 35))
     draw_wrapped_text(
         draw,
-        "The product experience needs to feel legible at a glance: getting oriented, following a run, and sending a voice task without losing context.",
+        "The experience stays useful in the moments that matter: picking the right workspace, following a run, and sending the next task without losing context.",
         (90, 212),
         body_font,
         fill=(97, 101, 106),
@@ -397,14 +399,14 @@ def create_showcase() -> None:
         (
             "Stay in the loop",
             "Follow the run live",
-            "Prompts, summaries, and the next recommended action stay together so follow-up work feels immediate.",
+            "Progress, output, summaries, and the next recommended action stay together.",
             conversation,
             (43, 150, 98),
         ),
         (
             "Go hands-free",
-            "Keep talking after each reply",
-            "Voice mode keeps typed context, attachments, and silence-based send behavior visible right where the action happens.",
+            "Use voice without losing context",
+            "Voice mode keeps typed context, attachments, and silence-based send behavior visible where the action happens.",
             recording,
             (34, 113, 214),
         ),

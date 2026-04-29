@@ -2,8 +2,8 @@
 
 ## Reviewer Summary
 
-MOBaiLE is an iPhone client for a paired personal backend that runs on the user's own machine.
-The app does not execute code on-device. It sends prompts and optional audio to the configured backend, then displays live run progress and returned results.
+MOBaiLE is an iPhone control surface for a paired personal backend that runs on the user's own Mac or Linux machine.
+The app does not execute code on-device. It sends prompts, optional audio, attachments, and run metadata to the configured backend, then displays live progress and returned results.
 
 ## Suggested Review Steps
 

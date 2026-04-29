@@ -4,14 +4,14 @@
   <img src="../docs/readme-screens/conversation.png" alt="MOBaiLE conversation screen on iPhone" width="250" />
 </p>
 
-MOBaiLE on iPhone is the handheld control surface for your own Mac or Linux machine.
-You open the app, pair it with your computer, send text or voice requests, and keep the run legible without going back to your laptop.
+MOBaiLE on iPhone is a control surface for your own Mac or Linux machine.
+Pair it with your computer, send text or voice requests, and keep each run readable without going back to your laptop.
 
 The app does not execute code on the phone. It forwards your prompt, audio, attachments, and session context to the backend you control.
 
 ## Why It Feels Good On Phone
 
-- Start from the same workspace thread you were already using
+- Start from the workspace thread you were already using
 - Send a quick typed prompt or record a one-shot voice task
 - Keep one thread in voice mode for a hands-free send-reply-listen loop
 - Watch progress, results, and the next recommended step in the same conversation

@@ -1,7 +1,7 @@
 [project]
 name = "voice-agent-backend"
 version = "0.1.0"
-description = "Backend orchestrator for voice-to-agent app"
+description = "Host-side backend for MOBaiLE's paired iPhone control surface"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",

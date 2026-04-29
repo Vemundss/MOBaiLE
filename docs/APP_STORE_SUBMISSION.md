@@ -71,6 +71,6 @@ Expected behavior:
 
 ## Before You Hit Submit
 
-- Replace the generated icon set with final production artwork if you have a higher-resolution source than `ios/VoiceAgentApp/mobaile_logo.png`.
+- Regenerate the icon set with `python3 scripts/generate_app_icons.py` if the brand mark changes.
 - Confirm your privacy policy and support URLs are publicly reachable and not temporary placeholders.
 - Test pairing and one complete run on a real iPhone using the exact build you plan to upload.

@@ -1,3 +1,3 @@
-Runtime settings now make Profile Instructions and Profile Memory clearer, with explicit include or skip states and backend-default guidance.
+Refined runtime settings, clearer profile context controls, and a more polished first-run presentation.
 
-This release also continues the polish across live progress in chat, voice capture, thread handling, and reconnect or recovery flows.
+This release also improves live progress in chat, voice capture, thread handling, and reconnect or recovery flows.
