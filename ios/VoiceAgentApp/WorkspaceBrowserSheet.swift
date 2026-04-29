@@ -16,6 +16,8 @@ struct WorkspaceBrowserSheet: View {
     @State private var fileOpenError: String = ""
     @State private var previewDocument: PreviewDocument?
     @State private var textPreviewDocument: TextPreviewDocument?
+    @State private var directoryFilterText = ""
+    @FocusState private var isDirectoryFilterFocused: Bool
     @State private var thumbnailImages: [DirectoryThumbnailCacheKey: UIImage] = [:]
     @State private var thumbnailCacheOrder: [DirectoryThumbnailCacheKey] = []
     @State private var thumbnailLoadingKeys: Set<DirectoryThumbnailCacheKey> = []
@@ -38,6 +40,8 @@ struct WorkspaceBrowserSheet: View {
                 }
                 .background(Color(.systemGroupedBackground))
                 .onChange(of: vm.directoryBrowserPath) {
+                    directoryFilterText = ""
+                    isDirectoryFilterFocused = false
                     scrollToDirectoryBrowser(using: proxy)
                 }
             }
@@ -155,6 +159,8 @@ struct WorkspaceBrowserSheet: View {
                 .disabled(vm.isLoadingDirectoryBrowser)
             }
 
+            directoryFilterField
+
             if isCreatingDirectory {
                 HStack(spacing: 6) {
                     TextField("New folder", text: $newDirectoryName)
@@ -228,6 +234,47 @@ struct WorkspaceBrowserSheet: View {
         .padding(10)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var directoryFilterField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            TextField("Filter files", text: $directoryFilterText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.footnote)
+                .submitLabel(.search)
+                .focused($isDirectoryFilterFocused)
+                .disabled(vm.isLoadingDirectoryBrowser)
+
+            if hasDirectoryFilter {
+                Button {
+                    directoryFilterText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear folder filter")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !vm.isLoadingDirectoryBrowser else { return }
+            isDirectoryFilterFocused = true
+        }
     }
 
     private var selectedWorkspaceBadge: some View {
@@ -414,9 +461,20 @@ struct WorkspaceBrowserSheet: View {
             Text("Only hidden folders in this directory. Disable filter in Settings to view them.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } else if displayedDirectoryEntries.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("No files match this filter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Clear Filter") {
+                    directoryFilterText = ""
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
         } else {
             LazyVStack(spacing: 8) {
-                ForEach(vm.filteredDirectoryBrowserEntries) { entry in
+                ForEach(displayedDirectoryEntries) { entry in
                     Button {
                         Task { await openDirectoryEntryOrPreviewFile(entry) }
                     } label: {
@@ -442,6 +500,20 @@ struct WorkspaceBrowserSheet: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var displayedDirectoryEntries: [DirectoryEntry] {
+        let entries = vm.filteredDirectoryBrowserEntries
+        let query = directoryFilterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return entries }
+        return entries.filter { entry in
+            entry.name.localizedCaseInsensitiveContains(query) ||
+            (entry.mime ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var hasDirectoryFilter: Bool {
+        !directoryFilterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func directoryEntryRow(_ entry: DirectoryEntry) -> some View {

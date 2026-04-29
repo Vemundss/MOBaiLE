@@ -905,6 +905,35 @@ enum VoiceAgentPreviewFactory {
             try? data.write(to: scriptURL, options: .atomic)
         }
 
+        let csvURL = directory.appendingPathComponent("PreviewData.csv")
+        let csv = """
+        name,count,notes
+        "alpha,beta",2,"quoted comma"
+        omega,3,plain
+        """
+        if !FileManager.default.fileExists(atPath: csvURL.path),
+           let data = csv.data(using: .utf8) {
+            try? data.write(to: csvURL, options: .atomic)
+        }
+
+        let jsonURL = directory.appendingPathComponent("PreviewConfig.json")
+        let json = #"{"name":"MOBaiLE","items":[1,true,null]}"#
+        if !FileManager.default.fileExists(atPath: jsonURL.path),
+           let data = json.data(using: .utf8) {
+            try? data.write(to: jsonURL, options: .atomic)
+        }
+
+        let markdownURL = directory.appendingPathComponent("PreviewNotes.md")
+        let markdown = """
+        # Preview Notes
+
+        Open text, image, table, and structured files from the phone.
+        """
+        if !FileManager.default.fileExists(atPath: markdownURL.path),
+           let data = markdown.data(using: .utf8) {
+            try? data.write(to: markdownURL, options: .atomic)
+        }
+
         let imageURL = directory.appendingPathComponent("PreviewPlot.png")
         if !FileManager.default.fileExists(atPath: imageURL.path),
            let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=") {
@@ -919,6 +948,30 @@ enum VoiceAgentPreviewFactory {
                 sizeBytes: fileSize(at: scriptURL),
                 mime: "text/x-python",
                 modifiedAt: "2026-04-28T20:00:00Z"
+            ),
+            DirectoryEntry(
+                name: "PreviewData.csv",
+                path: csvURL.path,
+                isDirectory: false,
+                sizeBytes: fileSize(at: csvURL),
+                mime: "text/csv",
+                modifiedAt: "2026-04-28T20:00:30Z"
+            ),
+            DirectoryEntry(
+                name: "PreviewConfig.json",
+                path: jsonURL.path,
+                isDirectory: false,
+                sizeBytes: fileSize(at: jsonURL),
+                mime: "application/json",
+                modifiedAt: "2026-04-28T20:00:40Z"
+            ),
+            DirectoryEntry(
+                name: "PreviewNotes.md",
+                path: markdownURL.path,
+                isDirectory: false,
+                sizeBytes: fileSize(at: markdownURL),
+                mime: "text/markdown",
+                modifiedAt: "2026-04-28T20:00:50Z"
             ),
             DirectoryEntry(
                 name: "PreviewPlot.png",

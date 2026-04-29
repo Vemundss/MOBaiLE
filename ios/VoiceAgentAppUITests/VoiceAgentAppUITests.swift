@@ -102,6 +102,29 @@ final class VoiceAgentAppUITests: XCTestCase {
         )
     }
 
+    func testWorkspaceBrowserFiltersAndOpensTablePreviewFile() {
+        let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace-files")
+
+        XCTAssertTrue(app.navigationBars.staticTexts["Workspace"].waitForExistence(timeout: 5))
+        let filterField = app.textFields["Filter files"]
+        XCTAssertTrue(filterField.waitForExistence(timeout: 5))
+        filterField.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+        filterField.typeText("Data")
+
+        let dataButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PreviewData.csv")).firstMatch
+        XCTAssertTrue(dataButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PreviewScript.py")).firstMatch.exists)
+        dataButton.tap()
+
+        XCTAssertTrue(app.navigationBars.staticTexts["PreviewData.csv"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Table"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Raw"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "alpha,beta")).firstMatch
+                .waitForExistence(timeout: 5)
+        )
+    }
+
     func testWorkspaceBrowserOpensImagePreviewFile() {
         let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace-files")
 
@@ -110,7 +133,7 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(fileButton.waitForExistence(timeout: 5))
         fileButton.tap()
 
-        XCTAssertTrue(app.navigationBars.staticTexts["PreviewPlot.png"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Share PreviewPlot.png"].waitForExistence(timeout: 5))
     }
 
     func testLiveActivityPreviewShowsStreamingCard() {

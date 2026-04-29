@@ -421,6 +421,88 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(FilePreviewLanguage.infer(fileName: "notes.unknown", mime: "text/plain"), "text")
     }
 
+    func testTextPreviewDisplayModeDefaultsToStructuredFormats() {
+        XCTAssertEqual(
+            TextPreviewDisplayMode.defaultMode(fileName: "README.md", language: "markdown"),
+            .renderedMarkdown
+        )
+        XCTAssertEqual(
+            TextPreviewDisplayMode.defaultMode(fileName: "events.jsonl", language: "json"),
+            .outline
+        )
+        XCTAssertEqual(
+            TextPreviewDisplayMode.defaultMode(fileName: "table.tsv", language: "csv"),
+            .table
+        )
+        XCTAssertEqual(
+            TextPreviewDisplayMode.availableModes(fileName: "script.py", language: "python"),
+            [.raw]
+        )
+    }
+
+    func testDelimitedTextParserHandlesQuotedCommasAndLimitsColumns() {
+        let table = DelimitedTextParser.parse(
+            "name,count,notes\n\"alpha,beta\",2,\"keeps \"\"quotes\"\"\"\nomega,3,plain\n",
+            delimiter: ",",
+            maxRows: 10,
+            maxColumns: 2
+        )
+
+        XCTAssertEqual(table.headers, ["name", "count"])
+        XCTAssertEqual(table.rows.first, ["alpha,beta", "2"])
+        XCTAssertEqual(table.rows.last, ["omega", "3"])
+        XCTAssertEqual(table.totalRowCount, 2)
+        XCTAssertEqual(table.totalColumnCount, 3)
+        XCTAssertFalse(table.truncatedRows)
+        XCTAssertTrue(table.truncatedColumns)
+    }
+
+    func testDelimitedTextParserHandlesTSVRows() {
+        let table = DelimitedTextParser.parse(
+            "name\tvalue\nalpha\t1\nbeta\t2\n",
+            delimiter: "\t"
+        )
+
+        XCTAssertEqual(table.headers, ["name", "value"])
+        XCTAssertEqual(table.rows, [["alpha", "1"], ["beta", "2"]])
+        XCTAssertEqual(DelimitedTextParser.delimiter(forFileName: "table.tsv"), "\t")
+    }
+
+    func testJSONPreviewParserBuildsOutlineForObjectsAndJSONLines() throws {
+        let root = try XCTUnwrap(JSONPreviewParser.parse(#"{"name":"demo","items":[1,true,null]}"#))
+        let rows = JSONPreviewParser.flattenedRows(from: root)
+
+        XCTAssertTrue(rows.contains { $0.key == "name" && $0.value == "demo" })
+        XCTAssertTrue(rows.contains { $0.key == "items" && $0.value == "3 items" })
+        XCTAssertTrue(rows.contains { $0.key == "[0]" && $0.value == "1" })
+        XCTAssertTrue(rows.contains { $0.key == "[1]" && $0.value == "true" })
+        XCTAssertTrue(rows.contains { $0.key == "[2]" && $0.value == "null" })
+
+        let linesRoot = try XCTUnwrap(JSONPreviewParser.parse("{\"event\":\"start\"}\n{\"event\":\"stop\"}"))
+        let lineRows = JSONPreviewParser.flattenedRows(from: linesRoot)
+        XCTAssertTrue(lineRows.contains { $0.key == "JSON Lines" && $0.value == "2 items" })
+        XCTAssertTrue(lineRows.contains { $0.key == "event" && $0.value == "stop" })
+    }
+
+    func testMarkdownPreviewRendererPreservesBlocksAndRemovesInlineMarkup() {
+        let rendered = MarkdownPreviewRenderer.renderedText(
+            """
+            # Preview Notes
+
+            Open **files** from [the phone](https://example.com).
+            """
+        )
+
+        XCTAssertEqual(
+            rendered,
+            """
+            Preview Notes
+
+            Open files from the phone.
+            """
+        )
+    }
+
     func testLocalFileInspectionSupportsPreviewPaginationAndSearch() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

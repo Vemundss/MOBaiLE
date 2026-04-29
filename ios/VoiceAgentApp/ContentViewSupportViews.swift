@@ -674,6 +674,7 @@ struct TextFilePreviewSheet: View {
     @State private var isLoadingMore = false
     @State private var isSearchingFullFile = false
     @State private var previewActionError: String?
+    @State private var displayMode: TextPreviewDisplayMode
 
     init(document: TextPreviewDocument) {
         self.document = document
@@ -683,14 +684,22 @@ struct TextFilePreviewSheet: View {
         _serverSearchQuery = State(initialValue: nil)
         _serverSearchMatches = State(initialValue: document.searchMatches)
         _serverSearchMatchCount = State(initialValue: document.searchMatchCount)
+        _displayMode = State(initialValue: TextPreviewDisplayMode.defaultMode(
+            fileName: document.title,
+            language: document.language
+        ))
     }
 
     private var displayText: String {
         showsLineNumbers ? TextPreviewFormatter.numberedText(previewText) : previewText
     }
 
+    private var visibleSearchText: String {
+        displayMode == .raw ? displayText : previewText
+    }
+
     private var searchMatchCount: Int {
-        TextPreviewFormatter.matchCount(in: displayText, query: searchText)
+        TextPreviewFormatter.matchCount(in: visibleSearchText, query: searchText)
     }
 
     private var metadataText: String? {
@@ -721,6 +730,13 @@ struct TextFilePreviewSheet: View {
             return "\(serverSearchMatchCount) full-file \(serverSearchMatchCount == 1 ? "match" : "matches")"
         }
         return "\(searchMatchCount) visible \(searchMatchCount == 1 ? "match" : "matches")"
+    }
+
+    private var availableDisplayModes: [TextPreviewDisplayMode] {
+        TextPreviewDisplayMode.availableModes(
+            fileName: document.title,
+            language: document.language
+        )
     }
 
     private var pathForActions: String? {
@@ -777,17 +793,8 @@ struct TextFilePreviewSheet: View {
                     .background(Color(.secondarySystemGroupedBackground))
                 }
 
-                ScrollView(wrapsLines ? [.vertical] : [.vertical, .horizontal]) {
-                    Text(TextPreviewFormatter.highlightedText(displayText, query: searchText, language: document.language))
-                        .font(.system(.footnote, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(
-                            maxWidth: wrapsLines ? .infinity : nil,
-                            alignment: .leading
-                        )
-                        .padding()
-                }
-                .background(Color(.systemBackground))
+                previewModePicker
+                previewContent
 
                 if !trimmedSearchText.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -858,8 +865,17 @@ struct TextFilePreviewSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Toggle("Line Numbers", isOn: $showsLineNumbers)
-                        Toggle("Wrap Lines", isOn: $wrapsLines)
+                        if displayMode == .raw {
+                            Toggle("Line Numbers", isOn: $showsLineNumbers)
+                            Toggle("Wrap Lines", isOn: $wrapsLines)
+                        }
+                        if availableDisplayModes.count > 1 {
+                            Picker("Preview Mode", selection: $displayMode) {
+                                ForEach(availableDisplayModes) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
+                            }
+                        }
                     } label: {
                         Image(systemName: "text.alignleft")
                     }
@@ -905,6 +921,52 @@ struct TextFilePreviewSheet: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var previewModePicker: some View {
+        if availableDisplayModes.count > 1 {
+            Picker("Preview mode", selection: $displayMode) {
+                ForEach(availableDisplayModes) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color(.secondarySystemGroupedBackground))
+        }
+    }
+
+    @ViewBuilder
+    private var previewContent: some View {
+        switch displayMode {
+        case .raw:
+            ScrollView(wrapsLines ? [.vertical] : [.vertical, .horizontal]) {
+                Text(TextPreviewFormatter.highlightedText(displayText, query: searchText, language: document.language))
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(
+                        maxWidth: wrapsLines ? .infinity : nil,
+                        alignment: .leading
+                    )
+                    .padding()
+            }
+            .background(Color(.systemBackground))
+        case .renderedMarkdown:
+            MarkdownRenderedPreview(text: previewText, query: searchText)
+                .background(Color(.systemBackground))
+        case .table:
+            DelimitedTablePreview(
+                text: previewText,
+                delimiter: DelimitedTextParser.delimiter(forFileName: document.title),
+                query: searchText
+            )
+            .background(Color(.systemBackground))
+        case .outline:
+            JSONOutlinePreview(text: previewText, query: searchText)
+                .background(Color(.systemBackground))
         }
     }
 
@@ -954,6 +1016,472 @@ struct TextFilePreviewSheet: View {
     }
 }
 
+enum TextPreviewDisplayMode: String, CaseIterable, Identifiable {
+    case raw
+    case renderedMarkdown
+    case table
+    case outline
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .raw:
+            return "Raw"
+        case .renderedMarkdown:
+            return "Rendered"
+        case .table:
+            return "Table"
+        case .outline:
+            return "Outline"
+        }
+    }
+
+    static func defaultMode(fileName: String, language: String?) -> TextPreviewDisplayMode {
+        availableModes(fileName: fileName, language: language).first ?? .raw
+    }
+
+    static func availableModes(fileName: String, language: String?) -> [TextPreviewDisplayMode] {
+        switch structuredKind(fileName: fileName, language: language) {
+        case .markdown:
+            return [.renderedMarkdown, .raw]
+        case .delimited:
+            return [.table, .raw]
+        case .json:
+            return [.outline, .raw]
+        case .none:
+            return [.raw]
+        }
+    }
+
+    private enum StructuredKind {
+        case markdown
+        case delimited
+        case json
+    }
+
+    private static func structuredKind(fileName: String, language: String?) -> StructuredKind? {
+        let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        if ["csv", "tsv"].contains(ext) {
+            return .delimited
+        }
+        if ["json", "jsonl", "ndjson"].contains(ext) {
+            return .json
+        }
+        if ["markdown", "md", "mdown", "mdtext", "mdwn", "mkd"].contains(ext) {
+            return .markdown
+        }
+
+        switch language {
+        case "csv":
+            return .delimited
+        case "json":
+            return .json
+        case "markdown":
+            return .markdown
+        default:
+            return nil
+        }
+    }
+}
+
+struct MarkdownRenderedPreview: View {
+    let text: String
+    let query: String
+
+    var body: some View {
+        ScrollView {
+            Text(TextPreviewFormatter.highlightedText(renderedText, query: query, language: nil))
+                .font(.body)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+    }
+
+    private var renderedText: String {
+        MarkdownPreviewRenderer.renderedText(text)
+    }
+}
+
+enum MarkdownPreviewRenderer {
+    static func renderedText(_ text: String) -> String {
+        text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { renderedLine(String($0)) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func renderedLine(_ line: String) -> String {
+        var rendered = line.replacingOccurrences(
+            of: #"^\s{0,3}#{1,6}\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+        rendered = rendered.replacingOccurrences(
+            of: #"\[([^\]]+)\]\([^)]+\)"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        for token in ["**", "__", "`", "*", "_"] {
+            rendered = rendered.replacingOccurrences(of: token, with: "")
+        }
+        return rendered
+    }
+}
+
+struct DelimitedPreviewTable {
+    let headers: [String]
+    let rows: [[String]]
+    let totalRowCount: Int
+    let totalColumnCount: Int
+    let truncatedRows: Bool
+    let truncatedColumns: Bool
+
+    var isEmpty: Bool {
+        headers.isEmpty && rows.isEmpty
+    }
+}
+
+enum DelimitedTextParser {
+    static func delimiter(forFileName fileName: String) -> Character {
+        URL(fileURLWithPath: fileName).pathExtension.lowercased() == "tsv" ? "\t" : ","
+    }
+
+    static func parse(
+        _ text: String,
+        delimiter: Character,
+        maxRows: Int = 80,
+        maxColumns: Int = 12
+    ) -> DelimitedPreviewTable {
+        let records = parsedRecords(text, delimiter: delimiter)
+            .filter { row in
+                row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            }
+        guard let headerRow = records.first else {
+            return DelimitedPreviewTable(
+                headers: [],
+                rows: [],
+                totalRowCount: 0,
+                totalColumnCount: 0,
+                truncatedRows: false,
+                truncatedColumns: false
+            )
+        }
+
+        let widestRowCount = records.map(\.count).max() ?? 0
+        let visibleColumnCount = min(max(widestRowCount, 1), maxColumns)
+        let headers = (0..<visibleColumnCount).map { index in
+            guard index < headerRow.count else { return "Column \(index + 1)" }
+            let title = headerRow[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            return title.isEmpty ? "Column \(index + 1)" : title
+        }
+
+        let bodyRows = Array(records.dropFirst())
+        let visibleRows = bodyRows.prefix(maxRows).map { row in
+            (0..<visibleColumnCount).map { index in
+                index < row.count ? row[index] : ""
+            }
+        }
+
+        return DelimitedPreviewTable(
+            headers: headers,
+            rows: visibleRows,
+            totalRowCount: bodyRows.count,
+            totalColumnCount: widestRowCount,
+            truncatedRows: bodyRows.count > maxRows,
+            truncatedColumns: widestRowCount > maxColumns
+        )
+    }
+
+    private static func parsedRecords(_ text: String, delimiter: Character) -> [[String]] {
+        guard !text.isEmpty else { return [] }
+
+        var records: [[String]] = []
+        var row: [String] = []
+        var field = ""
+        var inQuotes = false
+        var index = text.startIndex
+        var endedOnRecordBoundary = false
+
+        while index < text.endIndex {
+            let character = text[index]
+            if inQuotes {
+                if character == "\"" {
+                    let nextIndex = text.index(after: index)
+                    if nextIndex < text.endIndex, text[nextIndex] == "\"" {
+                        field.append("\"")
+                        index = text.index(after: nextIndex)
+                    } else {
+                        inQuotes = false
+                        index = nextIndex
+                    }
+                } else {
+                    field.append(character)
+                    index = text.index(after: index)
+                }
+                endedOnRecordBoundary = false
+                continue
+            }
+
+            if character == "\"" {
+                inQuotes = true
+                index = text.index(after: index)
+                endedOnRecordBoundary = false
+            } else if character == delimiter {
+                row.append(field)
+                field = ""
+                index = text.index(after: index)
+                endedOnRecordBoundary = false
+            } else if character == "\n" || character == "\r" {
+                row.append(field)
+                records.append(row)
+                row = []
+                field = ""
+                let nextIndex = text.index(after: index)
+                if character == "\r", nextIndex < text.endIndex, text[nextIndex] == "\n" {
+                    index = text.index(after: nextIndex)
+                } else {
+                    index = nextIndex
+                }
+                endedOnRecordBoundary = true
+            } else {
+                field.append(character)
+                index = text.index(after: index)
+                endedOnRecordBoundary = false
+            }
+        }
+
+        if !endedOnRecordBoundary || !row.isEmpty || !field.isEmpty {
+            row.append(field)
+            records.append(row)
+        }
+
+        return records
+    }
+}
+
+struct DelimitedTablePreview: View {
+    let text: String
+    let delimiter: Character
+    let query: String
+
+    private let cellWidth: CGFloat = 148
+
+    var body: some View {
+        let table = DelimitedTextParser.parse(text, delimiter: delimiter)
+
+        ScrollView(.vertical) {
+            if table.isEmpty {
+                Text("No tabular rows found.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            } else {
+                ScrollView(.horizontal) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        tableRow(table.headers, isHeader: true)
+                        ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
+                            tableRow(row, isHeader: false)
+                        }
+                        if table.truncatedRows || table.truncatedColumns {
+                            Text(tableLimitText(table))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 8)
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func tableRow(_ cells: [String], isHeader: Bool) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                Text(TextPreviewFormatter.highlightedText(cell, query: query, language: nil))
+                    .font(.system(.caption, design: .monospaced).weight(isHeader ? .semibold : .regular))
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+                    .frame(width: cellWidth, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(isHeader ? Color(.tertiarySystemFill) : Color(.systemBackground))
+                    .overlay(
+                        Rectangle()
+                            .stroke(Color(.separator).opacity(0.16), lineWidth: 0.5)
+                    )
+            }
+        }
+    }
+
+    private func tableLimitText(_ table: DelimitedPreviewTable) -> String {
+        var parts: [String] = []
+        if table.truncatedRows {
+            parts.append("showing \(table.rows.count) of \(table.totalRowCount) rows")
+        }
+        if table.truncatedColumns {
+            parts.append("showing \(table.headers.count) of \(table.totalColumnCount) columns")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+struct JSONPreviewNode {
+    let key: String?
+    let value: String
+    let kind: String
+    let children: [JSONPreviewNode]
+}
+
+struct JSONPreviewRow: Identifiable {
+    let id = UUID()
+    let depth: Int
+    let key: String
+    let value: String
+    let kind: String
+}
+
+enum JSONPreviewParser {
+    static func parse(_ text: String) -> JSONPreviewNode? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let value = parseJSONValue(trimmed) {
+            return node(key: "Root", value: value)
+        }
+
+        let lineValues = trimmed
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .compactMap { parseJSONValue(String($0)) }
+        guard !lineValues.isEmpty else { return nil }
+        return node(key: "JSON Lines", value: lineValues)
+    }
+
+    static func flattenedRows(from node: JSONPreviewNode, maxRows: Int = 200) -> [JSONPreviewRow] {
+        var rows: [JSONPreviewRow] = []
+        appendRows(from: node, depth: 0, rows: &rows, maxRows: maxRows)
+        return rows
+    }
+
+    private static func appendRows(
+        from node: JSONPreviewNode,
+        depth: Int,
+        rows: inout [JSONPreviewRow],
+        maxRows: Int
+    ) {
+        guard rows.count < maxRows else { return }
+        rows.append(JSONPreviewRow(depth: depth, key: node.key ?? "Value", value: node.value, kind: node.kind))
+        for child in node.children {
+            appendRows(from: child, depth: depth + 1, rows: &rows, maxRows: maxRows)
+        }
+    }
+
+    private static func parseJSONValue(_ text: String) -> Any? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+    }
+
+    private static func node(key: String?, value: Any) -> JSONPreviewNode {
+        if let dictionary = value as? [String: Any] {
+            let children = dictionary.keys.sorted().map { childKey in
+                node(key: childKey, value: dictionary[childKey] as Any)
+            }
+            return JSONPreviewNode(
+                key: key,
+                value: "\(children.count) \(children.count == 1 ? "key" : "keys")",
+                kind: "object",
+                children: children
+            )
+        }
+
+        if let array = value as? [Any] {
+            let children = array.enumerated().map { index, child in
+                node(key: "[\(index)]", value: child)
+            }
+            return JSONPreviewNode(
+                key: key,
+                value: "\(children.count) \(children.count == 1 ? "item" : "items")",
+                kind: "array",
+                children: children
+            )
+        }
+
+        if value is NSNull {
+            return JSONPreviewNode(key: key, value: "null", kind: "null", children: [])
+        }
+
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return JSONPreviewNode(
+                    key: key,
+                    value: number.boolValue ? "true" : "false",
+                    kind: "boolean",
+                    children: []
+                )
+            }
+            return JSONPreviewNode(key: key, value: number.stringValue, kind: "number", children: [])
+        }
+
+        if let bool = value as? Bool {
+            return JSONPreviewNode(key: key, value: bool ? "true" : "false", kind: "boolean", children: [])
+        }
+
+        if let string = value as? String {
+            return JSONPreviewNode(key: key, value: string, kind: "string", children: [])
+        }
+
+        return JSONPreviewNode(key: key, value: String(describing: value), kind: "value", children: [])
+    }
+}
+
+struct JSONOutlinePreview: View {
+    let text: String
+    let query: String
+
+    var body: some View {
+        let root = JSONPreviewParser.parse(text)
+
+        ScrollView {
+            if let root {
+                LazyVStack(alignment: .leading, spacing: 7) {
+                    ForEach(JSONPreviewParser.flattenedRows(from: root)) { row in
+                        rowView(row)
+                    }
+                }
+                .padding()
+            } else {
+                Text("JSON could not be parsed. Switch to Raw to inspect the text.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+        }
+    }
+
+    private func rowView(_ row: JSONPreviewRow) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(row.key)
+                .font(.caption.monospaced().weight(.semibold))
+                .foregroundStyle(row.kind == "object" || row.kind == "array" ? .primary : .secondary)
+                .frame(minWidth: 72, alignment: .leading)
+            Text(TextPreviewFormatter.highlightedText(row.value, query: query, language: nil))
+                .font(.caption.monospaced())
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+                .textSelection(.enabled)
+        }
+        .padding(.leading, CGFloat(row.depth) * 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 enum TextPreviewFormatter {
     static func numberedText(_ text: String) -> String {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
@@ -980,13 +1508,19 @@ enum TextPreviewFormatter {
     }
 
     static func highlightedText(_ text: String, query: String, language: String? = nil) -> AttributedString {
-        var attributed = FilePreviewLanguage.highlightedText(text, language: language)
+        let attributed = FilePreviewLanguage.highlightedText(text, language: language)
+        return highlightQuery(in: attributed, query: query)
+    }
+
+    static func highlightQuery(in attributed: AttributedString, query: String) -> AttributedString {
+        var highlighted = attributed
+        let text = String(highlighted.characters)
         for range in matchRanges(in: text, query: query) {
-            guard let attributedRange = Range(range, in: attributed) else { continue }
-            attributed[attributedRange].backgroundColor = Color.yellow.opacity(0.35)
-            attributed[attributedRange].foregroundColor = Color.primary
+            guard let attributedRange = Range(range, in: highlighted) else { continue }
+            highlighted[attributedRange].backgroundColor = Color.yellow.opacity(0.35)
+            highlighted[attributedRange].foregroundColor = Color.primary
         }
-        return attributed
+        return highlighted
     }
 }
 
