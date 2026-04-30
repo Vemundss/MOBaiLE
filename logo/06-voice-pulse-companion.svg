@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="128" y1="96" x2="896" y2="930" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071525"/>
+      <stop offset="1" stop-color="#0C6E67"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 524) rotate(90) scale(334)">
+      <stop stop-color="#F7FDFF"/>
+      <stop offset="0.62" stop-color="#CFF7EF"/>
+      <stop offset="1" stop-color="#84D8FF"/>
+    </radialGradient>
+    <filter id="shadow" x="116" y="122" width="796" height="820" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="30" stdDeviation="34" flood-color="#001421" flood-opacity="0.30"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <path d="M710 0H1024V268L812 214L710 0Z" fill="#31D0B8"/>
+  <path d="M0 744L328 1024H0V744Z" fill="#1B73E8"/>
+  <g filter="url(#shadow)">
+    <circle cx="512" cy="524" r="318" fill="url(#orb)"/>
+    <circle cx="512" cy="524" r="358" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="28"/>
+    <path d="M272 526C318 454 364 598 410 526C456 454 502 598 548 526C594 454 640 598 686 526C732 454 778 526 778 526" stroke="#102236" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="386" cy="402" r="34" fill="#102236"/>
+    <circle cx="638" cy="402" r="34" fill="#102236"/>
+    <circle cx="374" cy="390" r="10" fill="white"/>
+    <circle cx="626" cy="390" r="10" fill="white"/>
+    <path d="M420 662C464 700 560 700 604 662" stroke="#102236" stroke-width="26" stroke-linecap="round"/>
+    <rect x="698" y="288" width="124" height="96" rx="32" fill="#FFFFFF"/>
+    <path d="M734 384L710 424V370L734 384Z" fill="#FFFFFF"/>
+    <circle cx="744" cy="336" r="10" fill="#1B73E8"/>
+    <circle cx="780" cy="336" r="10" fill="#29C6B2"/>
+  </g>
+</svg>

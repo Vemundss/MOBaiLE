@@ -1,0 +1,35 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="132" y1="104" x2="884" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAF7FF"/>
+      <stop offset="1" stop-color="#DDF4ED"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="244" y1="202" x2="780" y2="846" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#69A6FF"/>
+      <stop offset="0.52" stop-color="#6FDACB"/>
+      <stop offset="1" stop-color="#FF9F6E"/>
+    </linearGradient>
+    <filter id="softShadow" x="116" y="130" width="800" height="812" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#0B2436" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <path d="M198 548C198 364.083 344.083 218 528 218C711.917 218 858 364.083 858 548C858 731.917 711.917 878 528 878C344.083 878 198 731.917 198 548Z" fill="url(#ring)" opacity="0.22"/>
+  <g filter="url(#softShadow)">
+    <circle cx="512" cy="548" r="300" fill="#FFFDF9"/>
+    <circle cx="512" cy="548" r="300" stroke="url(#ring)" stroke-width="38"/>
+    <rect x="444" y="158" width="136" height="242" rx="68" fill="#556EEB"/>
+    <rect x="480" y="108" width="64" height="86" rx="32" fill="#29C6B2"/>
+    <circle cx="228" cy="540" r="82" fill="#7C91FF"/>
+    <circle cx="796" cy="540" r="82" fill="#FF8E6E"/>
+    <circle cx="394" cy="516" r="72" fill="#17213D"/>
+    <circle cx="630" cy="516" r="72" fill="#17213D"/>
+    <circle cx="366" cy="488" r="22" fill="white"/>
+    <circle cx="602" cy="488" r="22" fill="white"/>
+    <circle cx="342" cy="646" r="42" fill="#FFB5CF"/>
+    <circle cx="682" cy="646" r="42" fill="#FFCBB8"/>
+    <path d="M370 706C424 754 600 754 654 706" stroke="#17213D" stroke-width="28" stroke-linecap="round"/>
+    <path d="M374 718C430 746 594 746 650 718" stroke="#7ADFD0" stroke-width="12" stroke-linecap="round"/>
+  </g>
+  <path d="M802 286L824 334L876 338L836 372L850 424L802 396L754 424L768 372L728 338L780 334L802 286Z" fill="#FFC84A"/>
+</svg>
