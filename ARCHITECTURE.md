@@ -67,7 +67,8 @@ For the current concrete endpoint list, read [`backend/app/main.py`](backend/app
 
 The phone UI is built around a typed chat envelope, not raw terminal text.
 
-- `ChatEnvelope` carries `summary`, `sections`, `agenda_items`, and `artifacts`
+- `ChatEnvelope` carries `summary`, `sections`, `agenda_items`, `artifacts`, and typed phone-surface metadata for changed files, commands/tests, warnings, and next actions
+- `message_kind` separates replaceable live progress from final user-facing results
 - SSE run events include chat-oriented events and log-oriented events
 - message IDs and timestamps are part of the schema for stable reconciliation
 

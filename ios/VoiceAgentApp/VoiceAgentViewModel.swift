@@ -2598,6 +2598,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         switch event.type {
         case "chat.message":
             if message.isEmpty { return nil }
+            if parseEnvelope(message)?.messageKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "progress" {
+                return nil
+            }
             if liveActivitySummary(from: message) != nil {
                 return nil
             }
@@ -2764,6 +2767,27 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             }
         }
 
+        if segments.count < 2 {
+            if !envelope.fileChanges.isEmpty {
+                let count = envelope.fileChanges.count
+                segments.append(count == 1 ? "Changed one file." : "Changed \(count) files.")
+            }
+            if !envelope.testsRun.isEmpty {
+                let hasFailure = envelope.testsRun.contains { $0.status.lowercased() == "failed" }
+                let hasSkipped = envelope.testsRun.contains { $0.status.lowercased() == "skipped" }
+                if hasFailure {
+                    segments.append("Verification has a failure on screen.")
+                } else if hasSkipped {
+                    segments.append("Some verification was skipped.")
+                } else {
+                    segments.append("Verification passed.")
+                }
+            }
+            if !envelope.warnings.isEmpty {
+                segments.append("There are warnings on screen.")
+            }
+        }
+
         if segments.isEmpty {
             if !envelope.agendaItems.isEmpty {
                 segments.append("I have follow-up items on screen.")
@@ -2867,7 +2891,17 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func isProgressAssistantMessage(_ text: String) -> Bool {
         if let envelope = parseEnvelope(text) {
-            if !envelope.agendaItems.isEmpty || !envelope.artifacts.isEmpty {
+            let messageKind = envelope.messageKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if messageKind == "progress" {
+                return true
+            }
+            if !envelope.agendaItems.isEmpty
+                || !envelope.artifacts.isEmpty
+                || !envelope.fileChanges.isEmpty
+                || !envelope.commandsRun.isEmpty
+                || !envelope.testsRun.isEmpty
+                || !envelope.warnings.isEmpty
+                || !envelope.nextActions.isEmpty {
                 return false
             }
             if envelope.sections.count > 1 {
@@ -2932,7 +2966,24 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         guard !message.isEmpty else { return nil }
 
         if let envelope = parseEnvelope(message) {
-            if !envelope.agendaItems.isEmpty || !envelope.artifacts.isEmpty || envelope.sections.count > 1 {
+            let messageKind = envelope.messageKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if messageKind == "progress" {
+                let body = envelope.sections.first?.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                let summary = envelope.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let body, !body.isEmpty {
+                    return compactLiveActivityText(body)
+                }
+                guard !summary.isEmpty else { return nil }
+                return compactLiveActivityText(summary)
+            }
+            if !envelope.agendaItems.isEmpty
+                || !envelope.artifacts.isEmpty
+                || !envelope.fileChanges.isEmpty
+                || !envelope.commandsRun.isEmpty
+                || !envelope.testsRun.isEmpty
+                || !envelope.warnings.isEmpty
+                || !envelope.nextActions.isEmpty
+                || envelope.sections.count > 1 {
                 return nil
             }
             if let section = envelope.sections.first {

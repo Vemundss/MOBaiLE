@@ -501,9 +501,6 @@ struct ContentView: View {
     }
 
     private var bottomRunStatusText: String {
-        if vm.runPhaseText == "Planning" || vm.runPhaseText == "Executing" || vm.runPhaseText == "Summarizing" {
-            return "Thinking"
-        }
         if vm.runPhaseText != "Idle" {
             return vm.runPhaseText
         }

@@ -147,7 +147,7 @@ def test_agent_run_service_retries_stale_codex_resume_with_fresh_session(monkeyp
     assert start_calls == ["stale-thread", None]
     assert monitor_calls == ["stale-thread", None]
     assert run.status == "completed"
-    assert run.summary == "Run completed successfully"
+    assert run.summary == "Fresh session succeeded."
     assert run_state.run_store.get_agent_session_id("codex", "session-1", client_thread_id) == "fresh-thread"
     assert any(event.type == "action.completed" and "resume failed" in event.message for event in run.events)
     assert any(event.type == "action.started" and event.action_index == 1 for event in run.events)

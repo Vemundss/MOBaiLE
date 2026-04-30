@@ -87,6 +87,37 @@ class ChatSection(BaseModel):
     body: str
 
 
+class ChatFileChange(BaseModel):
+    path: str
+    status: Literal["created", "modified", "deleted", "renamed", "generated", "unknown"] = "unknown"
+    summary: str | None = None
+    artifact: ChatArtifact | None = None
+
+
+class ChatCommandRun(BaseModel):
+    command: str
+    status: Literal["passed", "failed", "skipped", "unknown"] = "unknown"
+    exit_code: int | None = None
+    summary: str | None = None
+
+
+class ChatTestRun(BaseModel):
+    name: str
+    status: Literal["passed", "failed", "skipped", "unknown"] = "unknown"
+    summary: str | None = None
+
+
+class ChatWarning(BaseModel):
+    message: str
+    level: Literal["info", "warning", "error"] = "warning"
+
+
+class ChatNextAction(BaseModel):
+    title: str
+    detail: str | None = None
+    kind: Literal["continue", "retry", "open_logs", "inspect_artifact", "custom"] = "custom"
+
+
 class HumanUnblockRequest(BaseModel):
     instructions: str
     suggested_reply: str = "I completed the requested unblock step. Continue from the preserved state."
@@ -103,12 +134,18 @@ class AgendaItem(BaseModel):
 class ChatEnvelope(BaseModel):
     type: Literal["assistant_response"] = "assistant_response"
     version: Literal["1.0"] = "1.0"
+    message_kind: Literal["progress", "final", "notice"] = "final"
     message_id: str | None = None
     created_at: str | None = None
     summary: str
     sections: list[ChatSection] = Field(default_factory=list)
     agenda_items: list[AgendaItem] = Field(default_factory=list)
     artifacts: list["ChatArtifact"] = Field(default_factory=list)
+    file_changes: list[ChatFileChange] = Field(default_factory=list)
+    commands_run: list[ChatCommandRun] = Field(default_factory=list)
+    tests_run: list[ChatTestRun] = Field(default_factory=list)
+    warnings: list[ChatWarning] = Field(default_factory=list)
+    next_actions: list[ChatNextAction] = Field(default_factory=list)
 
 
 class ChatArtifact(BaseModel):

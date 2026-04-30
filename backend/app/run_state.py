@@ -8,15 +8,24 @@ from datetime import datetime, timezone
 from typing import Iterator, Literal
 
 from app.chat_envelope import (
+    chat_envelope_transport_json,
     coerce_assistant_text_to_envelope,
+    concise_chat_summary,
+    enhance_chat_envelope,
+    infer_chat_message_kind,
     parse_chat_envelope_payload,
 )
 from app.models.schemas import (
     ActionPlan,
     AgendaItem,
     ChatArtifact,
+    ChatCommandRun,
     ChatEnvelope,
+    ChatFileChange,
+    ChatNextAction,
     ChatSection,
+    ChatTestRun,
+    ChatWarning,
     ExecutionEvent,
     HumanUnblockRequest,
     RunDiagnostics,
@@ -121,7 +130,7 @@ class RunState:
         if not event.created_at:
             event.created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         if len(event.message) > self.max_event_message_chars:
-            event.message = event.message[: self.max_event_message_chars] + "\n...[truncated]"
+            event.message = self._truncate_event_message(event)
         with self._runs_lock:
             run = self._runs.get(run_id)
             if run is None:
@@ -143,35 +152,77 @@ class RunState:
         sections: list[ChatSection] | None = None,
         agenda_items: list[AgendaItem] | None = None,
         artifacts: list[ChatArtifact] | None = None,
+        message_kind: Literal["progress", "final", "notice"] = "final",
+        file_changes: list[ChatFileChange] | None = None,
+        commands_run: list[ChatCommandRun] | None = None,
+        tests_run: list[ChatTestRun] | None = None,
+        warnings: list[ChatWarning] | None = None,
+        next_actions: list[ChatNextAction] | None = None,
     ) -> None:
         envelope = ChatEnvelope(
             message_id=str(uuid.uuid4()),
             created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            message_kind=message_kind,
             summary=summary,
             sections=sections or [],
             agenda_items=agenda_items or [],
             artifacts=artifacts or [],
+            file_changes=file_changes or [],
+            commands_run=commands_run or [],
+            tests_run=tests_run or [],
+            warnings=warnings or [],
+            next_actions=next_actions or [],
         )
+        envelope = enhance_chat_envelope(envelope, infer_message_kind=False)
         self.append_event(
             run_id,
-            ExecutionEvent(type="chat.message", message=envelope.model_dump_json()),
+            ExecutionEvent(
+                type="chat.message",
+                message=chat_envelope_transport_json(envelope, self.max_event_message_chars),
+            ),
         )
 
     def append_assistant_payload(self, run_id: str, raw_text: str) -> ChatEnvelope:
         payload = parse_chat_envelope_payload(raw_text)
         if payload is not None:
+            has_explicit_message_kind = "message_kind" in payload
             envelope = ChatEnvelope.model_validate(payload)
+            envelope = enhance_chat_envelope(envelope, infer_message_kind=not has_explicit_message_kind)
+            if not has_explicit_message_kind:
+                envelope = envelope.model_copy(update={"message_kind": infer_chat_message_kind(envelope)})
             self.append_event(
                 run_id,
-                ExecutionEvent(type="chat.message", message=json.dumps(payload)),
+                ExecutionEvent(
+                    type="chat.message",
+                    message=chat_envelope_transport_json(envelope, self.max_event_message_chars),
+                ),
             )
             return envelope
         envelope = coerce_assistant_text_to_envelope(raw_text)
         self.append_event(
             run_id,
-            ExecutionEvent(type="chat.message", message=envelope.model_dump_json()),
+            ExecutionEvent(
+                type="chat.message",
+                message=chat_envelope_transport_json(envelope, self.max_event_message_chars),
+            ),
         )
         return envelope
+
+    def latest_chat_summary(self, run_id: str) -> str | None:
+        run = self.get_run(run_id)
+        if run is None:
+            return None
+        for event in reversed(run.events):
+            if event.type != "chat.message":
+                continue
+            payload = parse_chat_envelope_payload(event.message)
+            if payload is None:
+                continue
+            envelope = ChatEnvelope.model_validate(payload)
+            summary = concise_chat_summary(envelope)
+            if summary is not None:
+                return summary
+        return None
 
     def append_log_message(self, run_id: str, message: str, *, action_index: int | None = 0) -> None:
         text = message.strip()
@@ -203,6 +254,16 @@ class RunState:
                 level=level,
             ),
         )
+
+    def _truncate_event_message(self, event: ExecutionEvent) -> str:
+        if event.type == "chat.message":
+            payload = parse_chat_envelope_payload(event.message)
+            if payload is not None:
+                envelope = ChatEnvelope.model_validate(payload)
+                rendered = chat_envelope_transport_json(envelope, self.max_event_message_chars)
+                if len(rendered) <= self.max_event_message_chars:
+                    return rendered
+        return event.message[: self.max_event_message_chars] + "\n...[truncated]"
 
     def set_run_status(
         self,

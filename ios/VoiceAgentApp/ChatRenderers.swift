@@ -91,6 +91,22 @@ struct MessageBubble: View {
                         RemoteImageView(urlString: url, serverURL: serverURL, apiToken: apiToken)
                     case let .section(title, body):
                         SectionCard(title: title, content: body, isUser: isUser)
+                    case let .fileChanges(items):
+                        FileChangesCard(
+                            items: items,
+                            openingArtifactID: openingArtifactID,
+                            onOpen: { artifact in
+                                Task {
+                                    await openArtifact(artifact)
+                                }
+                            }
+                        )
+                    case let .verification(commands, tests):
+                        VerificationCard(commands: commands, tests: tests)
+                    case let .warnings(items):
+                        WarningsCard(items: items)
+                    case let .nextActions(items):
+                        NextActionsCard(items: items)
                     case let .artifact(item):
                         ArtifactCard(
                             artifact: item,
@@ -528,16 +544,29 @@ private struct SectionCard: View {
                 MarkdownText(text: trimmed, isUser: isUser)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
+        .padding(.leading, isUser ? 10 : 12)
+        .padding(.trailing, isUser ? 10 : 0)
+        .padding(.vertical, isUser ? 9 : 4)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isUser ? Color.white.opacity(0.08) : Color(.tertiarySystemGroupedBackground))
+                .fill(isUser ? Color.white.opacity(0.08) : Color.clear)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isUser ? Color.white.opacity(0.08) : style.tint.opacity(0.10), lineWidth: 1)
+            Group {
+                if isUser {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                }
+            }
         )
+        .overlay(alignment: .leading) {
+            if !isUser {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(style.tint.opacity(0.55))
+                    .frame(width: 3)
+                    .padding(.vertical, 4)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -562,6 +591,273 @@ private struct SectionCard: View {
         default:
             return ("text.alignleft", Color.secondary)
         }
+    }
+}
+
+private struct FileChangesCard: View {
+    let items: [ChatFileChange]
+    let openingArtifactID: String?
+    let onOpen: (ChatArtifact) -> Void
+
+    var body: some View {
+        TypedResultCard(title: "Changed Files", systemImage: "folder.badge.gearshape", tint: .blue) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: fileChangeIcon(for: item.status))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(fileChangeTint(for: item.status))
+                            .frame(width: 22, height: 22)
+                            .background(fileChangeTint(for: item.status).opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(lastPathComponent(item.path))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Text(fileChangeTitle(for: item.status))
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(fileChangeTint(for: item.status))
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(fileChangeTint(for: item.status).opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+
+                            Text(item.path)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+
+                            if let summary = item.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+                               !summary.isEmpty,
+                               summary != item.path {
+                                Text(summary)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        if let artifact = item.artifact {
+                            Button {
+                                onOpen(artifact)
+                            } label: {
+                                if openingArtifactID == artifact.id {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.up.right.square")
+                                        .imageScale(.medium)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+                            .frame(width: 32, height: 32)
+                            .accessibilityLabel("Open \(artifact.title)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct VerificationCard: View {
+    let commands: [ChatCommandRun]
+    let tests: [ChatTestRun]
+
+    var body: some View {
+        TypedResultCard(title: "Verification", systemImage: "checkmark.seal", tint: verificationTint) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(tests) { test in
+                    VerificationRow(
+                        title: test.name,
+                        detail: test.summary,
+                        status: test.status,
+                        isCommand: false
+                    )
+                }
+
+                ForEach(commands.filter { command in
+                    !tests.contains(where: { $0.name == command.command })
+                }) { command in
+                    VerificationRow(
+                        title: command.command,
+                        detail: command.summary,
+                        status: command.status,
+                        isCommand: true
+                    )
+                }
+            }
+        }
+    }
+
+    private var verificationTint: Color {
+        let statuses = tests.map(\.status) + commands.map(\.status)
+        if statuses.contains(where: { $0.lowercased() == "failed" }) {
+            return .red
+        }
+        if statuses.contains(where: { $0.lowercased() == "skipped" }) {
+            return .orange
+        }
+        return .green
+    }
+}
+
+private struct VerificationRow: View {
+    let title: String
+    let detail: String?
+    let status: String
+    let isCommand: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: statusIcon(for: status, fallback: isCommand ? "terminal" : "checkmark.circle"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(statusTint(for: status))
+                .frame(width: 22, height: 22)
+                .background(statusTint(for: status).opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(isCommand ? .caption.monospaced() : .subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(isCommand ? 3 : 2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+
+                if let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !detail.isEmpty,
+                   detail != title {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+private struct WarningsCard: View {
+    let items: [ChatWarning]
+
+    var body: some View {
+        TypedResultCard(title: title, systemImage: systemImage, tint: tint) {
+            VStack(alignment: .leading, spacing: 9) {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 9) {
+                        Image(systemName: warningIcon(for: item.level))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(warningTint(for: item.level))
+                            .padding(.top, 2)
+                        Text(item.message)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    private var title: String {
+        items.contains { $0.level.lowercased() != "info" } ? "Needs Attention" : "Notes"
+    }
+
+    private var systemImage: String {
+        items.contains { $0.level.lowercased() != "info" } ? "exclamationmark.triangle" : "info.circle"
+    }
+
+    private var tint: Color {
+        if items.contains(where: { $0.level.lowercased() == "error" }) {
+            return .red
+        }
+        if items.contains(where: { $0.level.lowercased() == "warning" }) {
+            return .orange
+        }
+        return .blue
+    }
+}
+
+private struct NextActionsCard: View {
+    let items: [ChatNextAction]
+
+    var body: some View {
+        TypedResultCard(title: "Next Actions", systemImage: "arrow.right.circle", tint: .indigo) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: nextActionIcon(for: item.kind))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.indigo)
+                            .frame(width: 22, height: 22)
+                            .background(Color.indigo.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let detail = item.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty {
+                                Text(detail)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct TypedResultCard<Content: View>: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let content: Content
+
+    init(title: String, systemImage: String, tint: Color, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tint = tint
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .imageScale(.small)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(tint)
+
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(11)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.tertiarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tint.opacity(0.12), lineWidth: 1)
+        )
     }
 }
 
@@ -749,6 +1045,10 @@ struct MessageSegment: Identifiable {
         case status(text: String)
         case image(url: String)
         case section(title: String, body: String)
+        case fileChanges(items: [ChatFileChange])
+        case verification(commands: [ChatCommandRun], tests: [ChatTestRun])
+        case warnings(items: [ChatWarning])
+        case nextActions(items: [ChatNextAction])
         case artifact(item: ChatArtifact)
         case agenda(items: [ChatAgendaItem])
         case emailDigest(items: [EmailDigestItem])
@@ -777,6 +1077,16 @@ struct MessageSegment: Identifiable {
             kindSeed = "image:\(url)"
         case let .section(title, _):
             kindSeed = "section:\(title)"
+        case let .fileChanges(items):
+            kindSeed = "files:\(items.map(\.id).joined(separator: "|"))"
+        case let .verification(commands, tests):
+            let commandSeed = commands.map(\.id).joined(separator: "|")
+            let testSeed = tests.map(\.id).joined(separator: "|")
+            kindSeed = "verification:\(commandSeed):\(testSeed)"
+        case let .warnings(items):
+            kindSeed = "warnings:\(items.map(\.id).joined(separator: "|"))"
+        case let .nextActions(items):
+            kindSeed = "next:\(items.map(\.id).joined(separator: "|"))"
         case let .artifact(item):
             kindSeed = "artifact:\(item.id)"
         case let .agenda(items):
@@ -804,6 +1114,145 @@ struct EmailDigestItem: Identifiable {
     let sender: String?
 }
 
+private func shouldSuppressSection(_ title: String, envelope: ChatEnvelope) -> Bool {
+    let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if !envelope.fileChanges.isEmpty,
+       ["artifacts", "changed files", "file changes", "files", "files changed"].contains(normalized) {
+        return true
+    }
+    if (!envelope.commandsRun.isEmpty || !envelope.testsRun.isEmpty),
+       ["checks", "commands", "tests", "tests run", "verification"].contains(normalized) {
+        return true
+    }
+    if !envelope.warnings.isEmpty,
+       ["blocked", "caveat", "caveats", "failure", "failed", "warnings"].contains(normalized) {
+        return true
+    }
+    if !envelope.nextActions.isEmpty,
+       ["human unblock", "next action", "next actions", "next step", "next steps"].contains(normalized) {
+        return true
+    }
+    return false
+}
+
+private func lastPathComponent(_ path: String) -> String {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "File" }
+    if let url = URL(string: trimmed), url.scheme != nil {
+        return url.lastPathComponent.isEmpty ? trimmed : url.lastPathComponent
+    }
+    let component = URL(fileURLWithPath: trimmed).lastPathComponent
+    return component.isEmpty ? trimmed : component
+}
+
+private func fileChangeTitle(for status: String) -> String {
+    switch status.lowercased() {
+    case "created":
+        return "Created"
+    case "modified":
+        return "Updated"
+    case "deleted":
+        return "Deleted"
+    case "renamed":
+        return "Renamed"
+    case "generated":
+        return "Generated"
+    default:
+        return "Changed"
+    }
+}
+
+private func fileChangeIcon(for status: String) -> String {
+    switch status.lowercased() {
+    case "created", "generated":
+        return "plus"
+    case "modified":
+        return "pencil"
+    case "deleted":
+        return "trash"
+    case "renamed":
+        return "arrow.left.arrow.right"
+    default:
+        return "doc"
+    }
+}
+
+private func fileChangeTint(for status: String) -> Color {
+    switch status.lowercased() {
+    case "created", "generated":
+        return .green
+    case "modified", "renamed":
+        return .blue
+    case "deleted":
+        return .red
+    default:
+        return .secondary
+    }
+}
+
+private func statusIcon(for status: String, fallback: String) -> String {
+    switch status.lowercased() {
+    case "passed":
+        return "checkmark.circle.fill"
+    case "failed":
+        return "xmark.circle.fill"
+    case "skipped":
+        return "minus.circle.fill"
+    default:
+        return fallback
+    }
+}
+
+private func statusTint(for status: String) -> Color {
+    switch status.lowercased() {
+    case "passed":
+        return .green
+    case "failed":
+        return .red
+    case "skipped":
+        return .orange
+    default:
+        return .secondary
+    }
+}
+
+private func warningTint(for level: String) -> Color {
+    switch level.lowercased() {
+    case "error":
+        return .red
+    case "warning":
+        return .orange
+    default:
+        return .blue
+    }
+}
+
+private func warningIcon(for level: String) -> String {
+    switch level.lowercased() {
+    case "error":
+        return "xmark.octagon.fill"
+    case "warning":
+        return "exclamationmark.circle.fill"
+    default:
+        return "info.circle.fill"
+    }
+}
+
+private func nextActionIcon(for kind: String) -> String {
+    switch kind.lowercased() {
+    case "continue":
+        return "play.circle"
+    case "retry":
+        return "arrow.clockwise"
+    case "open_logs":
+        return "doc.text.magnifyingglass"
+    case "inspect_artifact":
+        return "arrow.up.right.square"
+    default:
+        return "arrow.right"
+    }
+}
+
 private func parseSegments(
     from text: String,
     serverURL: String,
@@ -813,6 +1262,7 @@ private func parseSegments(
     var segments: [MessageSegment] = []
 
     if let envelope = parseChatEnvelope(from: text) {
+        let isProgressEnvelope = envelope.messageKind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "progress"
         let summaryRaw = massageForDisplay ? massageAssistantTextForDisplay(envelope.summary) : envelope.summary
         let summary = summaryRaw.trimmingCharacters(in: .whitespacesAndNewlines)
         let firstSectionRaw = envelope.sections.first?.body ?? ""
@@ -827,9 +1277,27 @@ private func parseSegments(
                 segments.append(MessageSegment(kind: .markdown, content: summary))
             }
         }
+        if isProgressEnvelope {
+            return segmentsWithUniqueStableIDs(segments)
+        }
+        if !envelope.warnings.isEmpty {
+            segments.append(MessageSegment(kind: .warnings(items: envelope.warnings), content: "warnings"))
+        }
+        if !envelope.fileChanges.isEmpty {
+            segments.append(MessageSegment(kind: .fileChanges(items: envelope.fileChanges), content: "fileChanges"))
+        }
+        if !envelope.commandsRun.isEmpty || !envelope.testsRun.isEmpty {
+            segments.append(MessageSegment(
+                kind: .verification(commands: envelope.commandsRun, tests: envelope.testsRun),
+                content: "verification"
+            ))
+        }
         for section in envelope.sections {
             let title = section.title.trimmingCharacters(in: .whitespacesAndNewlines)
             if title.isEmpty || isContextLeakLine(title) {
+                continue
+            }
+            if shouldSuppressSection(title, envelope: envelope) {
                 continue
             }
             let bodyRaw = massageForDisplay ? massageAssistantTextForDisplay(section.body) : section.body
@@ -857,6 +1325,9 @@ private func parseSegments(
         }
         if !envelope.agendaItems.isEmpty {
             segments.append(MessageSegment(kind: .agenda(items: envelope.agendaItems), content: "agenda"))
+        }
+        if !envelope.nextActions.isEmpty {
+            segments.append(MessageSegment(kind: .nextActions(items: envelope.nextActions), content: "nextActions"))
         }
         return segmentsWithUniqueStableIDs(segments)
     }
@@ -1601,6 +2072,14 @@ func _test_messageSegmentKindNames(_ text: String, serverURL: String, workspaceP
             return "image"
         case .section:
             return "section"
+        case .fileChanges:
+            return "fileChanges"
+        case .verification:
+            return "verification"
+        case .warnings:
+            return "warnings"
+        case .nextActions:
+            return "nextActions"
         case .artifact:
             return "artifact"
         case .agenda:

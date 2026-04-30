@@ -134,3 +134,34 @@ def test_agent_stream_handler_flushes_codex_extractor_output(tmp_path: Path) -> 
     assert run is not None
     chat_messages = [event.message for event in run.events if event.type == "chat.message"]
     assert any("Implemented the fix." in message for message in chat_messages)
+
+
+def test_agent_stream_handler_preserves_codex_structured_diagnostics(tmp_path: Path) -> None:
+    run_state = _run_state(tmp_path)
+    handler = AgentStreamHandler(run_state=run_state)
+    extractor = CodexAssistantExtractor("prompt", [])
+
+    blocked, linked_session_id = handler.consume_message(
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": "pytest backend/tests/test_chat_envelope.py",
+                },
+            }
+        ),
+        run_id="run-1",
+        session_id="session-1",
+        executor="codex",
+        client_thread_id=None,
+        linked_session_id=None,
+        chat_extractor=extractor,
+    )
+
+    assert blocked is False
+    assert linked_session_id is None
+    run = run_state.get_run("run-1")
+    assert run is not None
+    log_messages = [event.message for event in run.events if event.type == "log.message"]
+    assert any("command_execution" in message and "pytest" in message for message in log_messages)

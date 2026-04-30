@@ -493,11 +493,13 @@ For use beyond local network:
 iOS chat is now always concise by default:
 
 - user-facing chat shows assistant summaries/structured cards.
+- final assistant envelopes can include typed changed files, verification, warnings, artifacts, and next actions for higher-quality phone rendering.
+- `message_kind=progress` updates the live activity row, while final envelopes become durable chat messages.
 - noisy execution stream stays out of chat.
 - raw backend event output remains available in the `Logs` view (Developer Mode).
 - artifact `Open` actions now use authenticated in-app download/preview, so protected `/v1/files` resources open reliably.
 
 Event channel model:
 
-- `chat.message`: user-facing structured assistant envelope.
+- `chat.message`: user-facing structured assistant envelope; progress envelopes are replaceable live activity, final envelopes are persistent chat results.
 - `log.message`: raw execution/log stream for diagnostics.

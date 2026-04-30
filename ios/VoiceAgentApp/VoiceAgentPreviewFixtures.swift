@@ -281,6 +281,7 @@ enum VoiceAgentPreviewFactory {
 {
   "type": "assistant_response",
   "version": "1.0",
+  "message_kind": "final",
   "summary": "Smoke test finished.",
   "sections": [
     {
@@ -289,7 +290,56 @@ enum VoiceAgentPreviewFactory {
     }
   ],
   "agenda_items": [],
-  "artifacts": []
+  "artifacts": [],
+  "file_changes": [
+    {
+      "path": "backend/app/chat_envelope.py",
+      "status": "modified",
+      "summary": "Improved the phone-facing assistant envelope."
+    },
+    {
+      "path": "ios/VoiceAgentApp/ChatRenderers.swift",
+      "status": "modified",
+      "summary": "Added native result cards for compact review."
+    }
+  ],
+  "commands_run": [
+    {
+      "command": "cd backend && uv run pytest tests/test_chat_envelope.py",
+      "status": "passed",
+      "summary": "Envelope extraction tests passed."
+    },
+    {
+      "command": "xcodebuild test -project ios/VoiceAgentApp.xcodeproj -scheme VoiceAgentApp -only-testing:VoiceAgentAppTests/VoiceAgentModelTests",
+      "status": "passed",
+      "summary": "Model and renderer tests passed."
+    }
+  ],
+  "tests_run": [
+    {
+      "name": "backend envelope tests",
+      "status": "passed",
+      "summary": "6 tests passed."
+    },
+    {
+      "name": "VoiceAgentModelTests",
+      "status": "passed",
+      "summary": "138 tests passed."
+    }
+  ],
+  "warnings": [
+    {
+      "message": "Review the screenshots before shipping a visual change.",
+      "level": "info"
+    }
+  ],
+  "next_actions": [
+    {
+      "title": "Open Run Logs",
+      "detail": "Inspect the raw event tape if you need command-level detail.",
+      "kind": "open_logs"
+    }
+  ]
 }
 """
             ),

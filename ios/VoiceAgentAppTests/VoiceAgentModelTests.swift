@@ -777,17 +777,56 @@ final class VoiceAgentModelTests: XCTestCase {
           "version":"1.0",
           "message_id":"msg-1",
           "created_at":"2026-02-27T09:00:00Z",
+          "message_kind":"final",
           "summary":"Done",
           "sections":[{"title":"Result","body":"Created file"}],
           "agenda_items":[],
-          "artifacts":[{"type":"file","title":"hello.py","path":"/Users/test/hello.py","mime":"text/x-python"}]
+          "artifacts":[{"type":"file","title":"hello.py","path":"/Users/test/hello.py","mime":"text/x-python"}],
+          "file_changes":[{"path":"/Users/test/hello.py","status":"created","summary":"Created hello.py","artifact":{"type":"file","title":"hello.py","path":"/Users/test/hello.py","mime":"text/x-python"}}],
+          "commands_run":[{"command":"cd backend && uv run pytest tests/test_chat_envelope.py","status":"passed","summary":"pytest passed"}],
+          "tests_run":[{"name":"tests/test_chat_envelope.py","status":"passed","summary":"passed"}],
+          "warnings":[{"message":"Screenshot verification was skipped.","level":"warning"}],
+          "next_actions":[{"title":"Open Run Logs","detail":"Review raw output if needed.","kind":"open_logs"}]
         }
         """
         let data = Data(json.utf8)
         let decoded = try JSONDecoder().decode(ChatEnvelope.self, from: data)
         XCTAssertEqual(decoded.summary, "Done")
+        XCTAssertEqual(decoded.messageKind, "final")
         XCTAssertEqual(decoded.artifacts.count, 1)
         XCTAssertEqual(decoded.artifacts.first?.path, "/Users/test/hello.py")
+        XCTAssertEqual(decoded.fileChanges.first?.status, "created")
+        XCTAssertEqual(decoded.commandsRun.first?.status, "passed")
+        XCTAssertEqual(decoded.testsRun.first?.name, "tests/test_chat_envelope.py")
+        XCTAssertEqual(decoded.warnings.first?.level, "warning")
+        XCTAssertEqual(decoded.nextActions.first?.kind, "open_logs")
+    }
+
+    func testChatEnvelopeTypedResultSegmentsRenderBeforeFallbackSections() {
+        let envelope = """
+        {
+          "type":"assistant_response",
+          "version":"1.0",
+          "message_kind":"final",
+          "summary":"Done",
+          "sections":[
+            {"title":"Changed Files","body":"- Updated `backend/app/chat_envelope.py`."},
+            {"title":"Verification","body":"- `uv run pytest` passed."},
+            {"title":"Result","body":"Phone surface is richer."}
+          ],
+          "agenda_items":[],
+          "artifacts":[],
+          "file_changes":[{"path":"backend/app/chat_envelope.py","status":"modified","summary":"Updated envelope metadata."}],
+          "commands_run":[{"command":"uv run pytest","status":"passed","summary":"passed"}],
+          "tests_run":[{"name":"uv run pytest","status":"passed","summary":"passed"}],
+          "warnings":[{"message":"iOS screenshot was skipped.","level":"warning"}],
+          "next_actions":[{"title":"Open Run Logs","detail":"Inspect raw output.","kind":"open_logs"}]
+        }
+        """
+
+        let kinds = _test_messageSegmentKindNames(envelope, serverURL: "http://127.0.0.1:8000")
+
+        XCTAssertEqual(kinds, ["markdown", "warnings", "fileChanges", "verification", "section", "nextActions"])
     }
 
     func testExtractImagePathKeepsAbsolutePathWithSpaces() {
@@ -1411,8 +1450,8 @@ final class VoiceAgentModelTests: XCTestCase {
 
         vm._test_ingestRunEvents(
             [
-                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Checking the workspace…","sections":[],"agenda_items":[],"artifacts":[]}"#),
-                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Running the test suite…","sections":[],"agenda_items":[],"artifacts":[]}"#)
+                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","message_kind":"progress","summary":"Checking the workspace…","sections":[],"agenda_items":[],"artifacts":[]}"#),
+                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","message_kind":"progress","summary":"Running the test suite…","sections":[],"agenda_items":[],"artifacts":[]}"#)
             ],
             runID: "run-live",
             threadID: threadID
@@ -1432,7 +1471,7 @@ final class VoiceAgentModelTests: XCTestCase {
 
         vm._test_ingestRunEvents(
             [
-                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Checking the workspace…","sections":[],"agenda_items":[],"artifacts":[]}"#),
+                ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","message_kind":"progress","summary":"Checking the workspace…","sections":[],"agenda_items":[],"artifacts":[]}"#),
                 ExecutionEvent(type: "chat.message", message: #"{"type":"assistant_response","version":"1.0","summary":"Done","sections":[{"title":"Result","body":"Implemented the fix and updated the tests."}],"agenda_items":[],"artifacts":[]}"#)
             ],
             runID: "run-live",

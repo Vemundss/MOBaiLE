@@ -135,6 +135,9 @@ class AgentStreamHandler:
                 item_text = str(item.get("text", "")).strip()
                 if item_type == "agent_message" and item_text:
                     return linked_session_id, self.append_assistant_payload(run_id, item_text)
+        log_message = self._codex_event_log_message(payload)
+        if log_message:
+            self.run_state.append_log_message(run_id, log_message, action_index=0)
         return linked_session_id, False
 
     def _handle_claude_event(
@@ -164,3 +167,39 @@ class AgentStreamHandler:
         if assistant_text:
             return linked_session_id, self.append_assistant_payload(run_id, assistant_text)
         return linked_session_id, False
+
+    @staticmethod
+    def _codex_event_log_message(payload: dict[str, object]) -> str | None:
+        event_type = str(payload.get("type", "")).strip()
+        if not event_type or event_type == "thread.started":
+            return None
+        if event_type == "turn.completed":
+            usage = payload.get("usage")
+            if isinstance(usage, dict):
+                input_tokens = usage.get("input_tokens")
+                output_tokens = usage.get("output_tokens")
+                if input_tokens is not None or output_tokens is not None:
+                    return f"codex turn completed (input_tokens={input_tokens}, output_tokens={output_tokens})"
+            return "codex turn completed"
+        if event_type.startswith("item."):
+            item = payload.get("item")
+            if isinstance(item, dict):
+                item_type = str(item.get("type", "")).strip() or "item"
+                if item_type == "agent_message":
+                    return None
+                detail = AgentStreamHandler._first_string_value(
+                    item,
+                    keys=("command", "text", "message", "summary", "name"),
+                )
+                if detail:
+                    return f"codex {event_type} {item_type}: {detail}"
+                return f"codex {event_type} {item_type}"
+        return f"codex {event_type}"
+
+    @staticmethod
+    def _first_string_value(payload: dict[str, object], *, keys: tuple[str, ...]) -> str | None:
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return " ".join(value.strip().split())
+        return None

@@ -1119,40 +1119,101 @@ struct UploadResponse: Decodable {
 struct ChatEnvelope: Decodable {
     let type: String
     let version: String
+    let messageKind: String
     let messageID: String?
     let createdAt: String?
     let summary: String
     let sections: [ChatSection]
     let agendaItems: [ChatAgendaItem]
     let artifacts: [ChatArtifact]
+    let fileChanges: [ChatFileChange]
+    let commandsRun: [ChatCommandRun]
+    let testsRun: [ChatTestRun]
+    let warnings: [ChatWarning]
+    let nextActions: [ChatNextAction]
 
     enum CodingKeys: String, CodingKey {
         case type
         case version
+        case messageKind = "message_kind"
         case messageID = "message_id"
         case createdAt = "created_at"
         case summary
         case sections
         case agendaItems = "agenda_items"
         case artifacts
+        case fileChanges = "file_changes"
+        case commandsRun = "commands_run"
+        case testsRun = "tests_run"
+        case warnings
+        case nextActions = "next_actions"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         type = try container.decodeIfPresent(String.self, forKey: .type) ?? "assistant_response"
         version = try container.decodeIfPresent(String.self, forKey: .version) ?? "1.0"
+        messageKind = try container.decodeIfPresent(String.self, forKey: .messageKind) ?? "final"
         messageID = try container.decodeIfPresent(String.self, forKey: .messageID)
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? ""
         sections = try container.decodeIfPresent([ChatSection].self, forKey: .sections) ?? []
         agendaItems = try container.decodeIfPresent([ChatAgendaItem].self, forKey: .agendaItems) ?? []
         artifacts = try container.decodeIfPresent([ChatArtifact].self, forKey: .artifacts) ?? []
+        fileChanges = try container.decodeIfPresent([ChatFileChange].self, forKey: .fileChanges) ?? []
+        commandsRun = try container.decodeIfPresent([ChatCommandRun].self, forKey: .commandsRun) ?? []
+        testsRun = try container.decodeIfPresent([ChatTestRun].self, forKey: .testsRun) ?? []
+        warnings = try container.decodeIfPresent([ChatWarning].self, forKey: .warnings) ?? []
+        nextActions = try container.decodeIfPresent([ChatNextAction].self, forKey: .nextActions) ?? []
     }
 }
 
 struct ChatSection: Codable, Equatable {
     let title: String
     let body: String
+}
+
+struct ChatFileChange: Codable, Equatable, Identifiable {
+    var id: String { "\(status)-\(path)" }
+    let path: String
+    let status: String
+    let summary: String?
+    let artifact: ChatArtifact?
+}
+
+struct ChatCommandRun: Codable, Equatable, Identifiable {
+    var id: String { "\(command)-\(status)-\(exitCode.map(String.init) ?? "")" }
+    let command: String
+    let status: String
+    let exitCode: Int?
+    let summary: String?
+
+    enum CodingKeys: String, CodingKey {
+        case command
+        case status
+        case exitCode = "exit_code"
+        case summary
+    }
+}
+
+struct ChatTestRun: Codable, Equatable, Identifiable {
+    var id: String { "\(name)-\(status)" }
+    let name: String
+    let status: String
+    let summary: String?
+}
+
+struct ChatWarning: Codable, Equatable, Identifiable {
+    var id: String { "\(level)-\(message)" }
+    let message: String
+    let level: String
+}
+
+struct ChatNextAction: Codable, Equatable, Identifiable {
+    var id: String { "\(kind)-\(title)-\(detail ?? "")" }
+    let title: String
+    let detail: String?
+    let kind: String
 }
 
 struct ChatAgendaItem: Codable, Equatable, Identifiable {

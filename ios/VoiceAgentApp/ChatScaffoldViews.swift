@@ -515,7 +515,7 @@ struct LogsView: View {
             case .all:
                 return "Chat shows the curated live activity. This sheet keeps the full event tape for diagnostics."
             case .highlights:
-                return "A quieter view of key milestones. Switch back to All if you need the raw event timeline."
+                return "Key milestones in the order they happened. Switch to All if you need the raw diagnostic stream."
             }
         }
     }
@@ -536,11 +536,11 @@ struct LogsView: View {
         let source: [ExecutionEvent]
         switch scope {
         case .all:
-            source = events
+            return Array(events.reversed())
         case .highlights:
             source = events.filter(isHighlightEvent(_:))
+            return source
         }
-        return Array(source.enumerated().reversed()).map(\.element)
     }
 
     var body: some View {
@@ -614,8 +614,13 @@ struct LogsView: View {
                             .listRowSeparator(.hidden)
                         }
 
-                        ForEach(Array(displayedEvents.enumerated()), id: \.offset) { _, event in
-                            LogEventRow(event: event)
+                        ForEach(Array(displayedEvents.enumerated()), id: \.offset) { index, event in
+                            LogEventRow(
+                                event: event,
+                                timelinePosition: scope == .highlights
+                                    ? LogTimelinePosition(index: index, count: displayedEvents.count)
+                                    : .standalone
+                            )
                                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
@@ -655,8 +660,36 @@ struct LogsView: View {
     }
 }
 
+private enum LogTimelinePosition {
+    case first
+    case middle
+    case last
+    case standalone
+
+    init(index: Int, count: Int) {
+        if count <= 1 {
+            self = .standalone
+        } else if index == 0 {
+            self = .first
+        } else if index == count - 1 {
+            self = .last
+        } else {
+            self = .middle
+        }
+    }
+
+    var showsTopRail: Bool {
+        self == .middle || self == .last
+    }
+
+    var showsBottomRail: Bool {
+        self == .first || self == .middle
+    }
+}
+
 private struct LogEventRow: View {
     let event: ExecutionEvent
+    let timelinePosition: LogTimelinePosition
 
     private var descriptor: LogEventDescriptor {
         logEventDescriptor(for: event)
@@ -664,12 +697,23 @@ private struct LogEventRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: descriptor.systemImage)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(descriptor.tint)
-                .frame(width: 30, height: 30)
-                .background(descriptor.tint.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(timelinePosition.showsTopRail ? descriptor.tint.opacity(0.22) : Color.clear)
+                    .frame(width: 2, height: 8)
+
+                Image(systemName: descriptor.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(descriptor.tint)
+                    .frame(width: 30, height: 30)
+                    .background(descriptor.tint.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                Rectangle()
+                    .fill(timelinePosition.showsBottomRail ? descriptor.tint.opacity(0.22) : Color.clear)
+                    .frame(width: 2)
+            }
+            .frame(width: 30, height: timelinePosition == .standalone ? 30 : nil, alignment: .top)
 
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {

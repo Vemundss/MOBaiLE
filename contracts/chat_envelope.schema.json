@@ -99,6 +99,140 @@
       "title": "ChatArtifact",
       "type": "object"
     },
+    "ChatCommandRun": {
+      "properties": {
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "status": {
+          "default": "unknown",
+          "enum": [
+            "passed",
+            "failed",
+            "skipped",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "ChatCommandRun",
+      "type": "object"
+    },
+    "ChatFileChange": {
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatArtifact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "status": {
+          "default": "unknown",
+          "enum": [
+            "created",
+            "modified",
+            "deleted",
+            "renamed",
+            "generated",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ChatFileChange",
+      "type": "object"
+    },
+    "ChatNextAction": {
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "kind": {
+          "default": "custom",
+          "enum": [
+            "continue",
+            "retry",
+            "open_logs",
+            "inspect_artifact",
+            "custom"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "ChatNextAction",
+      "type": "object"
+    },
     "ChatSection": {
       "properties": {
         "body": {
@@ -115,6 +249,65 @@
         "body"
       ],
       "title": "ChatSection",
+      "type": "object"
+    },
+    "ChatTestRun": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "default": "unknown",
+          "enum": [
+            "passed",
+            "failed",
+            "skipped",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ChatTestRun",
+      "type": "object"
+    },
+    "ChatWarning": {
+      "properties": {
+        "level": {
+          "default": "warning",
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "ChatWarning",
       "type": "object"
     }
   },
@@ -133,6 +326,13 @@
       "title": "Artifacts",
       "type": "array"
     },
+    "commands_run": {
+      "items": {
+        "$ref": "#/$defs/ChatCommandRun"
+      },
+      "title": "Commands Run",
+      "type": "array"
+    },
     "created_at": {
       "anyOf": [
         {
@@ -144,6 +344,13 @@
       ],
       "default": null,
       "title": "Created At"
+    },
+    "file_changes": {
+      "items": {
+        "$ref": "#/$defs/ChatFileChange"
+      },
+      "title": "File Changes",
+      "type": "array"
     },
     "message_id": {
       "anyOf": [
@@ -157,6 +364,23 @@
       "default": null,
       "title": "Message Id"
     },
+    "message_kind": {
+      "default": "final",
+      "enum": [
+        "progress",
+        "final",
+        "notice"
+      ],
+      "title": "Message Kind",
+      "type": "string"
+    },
+    "next_actions": {
+      "items": {
+        "$ref": "#/$defs/ChatNextAction"
+      },
+      "title": "Next Actions",
+      "type": "array"
+    },
     "sections": {
       "items": {
         "$ref": "#/$defs/ChatSection"
@@ -167,6 +391,13 @@
     "summary": {
       "title": "Summary",
       "type": "string"
+    },
+    "tests_run": {
+      "items": {
+        "$ref": "#/$defs/ChatTestRun"
+      },
+      "title": "Tests Run",
+      "type": "array"
     },
     "type": {
       "const": "assistant_response",
@@ -179,6 +410,13 @@
       "default": "1.0",
       "title": "Version",
       "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "$ref": "#/$defs/ChatWarning"
+      },
+      "title": "Warnings",
+      "type": "array"
     }
   },
   "required": [
