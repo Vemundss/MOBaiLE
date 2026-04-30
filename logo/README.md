@@ -16,6 +16,11 @@ This folder collects current logo directions so the app mark can be chosen separ
 - `10-voice-drop-buddy.*`: colorful voice-drop mascot with a bold waveform expression.
 - `11-command-spark-face.*`: command prompt plus cute face, cropped tightly for small icon sizes.
 - `12-mobaile-smile-orb.*`: compact orb mascot with high contrast and simple colorful side controls.
+- `13-cheeky-side-eye-polished.*`: polished version of the cheeky side-eye concept with softer depth, cleaner line weights, and a warmer gradient.
+- `14-cheeky-side-eye-sorbet.*`: brighter, simpler sorbet palette with a larger ring and high small-icon clarity.
+- `15-cheeky-side-eye-night-pop.*`: higher-contrast dark-background version with the same cheeky expression.
+- `16-cheeky-side-eye-sticker.*`: bolder outlined sticker treatment with stronger silhouette and heavier lines.
+- `17-cheeky-side-eye-candy-glow.*`: softer candy-color version with subtle glow and smoother tonal transitions.
 
 ## Illustration-Only
 
@@ -27,4 +32,4 @@ The tracked app logo and app icon history currently points to the descriptive ho
 
 ## Current Recommendation
 
-Start from `08-pocket-pal-closeup.*`, `09-terminal-smile-closeup.*`, or `12-mobaile-smile-orb.*`. They are tightly cropped, colorful, and hold up best when reduced to small app-icon sizes.
+Start from `13-cheeky-side-eye-polished.*`, `14-cheeky-side-eye-sorbet.*`, or `16-cheeky-side-eye-sticker.*` if the cheeky side-eye direction is the favorite. They keep the character of `02-cheeky-side-eye-bot.*` while using stronger shapes, cleaner line weights, and better app-icon readability.
