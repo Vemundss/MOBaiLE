@@ -227,12 +227,25 @@ struct ConversationComposerBar: View {
 
     private var standardComposerRow: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            composerUtilityActionTray
+            embeddedComposerUtilityActions
             composerTextEditorSurface
                 .frame(maxWidth: .infinity)
                 .layoutPriority(1)
             composerPrimaryActionButton
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(
+                    composerFocused.wrappedValue
+                        ? Color.accentColor.opacity(0.30)
+                        : Color(.separator).opacity(0.12),
+                    lineWidth: 1
+                )
+        )
     }
 
     private var composerTextEditorSurface: some View {
@@ -243,20 +256,9 @@ struct ConversationComposerBar: View {
                 .textInputAutocapitalization(.sentences)
                 .textContentType(.none)
                 .scrollContentBackground(.hidden)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 6)
                 .frame(height: composerHeight)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(
-                            composerFocused.wrappedValue
-                                ? Color.accentColor.opacity(0.30)
-                                : Color(.separator).opacity(0.12),
-                            lineWidth: 1
-                        )
-                )
                 .onTapGesture {
                     composerFocused.wrappedValue = true
                 }
@@ -265,8 +267,8 @@ struct ConversationComposerBar: View {
                 Text(composerPlaceholder)
                     .font(.body)
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 14)
-                    .padding(.top, 16)
+                    .padding(.leading, 7)
+                    .padding(.top, 12)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .allowsHitTesting(false)
@@ -275,10 +277,10 @@ struct ConversationComposerBar: View {
         .animation(.easeInOut(duration: 0.16), value: composerHeight)
     }
 
-    private var composerUtilityActionTray: some View {
-        HStack(spacing: 8) {
+    private var embeddedComposerUtilityActions: some View {
+        HStack(spacing: 2) {
             Button(action: handleOpenAttachmentOptions) {
-                ComposerTrayButtonLabel(
+                ComposerEmbeddedButtonLabel(
                     systemImage: "plus",
                     tint: vm.draftAttachments.isEmpty ? Color.secondary : Color.accentColor,
                     fill: vm.draftAttachments.isEmpty ? Color(.tertiarySystemGroupedBackground) : Color.accentColor.opacity(0.16)
@@ -291,7 +293,7 @@ struct ConversationComposerBar: View {
 
             let canStartVoiceMode = !vm.isLoading && canUseConnectedFeatures
             Button(action: handleVoiceModeButtonTap) {
-                ComposerTrayButtonLabel(
+                ComposerEmbeddedButtonLabel(
                     systemImage: vm.isVoiceModeActiveForCurrentThread ? "waveform.circle.fill" : "waveform.circle",
                     tint: Color.blue,
                     fill: vm.isVoiceModeActiveForCurrentThread ? Color.blue.opacity(0.16) : Color(.tertiarySystemGroupedBackground)
@@ -310,8 +312,8 @@ struct ConversationComposerBar: View {
                 systemImage: "stop.fill",
                 tint: .white,
                 fill: .red,
-                size: 46,
-                iconSize: 13,
+                size: 34,
+                iconSize: 11,
                 weight: .semibold,
                 accessibilityLabel: vm.activeOperationCancelAccessibilityLabel,
                 isDisabled: false,
@@ -327,8 +329,8 @@ struct ConversationComposerBar: View {
                 systemImage: "arrow.up",
                 tint: .white,
                 fill: .accentColor,
-                size: 46,
-                iconSize: 14,
+                size: 34,
+                iconSize: 13,
                 weight: .bold,
                 accessibilityLabel: "Send prompt",
                 isDisabled: !canUseConnectedFeatures || !vm.hasDraftContent || vm.isLoading,
@@ -342,8 +344,8 @@ struct ConversationComposerBar: View {
             systemImage: "mic.fill",
             tint: .white,
             fill: .blue,
-            size: 46,
-            iconSize: 14,
+            size: 34,
+            iconSize: 13,
             weight: .bold,
             accessibilityLabel: "Start recording",
             isDisabled: vm.isLoading || !canUseConnectedFeatures,
@@ -370,6 +372,7 @@ struct ConversationComposerBar: View {
         .accessibilityLabel(configuration.accessibilityLabel)
         .disabled(configuration.isDisabled)
         .opacity(configuration.opacity)
+        .frame(width: 40, height: 40)
     }
 
     private var recordingComposerRow: some View {
@@ -606,10 +609,10 @@ struct ConversationComposerBar: View {
     private var composerHeight: CGFloat {
         let trimmed = vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !composerFocused.wrappedValue && trimmed.isEmpty {
-            return 50
+            return 40
         }
         let lineCount = max(1, vm.promptText.split(separator: "\n", omittingEmptySubsequences: false).count)
-        return min(136, max(74, CGFloat(lineCount) * 22 + 24))
+        return min(118, max(44, CGFloat(lineCount) * 22 + 22))
     }
 
     private var composerPlaceholder: String {
@@ -773,5 +776,25 @@ struct ConversationComposerBar: View {
 
     private func onSendRetryPrompt() {
         Task { await vm.retryLastPrompt() }
+    }
+}
+
+private struct ComposerEmbeddedButtonLabel: View {
+    let systemImage: String
+    let tint: Color
+    let fill: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(fill)
+                .frame(width: 32, height: 32)
+
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+        .frame(width: 38, height: 38)
+        .contentShape(Circle())
     }
 }
