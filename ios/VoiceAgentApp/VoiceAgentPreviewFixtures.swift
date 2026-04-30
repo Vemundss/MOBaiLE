@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 enum PreviewScenario: String {
     case configuredEmpty = "configured-empty"
@@ -940,16 +941,30 @@ enum VoiceAgentPreviewFactory {
             try? data.write(to: imageURL, options: .atomic)
         }
 
+        let pdfURL = directory.appendingPathComponent("PreviewGuide.pdf")
+        if !FileManager.default.fileExists(atPath: pdfURL.path) {
+            writePreviewPDF(to: pdfURL)
+        }
+
+        let binaryURL = directory.appendingPathComponent("PreviewBlob.bin")
+        if !FileManager.default.fileExists(atPath: binaryURL.path) {
+            try? Data([0x00, 0x9F, 0xFF, 0x10, 0x42, 0x00, 0x80, 0x7F]).write(to: binaryURL, options: .atomic)
+        }
+
         let scriptModifiedAt = "2026-04-28T20:00:00Z"
         let csvModifiedAt = "2026-04-28T20:00:30Z"
         let jsonModifiedAt = "2026-04-28T20:00:40Z"
         let markdownModifiedAt = "2026-04-28T20:00:50Z"
         let imageModifiedAt = "2026-04-28T20:01:00Z"
+        let pdfModifiedAt = "2026-04-28T20:01:30Z"
+        let binaryModifiedAt = "2026-04-28T20:02:00Z"
         setModificationDate(scriptModifiedAt, for: scriptURL)
         setModificationDate(csvModifiedAt, for: csvURL)
         setModificationDate(jsonModifiedAt, for: jsonURL)
         setModificationDate(markdownModifiedAt, for: markdownURL)
         setModificationDate(imageModifiedAt, for: imageURL)
+        setModificationDate(pdfModifiedAt, for: pdfURL)
+        setModificationDate(binaryModifiedAt, for: binaryURL)
 
         return [
             DirectoryEntry(
@@ -992,7 +1007,51 @@ enum VoiceAgentPreviewFactory {
                 mime: "image/png",
                 modifiedAt: imageModifiedAt
             ),
+            DirectoryEntry(
+                name: "PreviewGuide.pdf",
+                path: pdfURL.path,
+                isDirectory: false,
+                sizeBytes: fileSize(at: pdfURL),
+                mime: "application/pdf",
+                modifiedAt: pdfModifiedAt
+            ),
+            DirectoryEntry(
+                name: "PreviewBlob.bin",
+                path: binaryURL.path,
+                isDirectory: false,
+                sizeBytes: fileSize(at: binaryURL),
+                mime: "application/octet-stream",
+                modifiedAt: binaryModifiedAt
+            ),
         ]
+    }
+
+    private static func writePreviewPDF(to url: URL) {
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let data = renderer.pdfData { context in
+            context.beginPage()
+            UIColor.systemBackground.setFill()
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 320, height: 180))
+
+            let titleAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 22, weight: .semibold),
+                .foregroundColor: UIColor.label,
+            ]
+            "MOBaiLE Preview Guide".draw(
+                in: CGRect(x: 24, y: 28, width: 272, height: 32),
+                withAttributes: titleAttributes
+            )
+
+            let bodyAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 13, weight: .regular),
+                .foregroundColor: UIColor.secondaryLabel,
+            ]
+            "PDF files should open from the workspace browser with metadata, share, and copy-path actions.".draw(
+                in: CGRect(x: 24, y: 72, width: 272, height: 72),
+                withAttributes: bodyAttributes
+            )
+        }
+        try? data.write(to: url, options: .atomic)
     }
 
     private static func setModificationDate(_ isoDate: String, for url: URL) {

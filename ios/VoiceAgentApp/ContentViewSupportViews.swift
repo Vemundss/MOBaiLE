@@ -555,6 +555,7 @@ struct FilePreviewSheet: View {
                         .padding(.horizontal)
                         .padding(.vertical, 8)
                         .background(Color(.secondarySystemGroupedBackground))
+                        .accessibilityIdentifier("filePreview.metadata")
                 }
 
                 FileQuickLookPreview(url: url)
@@ -674,6 +675,8 @@ struct TextPreviewDocument: Identifiable {
 }
 
 struct TextFilePreviewSheet: View {
+    private static let maxLoadedPreviewBytes = 2 * 1024 * 1024
+
     let document: TextPreviewDocument
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
@@ -718,6 +721,10 @@ struct TextFilePreviewSheet: View {
         TextPreviewFormatter.matchCount(in: visibleSearchText, query: searchText)
     }
 
+    private var visibleLineMatches: [TextPreviewLineMatch] {
+        TextPreviewFormatter.lineMatches(in: visibleSearchText, query: searchText)
+    }
+
     private var metadataText: String? {
         FileMetadataFormatter.previewMetadataText(
             sizeBytes: document.sizeBytes,
@@ -736,6 +743,10 @@ struct TextFilePreviewSheet: View {
 
     private var canSearchFullFile: Bool {
         document.source != nil && !trimmedSearchText.isEmpty
+    }
+
+    private var hasReachedPreviewLoadLimit: Bool {
+        previewText.utf8.count >= Self.maxLoadedPreviewBytes
     }
 
     private var searchSummaryText: String {
@@ -771,6 +782,7 @@ struct TextFilePreviewSheet: View {
                         .padding(.horizontal)
                         .padding(.vertical, 8)
                         .background(Color(.secondarySystemGroupedBackground))
+                        .accessibilityIdentifier("textPreview.metadata")
                 }
 
                 if let blockedReason = document.previewBlockedReason {
@@ -787,7 +799,11 @@ struct TextFilePreviewSheet: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
-                        if nextOffset != nil {
+                        if nextOffset != nil, hasReachedPreviewLoadLimit {
+                            Text("Reached Limit")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        } else if nextOffset != nil {
                             Button {
                                 Task { await loadMorePreview() }
                             } label: {
@@ -839,6 +855,21 @@ struct TextFilePreviewSheet: View {
                         if hasServerSearchForCurrentQuery, !serverSearchMatches.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 ForEach(Array(serverSearchMatches.prefix(8))) { match in
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text("\(match.lineNumber)")
+                                            .font(.caption2.monospacedDigit().weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(minWidth: 28, alignment: .trailing)
+                                        Text(TextPreviewFormatter.highlightedText(match.lineText, query: searchText, language: document.language))
+                                            .font(.caption.monospaced())
+                                            .lineLimit(2)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                            }
+                        } else if !visibleLineMatches.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(visibleLineMatches) { match in
                                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                                         Text("\(match.lineNumber)")
                                             .font(.caption2.monospacedDigit().weight(.semibold))
@@ -989,6 +1020,10 @@ struct TextFilePreviewSheet: View {
     @MainActor
     private func loadMorePreview() async {
         guard let source = document.source, let nextOffset else { return }
+        guard !hasReachedPreviewLoadLimit else {
+            previewActionError = "This preview has loaded \(humanReadableAttachmentSize(Int64(Self.maxLoadedPreviewBytes))). Use full-file search or open it on the host for the rest."
+            return
+        }
         isLoadingMore = true
         defer { isLoadingMore = false }
 
@@ -999,7 +1034,17 @@ struct TextFilePreviewSheet: View {
                 artifact: source.artifact,
                 textPreviewOffset: nextOffset
             )
-            previewText += inspection.textPreview ?? ""
+            let appended = inspection.textPreview ?? ""
+            if previewText.utf8.count + appended.utf8.count > Self.maxLoadedPreviewBytes {
+                let remainingBytes = max(Self.maxLoadedPreviewBytes - previewText.utf8.count, 0)
+                let prefixData = Data(appended.utf8.prefix(remainingBytes))
+                previewText += TextPreviewDataDecoder.decodedPrefix(from: prefixData)?.text ?? ""
+                self.nextOffset = inspection.textPreviewNextOffset
+                previewIsTruncated = true
+                previewActionError = "This preview reached \(humanReadableAttachmentSize(Int64(Self.maxLoadedPreviewBytes))). Use full-file search or open it on the host for the rest."
+                return
+            }
+            previewText += appended
             self.nextOffset = inspection.textPreviewNextOffset
             previewIsTruncated = inspection.textPreviewNextOffset != nil || inspection.textPreviewTruncated
         } catch {
@@ -1228,6 +1273,17 @@ enum FilePreviewUnsupportedMessage {
         return "\(descriptor) cannot be previewed inline on iPhone. Inspect it from the host."
     }
 
+    static func prefersInlineUnsupportedMessage(fileName: String, mime: String?) -> Bool {
+        if isArchive(fileName: fileName, mime: mime) {
+            return true
+        }
+        guard isLikelyBinary(mime: mime) else {
+            return false
+        }
+        let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        return !["heic", "jpeg", "jpg", "pdf", "png", "tif", "tiff", "webp"].contains(ext)
+    }
+
     private static func isArchive(fileName: String, mime: String?) -> Bool {
         let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
         let lowerMime = (mime ?? "").lowercased()
@@ -1245,6 +1301,52 @@ enum FilePreviewUnsupportedMessage {
             lowerMime.hasPrefix("audio/") ||
             lowerMime.hasPrefix("video/") ||
             lowerMime.hasPrefix("font/")
+    }
+}
+
+enum FilePreviewOpenErrorMessage {
+    static func message(_ error: Error, fileName: String) -> String {
+        if let apiError = error as? APIError {
+            return message(for: apiError, fileName: fileName)
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            switch nsError.code {
+            case CocoaError.Code.fileReadNoPermission.rawValue,
+                 CocoaError.Code.fileWriteNoPermission.rawValue:
+                return "\(fileName) cannot be opened because permission was denied by the host."
+            case CocoaError.Code.fileNoSuchFile.rawValue,
+                 CocoaError.Code.fileReadNoSuchFile.rawValue:
+                return "\(fileName) no longer exists at that path."
+            case CocoaError.Code.fileReadCorruptFile.rawValue:
+                return "\(fileName) appears to be damaged and cannot be previewed."
+            default:
+                break
+            }
+        }
+
+        let fallback = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? "\(fileName) could not be opened." : fallback
+    }
+
+    private static func message(for apiError: APIError, fileName: String) -> String {
+        switch apiError {
+        case let .httpError(code, body):
+            let lowerBody = body.lowercased()
+            if code == 403 && lowerBody.contains("outside allowed roots") {
+                return "\(fileName) is outside the host paths MOBaiLE is allowed to preview in safe mode."
+            }
+            if code == 403 {
+                return "\(fileName) cannot be opened because permission was denied by the host."
+            }
+            if code == 404 {
+                return "\(fileName) no longer exists at that path."
+            }
+            return "Opening \(fileName) failed with HTTP \(code)."
+        default:
+            return apiError.localizedDescription
+        }
     }
 }
 
@@ -1471,6 +1573,10 @@ func _test_textPreviewMatchCount(_ text: String, query: String) -> Int {
 
 func _test_textPreviewMatchedSnippets(_ text: String, query: String) -> [String] {
     TextPreviewFormatter.matchRanges(in: text, query: query).map { String(text[$0]) }
+}
+
+func _test_textPreviewLineMatches(_ text: String, query: String, limit: Int = 8) -> [(Int, String)] {
+    TextPreviewFormatter.lineMatches(in: text, query: query, limit: limit).map { ($0.lineNumber, $0.lineText) }
 }
 #endif
 

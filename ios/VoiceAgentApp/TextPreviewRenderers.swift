@@ -372,6 +372,12 @@ struct JSONPreviewRow: Identifiable {
     let kind: String
 }
 
+struct TextPreviewLineMatch: Identifiable {
+    let id = UUID()
+    let lineNumber: Int
+    let lineText: String
+}
+
 enum JSONPreviewParser {
     static func parse(_ text: String) -> JSONPreviewNode? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -518,6 +524,21 @@ enum TextPreviewFormatter {
 
     static func matchCount(in text: String, query: String) -> Int {
         matchRanges(in: text, query: query).count
+    }
+
+    static func lineMatches(in text: String, query: String, limit: Int = 8) -> [TextPreviewLineMatch] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty, limit > 0 else { return [] }
+
+        var matches: [TextPreviewLineMatch] = []
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        for (index, line) in lines.enumerated() where line.range(of: needle, options: [.caseInsensitive]) != nil {
+            matches.append(TextPreviewLineMatch(lineNumber: index + 1, lineText: String(line)))
+            if matches.count == limit {
+                break
+            }
+        }
+        return matches
     }
 
     static func matchRanges(in text: String, query: String) -> [Range<String.Index>] {

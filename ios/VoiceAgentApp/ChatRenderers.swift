@@ -239,6 +239,20 @@ struct MessageBubble: View {
                     }
                 }
             }
+            let resolvedMime = inspection?.mime ?? artifact.mime
+            if FilePreviewUnsupportedMessage.prefersInlineUnsupportedMessage(
+                fileName: artifact.title,
+                mime: resolvedMime
+            ) {
+                await MainActor.run {
+                    artifactOpenError = FilePreviewUnsupportedMessage.message(
+                        fileName: artifact.title,
+                        mime: resolvedMime,
+                        sizeBytes: inspection?.sizeBytes
+                    )
+                }
+                return
+            }
             if QLPreviewController.canPreview(localURL as NSURL) {
                 await MainActor.run {
                     previewDocument = PreviewDocument(
@@ -265,7 +279,7 @@ struct MessageBubble: View {
             }
         } catch {
             await MainActor.run {
-                artifactOpenError = error.localizedDescription
+                artifactOpenError = FilePreviewOpenErrorMessage.message(error, fileName: artifact.title)
             }
         }
     }
@@ -1365,21 +1379,57 @@ private struct ImagePreviewSheet: View {
     let image: UIImage
     let title: String
     @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottomLeading) {
                 Color.black.ignoresSafeArea()
-                ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                GeometryReader { proxy in
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
                         .padding(20)
+                        .gesture(magnificationGesture)
+                        .simultaneousGesture(dragGesture)
+                        .onTapGesture(count: 2) {
+                            if scale > 1 {
+                                resetZoom()
+                            } else {
+                                scale = 2
+                                lastScale = 2
+                            }
+                        }
                 }
+
+                Label(dimensionText, systemImage: "photo")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.black.opacity(0.48))
+                    .clipShape(Capsule())
+                    .padding()
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        resetZoom()
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .disabled(scale == 1 && offset == .zero)
+                    .accessibilityLabel("Reset image zoom")
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         dismiss()
@@ -1387,6 +1437,47 @@ private struct ImagePreviewSheet: View {
                 }
             }
         }
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = min(max(lastScale * value, 1), 5)
+            }
+            .onEnded { _ in
+                lastScale = scale
+                if scale == 1 {
+                    offset = .zero
+                    lastOffset = .zero
+                }
+            }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > 1 else { return }
+                offset = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                lastOffset = offset
+            }
+    }
+
+    private var dimensionText: String {
+        let width = image.cgImage?.width ?? Int(image.size.width * image.scale)
+        let height = image.cgImage?.height ?? Int(image.size.height * image.scale)
+        return "\(width)x\(height)"
+    }
+
+    private func resetZoom() {
+        scale = 1
+        lastScale = 1
+        offset = .zero
+        lastOffset = .zero
     }
 }
 

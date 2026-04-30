@@ -1,5 +1,6 @@
 import ImageIO
 import QuickLook
+import QuickLookThumbnailing
 import SwiftUI
 import UIKit
 
@@ -24,6 +25,7 @@ struct WorkspaceBrowserSheet: View {
     @State private var thumbnailLoadingKeys: Set<DirectoryThumbnailCacheKey> = []
     private let directoryAutoRefreshIntervalNanoseconds: UInt64 = 5_000_000_000
     private let maxDirectoryThumbnailCacheCount = 80
+    private let maxDirectoryThumbnailBytes: Int64 = 5 * 1024 * 1024
 
     var body: some View {
         NavigationStack {
@@ -584,6 +586,7 @@ struct WorkspaceBrowserSheet: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(directoryEntryAccessibilityLabel(entry))
+        .accessibilityIdentifier(entry.isDirectory ? "workspace.folder.\(entry.name)" : "workspace.file.\(entry.name)")
     }
 
     @ViewBuilder
@@ -615,7 +618,8 @@ struct WorkspaceBrowserSheet: View {
     private func loadDirectoryThumbnailIfNeeded(_ entry: DirectoryEntry) async {
         let thumbnailKey = DirectoryThumbnailCacheKey(entry)
         guard !entry.isDirectory,
-              isImageEntry(entry),
+              canRenderDirectoryThumbnail(entry),
+              shouldLoadDirectoryThumbnail(entry),
               thumbnailImages[thumbnailKey] == nil,
               !thumbnailLoadingKeys.contains(thumbnailKey) else {
             return
@@ -627,7 +631,7 @@ struct WorkspaceBrowserSheet: View {
                 entry,
                 cacheVersion: entry.previewCacheVersion
             )
-            if let image = await DirectoryImageThumbnailRenderer.thumbnail(from: localURL, maxPointSize: 32) {
+            if let image = await DirectoryFileThumbnailRenderer.thumbnail(from: localURL, maxPointSize: 32) {
                 storeDirectoryThumbnail(image, for: thumbnailKey)
             }
         } catch {
@@ -765,6 +769,18 @@ struct WorkspaceBrowserSheet: View {
                     }
                 }
             }
+            let resolvedMime = inspection?.mime ?? entry.mime
+            if FilePreviewUnsupportedMessage.prefersInlineUnsupportedMessage(
+                fileName: entry.name,
+                mime: resolvedMime
+            ) {
+                fileOpenError = FilePreviewUnsupportedMessage.message(
+                    fileName: entry.name,
+                    mime: resolvedMime,
+                    sizeBytes: inspection?.sizeBytes ?? entry.sizeBytes
+                )
+                return
+            }
             if QLPreviewController.canPreview(localURL as NSURL) {
                 previewDocument = PreviewDocument(
                     url: localURL,
@@ -786,7 +802,7 @@ struct WorkspaceBrowserSheet: View {
                 )
             }
         } catch {
-            fileOpenError = error.localizedDescription
+            fileOpenError = FilePreviewOpenErrorMessage.message(error, fileName: entry.name)
         }
     }
 
@@ -860,6 +876,23 @@ struct WorkspaceBrowserSheet: View {
         guard !entry.isDirectory else { return false }
         let lowerMime = (entry.mime ?? "").lowercased()
         return lowerMime.hasPrefix("image/") || VoiceAgentDirectoryBrowser.artifactType(for: entry) == "image"
+    }
+
+    private func isPDFEntry(_ entry: DirectoryEntry) -> Bool {
+        guard !entry.isDirectory else { return false }
+        let lowerMime = (entry.mime ?? "").lowercased()
+        return lowerMime.contains("pdf") || URL(fileURLWithPath: entry.name).pathExtension.lowercased() == "pdf"
+    }
+
+    private func canRenderDirectoryThumbnail(_ entry: DirectoryEntry) -> Bool {
+        isImageEntry(entry) || isPDFEntry(entry)
+    }
+
+    private func shouldLoadDirectoryThumbnail(_ entry: DirectoryEntry) -> Bool {
+        if let sizeBytes = entry.sizeBytes {
+            return sizeBytes <= maxDirectoryThumbnailBytes
+        }
+        return PreviewScenario.current != nil
     }
 
     private func directoryEntryTint(_ entry: DirectoryEntry) -> Color {
@@ -1028,10 +1061,14 @@ private struct DirectoryThumbnailCacheKey: Hashable {
     }
 }
 
-private enum DirectoryImageThumbnailRenderer {
+private enum DirectoryFileThumbnailRenderer {
     static func thumbnail(from url: URL, maxPointSize: CGFloat) async -> UIImage? {
         let scale = await MainActor.run { UIScreen.main.scale }
         let pixelSize = max(1, Int(maxPointSize * scale))
+        if url.pathExtension.lowercased() == "pdf",
+           let thumbnail = await quickLookThumbnail(from: url, pointSize: CGSize(width: maxPointSize, height: maxPointSize), scale: scale) {
+            return thumbnail
+        }
         return await Task.detached(priority: .utility) {
             guard let source = CGImageSourceCreateWithURL(url as CFURL, [
                 kCGImageSourceShouldCache: false
@@ -1049,5 +1086,19 @@ private enum DirectoryImageThumbnailRenderer {
             }
             return UIImage(cgImage: image)
         }.value
+    }
+
+    private static func quickLookThumbnail(from url: URL, pointSize: CGSize, scale: CGFloat) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            let request = QLThumbnailGenerator.Request(
+                fileAt: url,
+                size: pointSize,
+                scale: scale,
+                representationTypes: .thumbnail
+            )
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, _ in
+                continuation.resume(returning: representation?.uiImage)
+            }
+        }
     }
 }

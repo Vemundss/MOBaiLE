@@ -88,18 +88,30 @@ final class VoiceAgentAppUITests: XCTestCase {
     }
 
     func testWorkspaceBrowserOpensTextPreviewFile() {
-        let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace-files")
-
-        XCTAssertTrue(app.navigationBars.staticTexts["Workspace"].waitForExistence(timeout: 5))
-        let fileButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PreviewScript.py")).firstMatch
-        XCTAssertTrue(fileButton.waitForExistence(timeout: 5))
-        fileButton.tap()
+        let app = openWorkspaceFilesPreview()
+        tapWorkspaceFile(named: "PreviewScript.py", in: app)
 
         XCTAssertTrue(app.navigationBars.staticTexts["PreviewScript.py"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Text preview options"].exists)
         XCTAssertTrue(
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "def render_preview")).firstMatch
                 .waitForExistence(timeout: 5)
+        )
+    }
+
+    func testTextPreviewSearchShowsVisibleMatches() {
+        let app = openWorkspaceFilesPreview()
+        tapWorkspaceFile(named: "PreviewScript.py", in: app)
+
+        XCTAssertTrue(app.navigationBars.staticTexts["PreviewScript.py"].waitForExistence(timeout: 5))
+        let searchField = app.searchFields["Find in file"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("render")
+
+        XCTAssertTrue(app.staticTexts["2 visible matches"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "render_preview")).firstMatch.exists
         )
     }
 
@@ -126,14 +138,35 @@ final class VoiceAgentAppUITests: XCTestCase {
     }
 
     func testWorkspaceBrowserOpensImagePreviewFile() {
-        let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace-files")
-
-        XCTAssertTrue(app.navigationBars.staticTexts["Workspace"].waitForExistence(timeout: 5))
-        let fileButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "PreviewPlot.png")).firstMatch
-        XCTAssertTrue(fileButton.waitForExistence(timeout: 5))
-        fileButton.tap()
+        let app = openWorkspaceFilesPreview()
+        let imageButton = app.buttons
+            .matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "PreviewPlot.png", "Image"))
+            .firstMatch
+        XCTAssertTrue(imageButton.waitForExistence(timeout: 5))
+        tapWorkspaceFile(named: "PreviewPlot.png", in: app)
 
         XCTAssertTrue(app.buttons["Share PreviewPlot.png"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "image/png")).firstMatch.exists)
+    }
+
+    func testWorkspaceBrowserOpensPDFPreviewFile() {
+        let app = openWorkspaceFilesPreview()
+        tapWorkspaceFile(named: "PreviewGuide.pdf", in: app)
+
+        XCTAssertTrue(app.navigationBars.staticTexts["PreviewGuide.pdf"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Share PreviewGuide.pdf"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "application/pdf")).firstMatch.exists)
+    }
+
+    func testWorkspaceBrowserShowsUnsupportedBinaryAlert() {
+        let app = openWorkspaceFilesPreview()
+        tapWorkspaceFile(named: "PreviewBlob.bin", in: app)
+
+        let alert = app.alerts["Open failed"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "binary file")).firstMatch.exists
+        )
     }
 
     func testLiveActivityPreviewShowsStreamingCard() {
@@ -226,6 +259,18 @@ final class VoiceAgentAppUITests: XCTestCase {
         }
         app.launch()
         return app
+    }
+
+    private func openWorkspaceFilesPreview() -> XCUIApplication {
+        let app = launchApp(previewScenario: "conversation", previewPresentation: "workspace-files")
+        XCTAssertTrue(app.navigationBars.staticTexts["Workspace"].waitForExistence(timeout: 5))
+        return app
+    }
+
+    private func tapWorkspaceFile(named name: String, in app: XCUIApplication) {
+        let fileButton = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
+        XCTAssertTrue(fileButton.waitForExistence(timeout: 5))
+        fileButton.tap()
     }
 
     private func threadToolbarButton(in app: XCUIApplication) -> XCUIElement {

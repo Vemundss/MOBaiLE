@@ -409,6 +409,9 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(_test_numberedPreviewText(text), "1  alpha\n2  beta\n3  alpha")
         XCTAssertEqual(_test_textPreviewMatchCount(text, query: "alpha"), 2)
         XCTAssertEqual(_test_textPreviewMatchedSnippets("Alpha\nbeta\nalpha", query: "alpha"), ["Alpha", "alpha"])
+        let lineMatches = _test_textPreviewLineMatches("first\nneedle one\nsecond\nneedle two", query: "needle")
+        XCTAssertEqual(lineMatches.map { $0.0 }, [2, 4])
+        XCTAssertEqual(lineMatches.map { $0.1 }, ["needle one", "needle two"])
         XCTAssertEqual(_test_textPreviewMatchCount(_test_numberedPreviewText(text), query: "1"), 1)
         XCTAssertEqual(_test_textPreviewMatchCount(text, query: "missing"), 0)
     }
@@ -551,6 +554,55 @@ final class VoiceAgentModelTests: XCTestCase {
                 sizeBytes: 42
             ).contains("archive")
         )
+        XCTAssertTrue(FilePreviewUnsupportedMessage.prefersInlineUnsupportedMessage(
+            fileName: "blob.bin",
+            mime: "application/octet-stream"
+        ))
+        XCTAssertFalse(FilePreviewUnsupportedMessage.prefersInlineUnsupportedMessage(
+            fileName: "brief.pdf",
+            mime: "application/octet-stream"
+        ))
+    }
+
+    func testFilePreviewOpenErrorsUseActionableMessages() {
+        XCTAssertTrue(
+            FilePreviewOpenErrorMessage.message(
+                APIError.httpError(403, #"{"detail":"outside allowed roots"}"#),
+                fileName: "secret.txt"
+            ).contains("safe mode")
+        )
+        XCTAssertTrue(
+            FilePreviewOpenErrorMessage.message(
+                CocoaError(.fileReadNoPermission),
+                fileName: "private.txt"
+            ).contains("permission")
+        )
+        XCTAssertTrue(
+            FilePreviewOpenErrorMessage.message(
+                CocoaError(.fileReadCorruptFile),
+                fileName: "broken.pdf"
+            ).contains("damaged")
+        )
+    }
+
+    func testTextPreviewLoaderRejectsHugeLocalFilesWithoutReadingThemIntoPreview() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("huge.log")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: 2 * 1024 * 1024 + 1)
+        try handle.close()
+
+        do {
+            _ = try await TextPreviewLoader.loadText(from: url)
+            XCTFail("Expected large text preview loading to fail")
+        } catch TextPreviewError.tooLarge {
+            // Expected.
+        } catch {
+            XCTFail("Expected tooLarge, got \(error)")
+        }
     }
 
     func testLocalFileInspectionSupportsPreviewPaginationAndSearch() async throws {
