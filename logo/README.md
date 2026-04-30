@@ -2,6 +2,10 @@
 
 This folder collects current logo directions so the app mark can be chosen separately from broader marketing illustrations.
 
+## Selected Product Logo
+
+- `02-cheeky-side-eye-bot.*`: selected as the MOBaiLE product logo. The iOS app icon set and `ios/VoiceAgentApp/mobaile_logo.png` are generated from `02-cheeky-side-eye-bot.png` via `scripts/generate_app_icons.py`.
+
 ## Candidates
 
 - `01-friendly-bot-refined.*`: a friendlier mascot direction from the existing design concepts.
