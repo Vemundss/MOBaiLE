@@ -533,48 +533,62 @@ struct FilePreviewSheet: View {
     let url: URL
     let title: String?
     let originalPath: String?
+    let metadataText: String?
     @Environment(\.dismiss) private var dismiss
     @State private var copiedPath = false
 
-    init(url: URL, title: String?, originalPath: String? = nil) {
+    init(url: URL, title: String?, originalPath: String? = nil, metadataText: String? = nil) {
         self.url = url
         self.title = title
         self.originalPath = originalPath
+        self.metadataText = metadataText
     }
 
     var body: some View {
         NavigationStack {
-            FileQuickLookPreview(url: url)
-                .navigationTitle((title ?? url.lastPathComponent).trimmingCharacters(in: .whitespacesAndNewlines))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItemGroup(placement: .topBarLeading) {
-                        ShareLink(item: url) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        .accessibilityLabel("Share \(title ?? url.lastPathComponent)")
+            VStack(spacing: 0) {
+                if let metadataText {
+                    Text(metadataText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color(.secondarySystemGroupedBackground))
+                }
 
-                        if let pathForActions {
-                            Button {
-                                UIPasteboard.general.string = pathForActions
-                                copiedPath = true
-                                Task { @MainActor in
-                                    try? await Task.sleep(nanoseconds: 1_200_000_000)
-                                    copiedPath = false
-                                }
-                            } label: {
-                                Image(systemName: copiedPath ? "checkmark" : "link")
-                            }
-                            .accessibilityLabel(copiedPath ? "Copied path" : "Copy file path")
-                        }
+                FileQuickLookPreview(url: url)
+            }
+            .navigationTitle((title ?? url.lastPathComponent).trimmingCharacters(in: .whitespacesAndNewlines))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
                     }
+                    .accessibilityLabel("Share \(title ?? url.lastPathComponent)")
 
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") {
-                            dismiss()
+                    if let pathForActions {
+                        Button {
+                            UIPasteboard.general.string = pathForActions
+                            copiedPath = true
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                                copiedPath = false
+                            }
+                        } label: {
+                            Image(systemName: copiedPath ? "checkmark" : "link")
                         }
+                        .accessibilityLabel(copiedPath ? "Copied path" : "Copy file path")
                     }
                 }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 
@@ -589,11 +603,13 @@ struct PreviewDocument: Identifiable {
     let url: URL
     let title: String
     let originalPath: String?
+    let metadataText: String?
 
-    init(url: URL, title: String, originalPath: String? = nil) {
+    init(url: URL, title: String, originalPath: String? = nil, metadataText: String? = nil) {
         self.url = url
         self.title = title
         self.originalPath = originalPath
+        self.metadataText = metadataText
     }
 }
 
@@ -1016,514 +1032,6 @@ struct TextFilePreviewSheet: View {
     }
 }
 
-enum TextPreviewDisplayMode: String, CaseIterable, Identifiable {
-    case raw
-    case renderedMarkdown
-    case table
-    case outline
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .raw:
-            return "Raw"
-        case .renderedMarkdown:
-            return "Rendered"
-        case .table:
-            return "Table"
-        case .outline:
-            return "Outline"
-        }
-    }
-
-    static func defaultMode(fileName: String, language: String?) -> TextPreviewDisplayMode {
-        availableModes(fileName: fileName, language: language).first ?? .raw
-    }
-
-    static func availableModes(fileName: String, language: String?) -> [TextPreviewDisplayMode] {
-        switch structuredKind(fileName: fileName, language: language) {
-        case .markdown:
-            return [.renderedMarkdown, .raw]
-        case .delimited:
-            return [.table, .raw]
-        case .json:
-            return [.outline, .raw]
-        case .none:
-            return [.raw]
-        }
-    }
-
-    private enum StructuredKind {
-        case markdown
-        case delimited
-        case json
-    }
-
-    private static func structuredKind(fileName: String, language: String?) -> StructuredKind? {
-        let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
-        if ["csv", "tsv"].contains(ext) {
-            return .delimited
-        }
-        if ["json", "jsonl", "ndjson"].contains(ext) {
-            return .json
-        }
-        if ["markdown", "md", "mdown", "mdtext", "mdwn", "mkd"].contains(ext) {
-            return .markdown
-        }
-
-        switch language {
-        case "csv":
-            return .delimited
-        case "json":
-            return .json
-        case "markdown":
-            return .markdown
-        default:
-            return nil
-        }
-    }
-}
-
-struct MarkdownRenderedPreview: View {
-    let text: String
-    let query: String
-
-    var body: some View {
-        ScrollView {
-            Text(TextPreviewFormatter.highlightedText(renderedText, query: query, language: nil))
-                .font(.body)
-                .lineSpacing(4)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-        }
-    }
-
-    private var renderedText: String {
-        MarkdownPreviewRenderer.renderedText(text)
-    }
-}
-
-enum MarkdownPreviewRenderer {
-    static func renderedText(_ text: String) -> String {
-        text
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { renderedLine(String($0)) }
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func renderedLine(_ line: String) -> String {
-        var rendered = line.replacingOccurrences(
-            of: #"^\s{0,3}#{1,6}\s+"#,
-            with: "",
-            options: .regularExpression
-        )
-        rendered = rendered.replacingOccurrences(
-            of: #"\[([^\]]+)\]\([^)]+\)"#,
-            with: "$1",
-            options: .regularExpression
-        )
-        for token in ["**", "__", "`", "*", "_"] {
-            rendered = rendered.replacingOccurrences(of: token, with: "")
-        }
-        return rendered
-    }
-}
-
-struct DelimitedPreviewTable {
-    let headers: [String]
-    let rows: [[String]]
-    let totalRowCount: Int
-    let totalColumnCount: Int
-    let truncatedRows: Bool
-    let truncatedColumns: Bool
-
-    var isEmpty: Bool {
-        headers.isEmpty && rows.isEmpty
-    }
-}
-
-enum DelimitedTextParser {
-    static func delimiter(forFileName fileName: String) -> Character {
-        URL(fileURLWithPath: fileName).pathExtension.lowercased() == "tsv" ? "\t" : ","
-    }
-
-    static func parse(
-        _ text: String,
-        delimiter: Character,
-        maxRows: Int = 80,
-        maxColumns: Int = 12
-    ) -> DelimitedPreviewTable {
-        let records = parsedRecords(text, delimiter: delimiter)
-            .filter { row in
-                row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            }
-        guard let headerRow = records.first else {
-            return DelimitedPreviewTable(
-                headers: [],
-                rows: [],
-                totalRowCount: 0,
-                totalColumnCount: 0,
-                truncatedRows: false,
-                truncatedColumns: false
-            )
-        }
-
-        let widestRowCount = records.map(\.count).max() ?? 0
-        let visibleColumnCount = min(max(widestRowCount, 1), maxColumns)
-        let headers = (0..<visibleColumnCount).map { index in
-            guard index < headerRow.count else { return "Column \(index + 1)" }
-            let title = headerRow[index].trimmingCharacters(in: .whitespacesAndNewlines)
-            return title.isEmpty ? "Column \(index + 1)" : title
-        }
-
-        let bodyRows = Array(records.dropFirst())
-        let visibleRows = bodyRows.prefix(maxRows).map { row in
-            (0..<visibleColumnCount).map { index in
-                index < row.count ? row[index] : ""
-            }
-        }
-
-        return DelimitedPreviewTable(
-            headers: headers,
-            rows: visibleRows,
-            totalRowCount: bodyRows.count,
-            totalColumnCount: widestRowCount,
-            truncatedRows: bodyRows.count > maxRows,
-            truncatedColumns: widestRowCount > maxColumns
-        )
-    }
-
-    private static func parsedRecords(_ text: String, delimiter: Character) -> [[String]] {
-        guard !text.isEmpty else { return [] }
-
-        var records: [[String]] = []
-        var row: [String] = []
-        var field = ""
-        var inQuotes = false
-        var index = text.startIndex
-        var endedOnRecordBoundary = false
-
-        while index < text.endIndex {
-            let character = text[index]
-            if inQuotes {
-                if character == "\"" {
-                    let nextIndex = text.index(after: index)
-                    if nextIndex < text.endIndex, text[nextIndex] == "\"" {
-                        field.append("\"")
-                        index = text.index(after: nextIndex)
-                    } else {
-                        inQuotes = false
-                        index = nextIndex
-                    }
-                } else {
-                    field.append(character)
-                    index = text.index(after: index)
-                }
-                endedOnRecordBoundary = false
-                continue
-            }
-
-            if character == "\"" {
-                inQuotes = true
-                index = text.index(after: index)
-                endedOnRecordBoundary = false
-            } else if character == delimiter {
-                row.append(field)
-                field = ""
-                index = text.index(after: index)
-                endedOnRecordBoundary = false
-            } else if character == "\n" || character == "\r" {
-                row.append(field)
-                records.append(row)
-                row = []
-                field = ""
-                let nextIndex = text.index(after: index)
-                if character == "\r", nextIndex < text.endIndex, text[nextIndex] == "\n" {
-                    index = text.index(after: nextIndex)
-                } else {
-                    index = nextIndex
-                }
-                endedOnRecordBoundary = true
-            } else {
-                field.append(character)
-                index = text.index(after: index)
-                endedOnRecordBoundary = false
-            }
-        }
-
-        if !endedOnRecordBoundary || !row.isEmpty || !field.isEmpty {
-            row.append(field)
-            records.append(row)
-        }
-
-        return records
-    }
-}
-
-struct DelimitedTablePreview: View {
-    let text: String
-    let delimiter: Character
-    let query: String
-
-    private let cellWidth: CGFloat = 148
-
-    var body: some View {
-        let table = DelimitedTextParser.parse(text, delimiter: delimiter)
-
-        ScrollView(.vertical) {
-            if table.isEmpty {
-                Text("No tabular rows found.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-            } else {
-                ScrollView(.horizontal) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        tableRow(table.headers, isHeader: true)
-                        ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
-                            tableRow(row, isHeader: false)
-                        }
-                        if table.truncatedRows || table.truncatedColumns {
-                            Text(tableLimitText(table))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 8)
-                        }
-                    }
-                    .padding()
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func tableRow(_ cells: [String], isHeader: Bool) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
-                Text(TextPreviewFormatter.highlightedText(cell, query: query, language: nil))
-                    .font(.system(.caption, design: .monospaced).weight(isHeader ? .semibold : .regular))
-                    .lineLimit(3)
-                    .textSelection(.enabled)
-                    .frame(width: cellWidth, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 7)
-                    .background(isHeader ? Color(.tertiarySystemFill) : Color(.systemBackground))
-                    .overlay(
-                        Rectangle()
-                            .stroke(Color(.separator).opacity(0.16), lineWidth: 0.5)
-                    )
-            }
-        }
-    }
-
-    private func tableLimitText(_ table: DelimitedPreviewTable) -> String {
-        var parts: [String] = []
-        if table.truncatedRows {
-            parts.append("showing \(table.rows.count) of \(table.totalRowCount) rows")
-        }
-        if table.truncatedColumns {
-            parts.append("showing \(table.headers.count) of \(table.totalColumnCount) columns")
-        }
-        return parts.joined(separator: ", ")
-    }
-}
-
-struct JSONPreviewNode {
-    let key: String?
-    let value: String
-    let kind: String
-    let children: [JSONPreviewNode]
-}
-
-struct JSONPreviewRow: Identifiable {
-    let id = UUID()
-    let depth: Int
-    let key: String
-    let value: String
-    let kind: String
-}
-
-enum JSONPreviewParser {
-    static func parse(_ text: String) -> JSONPreviewNode? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        if let value = parseJSONValue(trimmed) {
-            return node(key: "Root", value: value)
-        }
-
-        let lineValues = trimmed
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .compactMap { parseJSONValue(String($0)) }
-        guard !lineValues.isEmpty else { return nil }
-        return node(key: "JSON Lines", value: lineValues)
-    }
-
-    static func flattenedRows(from node: JSONPreviewNode, maxRows: Int = 200) -> [JSONPreviewRow] {
-        var rows: [JSONPreviewRow] = []
-        appendRows(from: node, depth: 0, rows: &rows, maxRows: maxRows)
-        return rows
-    }
-
-    private static func appendRows(
-        from node: JSONPreviewNode,
-        depth: Int,
-        rows: inout [JSONPreviewRow],
-        maxRows: Int
-    ) {
-        guard rows.count < maxRows else { return }
-        rows.append(JSONPreviewRow(depth: depth, key: node.key ?? "Value", value: node.value, kind: node.kind))
-        for child in node.children {
-            appendRows(from: child, depth: depth + 1, rows: &rows, maxRows: maxRows)
-        }
-    }
-
-    private static func parseJSONValue(_ text: String) -> Any? {
-        guard let data = text.data(using: .utf8) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-    }
-
-    private static func node(key: String?, value: Any) -> JSONPreviewNode {
-        if let dictionary = value as? [String: Any] {
-            let children = dictionary.keys.sorted().map { childKey in
-                node(key: childKey, value: dictionary[childKey] as Any)
-            }
-            return JSONPreviewNode(
-                key: key,
-                value: "\(children.count) \(children.count == 1 ? "key" : "keys")",
-                kind: "object",
-                children: children
-            )
-        }
-
-        if let array = value as? [Any] {
-            let children = array.enumerated().map { index, child in
-                node(key: "[\(index)]", value: child)
-            }
-            return JSONPreviewNode(
-                key: key,
-                value: "\(children.count) \(children.count == 1 ? "item" : "items")",
-                kind: "array",
-                children: children
-            )
-        }
-
-        if value is NSNull {
-            return JSONPreviewNode(key: key, value: "null", kind: "null", children: [])
-        }
-
-        if let number = value as? NSNumber {
-            if CFGetTypeID(number) == CFBooleanGetTypeID() {
-                return JSONPreviewNode(
-                    key: key,
-                    value: number.boolValue ? "true" : "false",
-                    kind: "boolean",
-                    children: []
-                )
-            }
-            return JSONPreviewNode(key: key, value: number.stringValue, kind: "number", children: [])
-        }
-
-        if let bool = value as? Bool {
-            return JSONPreviewNode(key: key, value: bool ? "true" : "false", kind: "boolean", children: [])
-        }
-
-        if let string = value as? String {
-            return JSONPreviewNode(key: key, value: string, kind: "string", children: [])
-        }
-
-        return JSONPreviewNode(key: key, value: String(describing: value), kind: "value", children: [])
-    }
-}
-
-struct JSONOutlinePreview: View {
-    let text: String
-    let query: String
-
-    var body: some View {
-        let root = JSONPreviewParser.parse(text)
-
-        ScrollView {
-            if let root {
-                LazyVStack(alignment: .leading, spacing: 7) {
-                    ForEach(JSONPreviewParser.flattenedRows(from: root)) { row in
-                        rowView(row)
-                    }
-                }
-                .padding()
-            } else {
-                Text("JSON could not be parsed. Switch to Raw to inspect the text.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-            }
-        }
-    }
-
-    private func rowView(_ row: JSONPreviewRow) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(row.key)
-                .font(.caption.monospaced().weight(.semibold))
-                .foregroundStyle(row.kind == "object" || row.kind == "array" ? .primary : .secondary)
-                .frame(minWidth: 72, alignment: .leading)
-            Text(TextPreviewFormatter.highlightedText(row.value, query: query, language: nil))
-                .font(.caption.monospaced())
-                .foregroundStyle(.primary)
-                .lineLimit(3)
-                .textSelection(.enabled)
-        }
-        .padding(.leading, CGFloat(row.depth) * 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-enum TextPreviewFormatter {
-    static func numberedText(_ text: String) -> String {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let width = String(max(lines.count, 1)).count
-        return lines.enumerated().map { index, line in
-            "\(String(index + 1).leftPadded(toLength: width))  \(line)"
-        }.joined(separator: "\n")
-    }
-
-    static func matchCount(in text: String, query: String) -> Int {
-        matchRanges(in: text, query: query).count
-    }
-
-    static func matchRanges(in text: String, query: String) -> [Range<String.Index>] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !needle.isEmpty, !text.isEmpty else { return [] }
-        var ranges: [Range<String.Index>] = []
-        var searchRange = text.startIndex..<text.endIndex
-        while let range = text.range(of: needle, options: [.caseInsensitive], range: searchRange) {
-            ranges.append(range)
-            searchRange = range.upperBound..<text.endIndex
-        }
-        return ranges
-    }
-
-    static func highlightedText(_ text: String, query: String, language: String? = nil) -> AttributedString {
-        let attributed = FilePreviewLanguage.highlightedText(text, language: language)
-        return highlightQuery(in: attributed, query: query)
-    }
-
-    static func highlightQuery(in attributed: AttributedString, query: String) -> AttributedString {
-        var highlighted = attributed
-        let text = String(highlighted.characters)
-        for range in matchRanges(in: text, query: query) {
-            guard let attributedRange = Range(range, in: highlighted) else { continue }
-            highlighted[attributedRange].backgroundColor = Color.yellow.opacity(0.35)
-            highlighted[attributedRange].foregroundColor = Color.primary
-        }
-        return highlighted
-    }
-}
-
 enum FilePreviewLanguage {
     static func infer(fileName: String, mime: String?) -> String? {
         let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
@@ -1644,10 +1152,22 @@ enum FilePreviewLanguage {
 }
 
 enum FileMetadataFormatter {
-    static func previewMetadataText(sizeBytes: Int64?, modifiedAt: String?) -> String? {
+    static func previewMetadataText(
+        sizeBytes: Int64?,
+        modifiedAt: String?,
+        imageWidth: Int? = nil,
+        imageHeight: Int? = nil,
+        mime: String? = nil
+    ) -> String? {
         var parts: [String] = []
         if let sizeBytes {
             parts.append(humanReadableAttachmentSize(sizeBytes))
+        }
+        if let imageWidth, let imageHeight {
+            parts.append("\(imageWidth)x\(imageHeight)")
+        }
+        if let mime = mime?.trimmingCharacters(in: .whitespacesAndNewlines), !mime.isEmpty {
+            parts.append(mime)
         }
         if let modified = modifiedLabel(modifiedAt, compact: false) {
             parts.append(modified)
@@ -1688,6 +1208,46 @@ enum FileMetadataFormatter {
     }
 }
 
+enum FilePreviewUnsupportedMessage {
+    static func message(fileName: String, mime: String?, sizeBytes: Int64?) -> String {
+        var details: [String] = []
+        if let mime = mime?.trimmingCharacters(in: .whitespacesAndNewlines), !mime.isEmpty {
+            details.append(mime)
+        }
+        if let sizeBytes {
+            details.append(humanReadableAttachmentSize(sizeBytes))
+        }
+
+        let descriptor = details.isEmpty ? "This file" : "\(fileName) (\(details.joined(separator: ", ")))"
+        if isArchive(fileName: fileName, mime: mime) {
+            return "\(descriptor) is an archive, which cannot be previewed inline on iPhone yet. Inspect or extract it on the host."
+        }
+        if isLikelyBinary(mime: mime) {
+            return "\(descriptor) is a binary file that cannot be rendered inline on iPhone yet. Inspect it on the host."
+        }
+        return "\(descriptor) cannot be previewed inline on iPhone. Inspect it from the host."
+    }
+
+    private static func isArchive(fileName: String, mime: String?) -> Bool {
+        let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        let lowerMime = (mime ?? "").lowercased()
+        return ["zip", "gz", "tgz", "tar", "rar", "7z", "xz"].contains(ext) ||
+            lowerMime.contains("zip") ||
+            lowerMime.contains("tar") ||
+            lowerMime.contains("archive") ||
+            lowerMime.contains("compressed")
+    }
+
+    private static func isLikelyBinary(mime: String?) -> Bool {
+        let lowerMime = (mime ?? "").lowercased()
+        guard !lowerMime.isEmpty else { return false }
+        return lowerMime == "application/octet-stream" ||
+            lowerMime.hasPrefix("audio/") ||
+            lowerMime.hasPrefix("video/") ||
+            lowerMime.hasPrefix("font/")
+    }
+}
+
 enum TextPreviewLoader {
     private static let maxPreviewBytes = 2 * 1024 * 1024
     private static let previewTextPrefix = "mobaile-text-preview-"
@@ -1714,10 +1274,8 @@ enum TextPreviewLoader {
             if data.count > maxPreviewBytes {
                 throw TextPreviewError.tooLarge
             }
-            for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .isoLatin1] {
-                if let text = String(data: data, encoding: encoding) {
-                    return text
-                }
+            if let text = TextPreviewDataDecoder.decodedText(from: data) {
+                return text
             }
             throw TextPreviewError.unsupportedEncoding
         }.value
@@ -1842,14 +1400,12 @@ enum LocalFileInspection {
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
             try handle.seek(toOffset: UInt64(safeOffset))
-            let data = try handle.read(upToCount: limit + 1) ?? Data()
+            let data = try handle.read(upToCount: limit + 4) ?? Data()
             let truncated = data.count > limit
-            let previewData = truncated ? data.prefix(limit) : data[...]
-            for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .isoLatin1] {
-                if let text = String(data: Data(previewData), encoding: encoding) {
-                    let nextOffset = truncated ? safeOffset + previewData.count : nil
-                    return (text, previewData.count, truncated, nextOffset)
-                }
+            let previewData = Data(truncated ? data.prefix(limit) : data[...])
+            if let decoded = TextPreviewDataDecoder.decodedPrefix(from: previewData) {
+                let nextOffset = truncated ? safeOffset + decoded.byteCount : nil
+                return (decoded.text, decoded.byteCount, truncated, nextOffset)
             }
         } catch {
             return (nil, 0, false, nil)
@@ -1874,7 +1430,7 @@ enum LocalFileInspection {
                 return (needle, 0, [])
             }
             let data = try Data(contentsOf: url)
-            guard let text = decodedText(from: data) else {
+            guard let text = TextPreviewDataDecoder.decodedText(from: data) else {
                 return (needle, 0, [])
             }
             var count = 0
@@ -1892,15 +1448,6 @@ enum LocalFileInspection {
         }
     }
 
-    private static func decodedText(from data: Data) -> String? {
-        for encoding in [String.Encoding.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .isoLatin1] {
-            if let text = String(data: data, encoding: encoding) {
-                return text
-            }
-        }
-        return nil
-    }
-
     private static func imageDimensions(url: URL, kind: DraftAttachment.Kind) -> (width: Int?, height: Int?) {
         guard kind == .image,
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -1910,13 +1457,6 @@ enum LocalFileInspection {
         let width = properties[kCGImagePropertyPixelWidth] as? Int
         let height = properties[kCGImagePropertyPixelHeight] as? Int
         return (width, height)
-    }
-}
-
-private extension String {
-    func leftPadded(toLength length: Int) -> String {
-        guard count < length else { return self }
-        return String(repeating: " ", count: length - count) + self
     }
 }
 

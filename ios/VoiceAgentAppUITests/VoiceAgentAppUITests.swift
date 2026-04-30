@@ -84,6 +84,7 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Selected workspace"].exists)
         XCTAssertTrue(app.staticTexts["Browsing"].exists)
         XCTAssertTrue(app.staticTexts["Selected for future runs"].exists)
+        XCTAssertTrue(app.buttons["Sort files"].exists)
     }
 
     func testWorkspaceBrowserOpensTextPreviewFile() {
@@ -119,10 +120,9 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.staticTexts["PreviewData.csv"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Table"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Raw"].exists)
-        XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "alpha,beta")).firstMatch
-                .waitForExistence(timeout: 5)
-        )
+        XCTAssertTrue(app.staticTexts["2 rows"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["3 columns"].exists)
+        XCTAssertTrue(app.staticTexts["alpha,beta"].waitForExistence(timeout: 5))
     }
 
     func testWorkspaceBrowserOpensImagePreviewFile() {

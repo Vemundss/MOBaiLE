@@ -468,6 +468,28 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(DelimitedTextParser.delimiter(forFileName: "table.tsv"), "\t")
     }
 
+    func testDelimitedTextParserLimitsLargeTablesAndSizesVisibleColumns() {
+        let body = (0..<120)
+            .map { "row-\($0),\($0),\(String(repeating: "x", count: 48))" }
+            .joined(separator: "\n")
+        let table = DelimitedTextParser.parse(
+            "name,count,description\n\(body)\n",
+            delimiter: ",",
+            maxRows: 5,
+            maxColumns: 2
+        )
+
+        XCTAssertEqual(table.headers, ["name", "count"])
+        XCTAssertEqual(table.rows.count, 5)
+        XCTAssertEqual(table.totalRowCount, 120)
+        XCTAssertEqual(table.totalColumnCount, 3)
+        XCTAssertTrue(table.truncatedRows)
+        XCTAssertTrue(table.truncatedColumns)
+        XCTAssertEqual(table.columnWidths.count, 2)
+        XCTAssertGreaterThanOrEqual(table.columnWidths[0], 108)
+        XCTAssertGreaterThanOrEqual(table.columnWidths[1], 108)
+    }
+
     func testJSONPreviewParserBuildsOutlineForObjectsAndJSONLines() throws {
         let root = try XCTUnwrap(JSONPreviewParser.parse(#"{"name":"demo","items":[1,true,null]}"#))
         let rows = JSONPreviewParser.flattenedRows(from: root)
@@ -482,6 +504,14 @@ final class VoiceAgentModelTests: XCTestCase {
         let lineRows = JSONPreviewParser.flattenedRows(from: linesRoot)
         XCTAssertTrue(lineRows.contains { $0.key == "JSON Lines" && $0.value == "2 items" })
         XCTAssertTrue(lineRows.contains { $0.key == "event" && $0.value == "stop" })
+    }
+
+    func testJSONPreviewParserHonorsFlattenedRowLimit() throws {
+        let root = try XCTUnwrap(JSONPreviewParser.parse(#"{"items":[0,1,2,3,4,5,6,7,8,9]}"#))
+        let rows = JSONPreviewParser.flattenedRows(from: root, maxRows: 4)
+
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertEqual(rows.map(\.key), ["Root", "items", "[0]", "[1]"])
     }
 
     func testMarkdownPreviewRendererPreservesBlocksAndRemovesInlineMarkup() {
@@ -500,6 +530,26 @@ final class VoiceAgentModelTests: XCTestCase {
 
             Open files from the phone.
             """
+        )
+    }
+
+    func testFilePreviewMetadataAndUnsupportedMessagesIncludeUsefulDetails() {
+        XCTAssertEqual(
+            FileMetadataFormatter.previewMetadataText(
+                sizeBytes: 128,
+                modifiedAt: nil,
+                imageWidth: 640,
+                imageHeight: 360,
+                mime: "image/png"
+            ),
+            "128 bytes · 640x360 · image/png"
+        )
+        XCTAssertTrue(
+            FilePreviewUnsupportedMessage.message(
+                fileName: "archive.zip",
+                mime: "application/zip",
+                sizeBytes: 42
+            ).contains("archive")
         )
     }
 
@@ -536,6 +586,68 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertEqual(secondPage.textPreviewOffset, 6)
         XCTAssertEqual(secondPage.textPreview, "needle")
+    }
+
+    func testLocalFileInspectionDoesNotSplitUTF8PreviewCharacters() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("emoji.txt")
+        try "hi \u{1F603} there".write(to: url, atomically: true, encoding: .utf8)
+
+        let firstPage = try await LocalFileInspection.inspect(
+            url: url,
+            name: "emoji.txt",
+            mime: nil,
+            textPreviewBytes: 4
+        )
+
+        XCTAssertEqual(firstPage.textPreview, "hi ")
+        XCTAssertEqual(firstPage.textPreviewBytes, 3)
+        XCTAssertEqual(firstPage.textPreviewNextOffset, 3)
+
+        let secondPage = try await LocalFileInspection.inspect(
+            url: url,
+            name: "emoji.txt",
+            mime: nil,
+            textPreviewBytes: 4,
+            textPreviewOffset: 3
+        )
+
+        XCTAssertEqual(secondPage.textPreview, "\u{1F603}")
+        XCTAssertEqual(secondPage.textPreviewBytes, 4)
+        XCTAssertEqual(secondPage.textPreviewNextOffset, 7)
+    }
+
+    func testLocalFileInspectionDecodesUTF16PreviewWithoutEmbeddedNuls() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("utf16.txt")
+        try XCTUnwrap("ABCD".data(using: .utf16LittleEndian)).write(to: url)
+
+        let firstPage = try await LocalFileInspection.inspect(
+            url: url,
+            name: "utf16.txt",
+            mime: "text/plain",
+            textPreviewBytes: 5
+        )
+
+        XCTAssertEqual(firstPage.textPreview, "AB")
+        XCTAssertEqual(firstPage.textPreviewBytes, 4)
+        XCTAssertEqual(firstPage.textPreviewNextOffset, 4)
+
+        let secondPage = try await LocalFileInspection.inspect(
+            url: url,
+            name: "utf16.txt",
+            mime: "text/plain",
+            textPreviewBytes: 4,
+            textPreviewOffset: 4
+        )
+
+        XCTAssertEqual(secondPage.textPreview, "CD")
+        XCTAssertEqual(secondPage.textPreviewBytes, 4)
+        XCTAssertNil(secondPage.textPreviewNextOffset)
     }
 
     func testRunRecordDecoding() throws {

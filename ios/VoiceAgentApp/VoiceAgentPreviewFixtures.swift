@@ -940,6 +940,17 @@ enum VoiceAgentPreviewFactory {
             try? data.write(to: imageURL, options: .atomic)
         }
 
+        let scriptModifiedAt = "2026-04-28T20:00:00Z"
+        let csvModifiedAt = "2026-04-28T20:00:30Z"
+        let jsonModifiedAt = "2026-04-28T20:00:40Z"
+        let markdownModifiedAt = "2026-04-28T20:00:50Z"
+        let imageModifiedAt = "2026-04-28T20:01:00Z"
+        setModificationDate(scriptModifiedAt, for: scriptURL)
+        setModificationDate(csvModifiedAt, for: csvURL)
+        setModificationDate(jsonModifiedAt, for: jsonURL)
+        setModificationDate(markdownModifiedAt, for: markdownURL)
+        setModificationDate(imageModifiedAt, for: imageURL)
+
         return [
             DirectoryEntry(
                 name: "PreviewScript.py",
@@ -947,7 +958,7 @@ enum VoiceAgentPreviewFactory {
                 isDirectory: false,
                 sizeBytes: fileSize(at: scriptURL),
                 mime: "text/x-python",
-                modifiedAt: "2026-04-28T20:00:00Z"
+                modifiedAt: scriptModifiedAt
             ),
             DirectoryEntry(
                 name: "PreviewData.csv",
@@ -955,7 +966,7 @@ enum VoiceAgentPreviewFactory {
                 isDirectory: false,
                 sizeBytes: fileSize(at: csvURL),
                 mime: "text/csv",
-                modifiedAt: "2026-04-28T20:00:30Z"
+                modifiedAt: csvModifiedAt
             ),
             DirectoryEntry(
                 name: "PreviewConfig.json",
@@ -963,7 +974,7 @@ enum VoiceAgentPreviewFactory {
                 isDirectory: false,
                 sizeBytes: fileSize(at: jsonURL),
                 mime: "application/json",
-                modifiedAt: "2026-04-28T20:00:40Z"
+                modifiedAt: jsonModifiedAt
             ),
             DirectoryEntry(
                 name: "PreviewNotes.md",
@@ -971,7 +982,7 @@ enum VoiceAgentPreviewFactory {
                 isDirectory: false,
                 sizeBytes: fileSize(at: markdownURL),
                 mime: "text/markdown",
-                modifiedAt: "2026-04-28T20:00:50Z"
+                modifiedAt: markdownModifiedAt
             ),
             DirectoryEntry(
                 name: "PreviewPlot.png",
@@ -979,9 +990,14 @@ enum VoiceAgentPreviewFactory {
                 isDirectory: false,
                 sizeBytes: fileSize(at: imageURL),
                 mime: "image/png",
-                modifiedAt: "2026-04-28T20:01:00Z"
+                modifiedAt: imageModifiedAt
             ),
         ]
+    }
+
+    private static func setModificationDate(_ isoDate: String, for url: URL) {
+        guard let date = ISO8601DateFormatter().date(from: isoDate) else { return }
+        try? FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
     }
 
     private static func fileSize(at url: URL) -> Int64 {

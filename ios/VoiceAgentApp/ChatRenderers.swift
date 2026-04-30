@@ -36,7 +36,12 @@ struct MessageBubble: View {
             Text(artifactOpenError)
         }
         .sheet(item: $previewDocument) { preview in
-            FilePreviewSheet(url: preview.url, title: preview.title, originalPath: preview.originalPath)
+            FilePreviewSheet(
+                url: preview.url,
+                title: preview.title,
+                originalPath: preview.originalPath,
+                metadataText: preview.metadataText
+            )
         }
         .sheet(item: $textPreviewDocument) { preview in
             TextFilePreviewSheet(document: preview)
@@ -239,12 +244,23 @@ struct MessageBubble: View {
                     previewDocument = PreviewDocument(
                         url: localURL,
                         title: artifact.title,
-                        originalPath: inspection?.path ?? artifact.path ?? artifact.url
+                        originalPath: inspection?.path ?? artifact.path ?? artifact.url,
+                        metadataText: FileMetadataFormatter.previewMetadataText(
+                            sizeBytes: inspection?.sizeBytes,
+                            modifiedAt: inspection?.modifiedAt,
+                            imageWidth: inspection?.imageWidth,
+                            imageHeight: inspection?.imageHeight,
+                            mime: inspection?.mime ?? artifact.mime
+                        )
                     )
                 }
             } else {
                 await MainActor.run {
-                    artifactOpenError = "This file type can't be previewed on iPhone."
+                    artifactOpenError = FilePreviewUnsupportedMessage.message(
+                        fileName: artifact.title,
+                        mime: inspection?.mime ?? artifact.mime,
+                        sizeBytes: inspection?.sizeBytes
+                    )
                 }
             }
         } catch {

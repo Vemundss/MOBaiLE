@@ -48,6 +48,7 @@
 		F1CF503505B19E2BD17DE7C4 /* VoiceThreadResumeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA66A9DEB601906DD5FE8B0 /* VoiceThreadResumeResolver.swift */; };
 		F93F690F4929529AA9138114 /* MediaAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D63F53093311E4F4CEF7978 /* MediaAttachments.swift */; };
 		FC608A46DC941842587A2F24 /* ContentViewSupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D4EC528B0377B653D98B6E /* ContentViewSupportViews.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* TextPreviewRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5D /* TextPreviewRenderers.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +127,7 @@
 		A89A43780862752035F315FC /* MOBaiLEShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MOBaiLEShortcuts.swift; sourceTree = "<group>"; };
 		AAA945BA92E3B0DFAE3BCA72 /* VoiceTaskWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTaskWidget.swift; sourceTree = "<group>"; };
 		AFB87F32B46B087DBF769104 /* URLSchemeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLSchemeConfiguration.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5D /* TextPreviewRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPreviewRenderers.swift; sourceTree = "<group>"; };
 		BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAgentApp.swift; sourceTree = "<group>"; };
 		BCED4808EDE3C590E926F59E /* ConversationComposerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationComposerBar.swift; sourceTree = "<group>"; };
 		C5A63560C68468159F1DCE09 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -221,6 +223,7 @@
 				EDF33E49DD9EEF0442C7A3B1 /* RuntimeConfigurationCatalog.swift */,
 				58403D1414C58DC0E8F2BF29 /* RuntimeInfoBar.swift */,
 				EC5EABF3E8FA7C8EBB07FB2F /* SpeechTranscriptionService.swift */,
+				A1B2C3D4E5F60718293A4B5D /* TextPreviewRenderers.swift */,
 				AFB87F32B46B087DBF769104 /* URLSchemeConfiguration.swift */,
 				BA2C599146D820FC1D92197F /* VoiceAgentApp.swift */,
 				3C3B93CDB10258D6BA77B613 /* VoiceAgentConnectionState.swift */,
@@ -395,6 +398,7 @@
 				BC411C324358DF0DA030EAE7 /* RuntimeConfigurationCatalog.swift in Sources */,
 				ECF54C131C5583F7116AA87A /* RuntimeInfoBar.swift in Sources */,
 				A1862D9871A32EF06B8E9B46 /* SpeechTranscriptionService.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5C /* TextPreviewRenderers.swift in Sources */,
 				02F1E8C0D81003A451563293 /* URLSchemeConfiguration.swift in Sources */,
 				059E913A99D8C9D48A0C5FBE /* VoiceAgentApp.swift in Sources */,
 				EB967E83C700AF637541263D /* VoiceAgentConnectionState.swift in Sources */,

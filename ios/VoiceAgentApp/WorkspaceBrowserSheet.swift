@@ -17,6 +17,7 @@ struct WorkspaceBrowserSheet: View {
     @State private var previewDocument: PreviewDocument?
     @State private var textPreviewDocument: TextPreviewDocument?
     @State private var directoryFilterText = ""
+    @State private var directorySortOrder: WorkspaceDirectorySortOrder = .name
     @FocusState private var isDirectoryFilterFocused: Bool
     @State private var thumbnailImages: [DirectoryThumbnailCacheKey: UIImage] = [:]
     @State private var thumbnailCacheOrder: [DirectoryThumbnailCacheKey] = []
@@ -71,7 +72,12 @@ struct WorkspaceBrowserSheet: View {
                 Text(fileOpenError)
             }
             .sheet(item: $previewDocument) { preview in
-                FilePreviewSheet(url: preview.url, title: preview.title, originalPath: preview.originalPath)
+                FilePreviewSheet(
+                    url: preview.url,
+                    title: preview.title,
+                    originalPath: preview.originalPath,
+                    metadataText: preview.metadataText
+                )
             }
             .sheet(item: $textPreviewDocument) { preview in
                 TextFilePreviewSheet(document: preview)
@@ -159,7 +165,7 @@ struct WorkspaceBrowserSheet: View {
                 .disabled(vm.isLoadingDirectoryBrowser)
             }
 
-            directoryFilterField
+            directoryListControls
 
             if isCreatingDirectory {
                 HStack(spacing: 6) {
@@ -274,6 +280,28 @@ struct WorkspaceBrowserSheet: View {
         .onTapGesture {
             guard !vm.isLoadingDirectoryBrowser else { return }
             isDirectoryFilterFocused = true
+        }
+    }
+
+    private var directoryListControls: some View {
+        HStack(spacing: 8) {
+            directoryFilterField
+
+            Menu {
+                Picker("Sort files", selection: $directorySortOrder) {
+                    ForEach(WorkspaceDirectorySortOrder.allCases) { order in
+                        Label(order.title, systemImage: order.systemImage).tag(order)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.callout.weight(.semibold))
+                    .frame(width: 44, height: 36)
+            }
+            .buttonStyle(.bordered)
+            .disabled(vm.isLoadingDirectoryBrowser)
+            .accessibilityLabel("Sort files")
+            .accessibilityValue(directorySortOrder.title)
         }
     }
 
@@ -505,10 +533,12 @@ struct WorkspaceBrowserSheet: View {
     private var displayedDirectoryEntries: [DirectoryEntry] {
         let entries = vm.filteredDirectoryBrowserEntries
         let query = directoryFilterText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return entries }
-        return entries.filter { entry in
+        let filteredEntries = query.isEmpty ? entries : entries.filter { entry in
             entry.name.localizedCaseInsensitiveContains(query) ||
             (entry.mime ?? "").localizedCaseInsensitiveContains(query)
+        }
+        return filteredEntries.sorted { lhs, rhs in
+            directorySortOrder.areInIncreasingOrder(lhs, rhs)
         }
     }
 
@@ -739,10 +769,21 @@ struct WorkspaceBrowserSheet: View {
                 previewDocument = PreviewDocument(
                     url: localURL,
                     title: entry.name,
-                    originalPath: inspection?.path ?? entry.path
+                    originalPath: inspection?.path ?? entry.path,
+                    metadataText: FileMetadataFormatter.previewMetadataText(
+                        sizeBytes: inspection?.sizeBytes ?? entry.sizeBytes,
+                        modifiedAt: inspection?.modifiedAt ?? entry.modifiedAt,
+                        imageWidth: inspection?.imageWidth,
+                        imageHeight: inspection?.imageHeight,
+                        mime: inspection?.mime ?? entry.mime
+                    )
                 )
             } else {
-                fileOpenError = "This file type can't be previewed on iPhone."
+                fileOpenError = FilePreviewUnsupportedMessage.message(
+                    fileName: entry.name,
+                    mime: inspection?.mime ?? entry.mime,
+                    sizeBytes: inspection?.sizeBytes ?? entry.sizeBytes
+                )
             }
         } catch {
             fileOpenError = error.localizedDescription
@@ -874,6 +915,106 @@ struct WorkspaceBrowserSheet: View {
             return "Open folder \(entry.name)"
         }
         return "Preview file \(entry.name), \(directoryEntryDetailText(entry))"
+    }
+}
+
+private enum WorkspaceDirectorySortOrder: String, CaseIterable, Identifiable {
+    case name
+    case modified
+    case type
+    case size
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name:
+            return "Name"
+        case .modified:
+            return "Modified"
+        case .type:
+            return "Type"
+        case .size:
+            return "Size"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .name:
+            return "textformat"
+        case .modified:
+            return "calendar"
+        case .type:
+            return "doc.on.doc"
+        case .size:
+            return "arrow.up.left.and.arrow.down.right"
+        }
+    }
+
+    func areInIncreasingOrder(_ lhs: DirectoryEntry, _ rhs: DirectoryEntry) -> Bool {
+        if lhs.isDirectory != rhs.isDirectory {
+            return lhs.isDirectory && !rhs.isDirectory
+        }
+
+        switch self {
+        case .name:
+            return nameCompare(lhs, rhs)
+        case .modified:
+            return compareOptionalStrings(lhs.modifiedAt, rhs.modifiedAt, descending: true) ?? nameCompare(lhs, rhs)
+        case .type:
+            let lhsType = directoryTypeKey(lhs)
+            let rhsType = directoryTypeKey(rhs)
+            if lhsType != rhsType {
+                return lhsType.localizedCaseInsensitiveCompare(rhsType) == .orderedAscending
+            }
+            return nameCompare(lhs, rhs)
+        case .size:
+            return compareOptionalInts(lhs.sizeBytes, rhs.sizeBytes, descending: true) ?? nameCompare(lhs, rhs)
+        }
+    }
+
+    private func nameCompare(_ lhs: DirectoryEntry, _ rhs: DirectoryEntry) -> Bool {
+        lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    }
+
+    private func directoryTypeKey(_ entry: DirectoryEntry) -> String {
+        if entry.isDirectory {
+            return "0-folder"
+        }
+        let mime = entry.mime?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let mime, !mime.isEmpty {
+            return mime
+        }
+        return URL(fileURLWithPath: entry.name).pathExtension.lowercased()
+    }
+
+    private func compareOptionalStrings(_ lhs: String?, _ rhs: String?, descending: Bool) -> Bool? {
+        let lhsValue = lhs?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rhsValue = rhs?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (lhsValue?.isEmpty == false ? lhsValue : nil, rhsValue?.isEmpty == false ? rhsValue : nil) {
+        case let (left?, right?) where left != right:
+            return descending ? left > right : left < right
+        case (nil, _?):
+            return false
+        case (_?, nil):
+            return true
+        default:
+            return nil
+        }
+    }
+
+    private func compareOptionalInts(_ lhs: Int64?, _ rhs: Int64?, descending: Bool) -> Bool? {
+        switch (lhs, rhs) {
+        case let (left?, right?) where left != right:
+            return descending ? left > right : left < right
+        case (nil, _?):
+            return false
+        case (_?, nil):
+            return true
+        default:
+            return nil
+        }
     }
 }
 
