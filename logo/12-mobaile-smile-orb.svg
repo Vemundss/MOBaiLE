@@ -1,0 +1,25 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <circle cx="512" cy="512" r="372" fill="#12304D"/>
+  <circle cx="512" cy="512" r="292" fill="url(#orb)"/>
+  <circle cx="408" cy="456" r="54" fill="#071D35"/>
+  <circle cx="616" cy="456" r="54" fill="#071D35"/>
+  <circle cx="390" cy="436" r="18" fill="white"/>
+  <circle cx="598" cy="436" r="18" fill="white"/>
+  <path d="M386 614C430 666 594 666 638 614" stroke="white" stroke-width="46" stroke-linecap="round"/>
+  <circle cx="234" cy="596" r="72" fill="#FF8D6E"/>
+  <circle cx="790" cy="596" r="72" fill="#FFCE5C"/>
+  <rect x="452" y="106" width="120" height="210" rx="60" fill="#6F7CFF"/>
+  <circle cx="512" cy="116" r="48" fill="#34D4BD"/>
+  <defs>
+    <linearGradient id="bg" x1="98" y1="88" x2="896" y2="932" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#092238"/>
+      <stop offset="1" stop-color="#10766B"/>
+    </linearGradient>
+    <linearGradient id="orb" x1="292" y1="230" x2="746" y2="788" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#64B8FF"/>
+      <stop offset="0.52" stop-color="#BFF3E0"/>
+      <stop offset="1" stop-color="#FFF1B8"/>
+    </linearGradient>
+  </defs>
+</svg>

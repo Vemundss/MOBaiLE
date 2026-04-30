@@ -11,6 +11,11 @@ This folder collects current logo directions so the app mark can be chosen separ
 - `05-cute-control-face.*`: new polished cute-face direction that keeps the original warmth.
 - `06-voice-pulse-companion.*`: new voice companion direction.
 - `07-pocket-terminal-mascot.*`: new terminal-plus-companion direction.
+- `08-pocket-pal-closeup.*`: zoomed-in mascot face with large readable headphones and warm color accents.
+- `09-terminal-smile-closeup.*`: simple terminal/app-window face with large command and smile shapes.
+- `10-voice-drop-buddy.*`: colorful voice-drop mascot with a bold waveform expression.
+- `11-command-spark-face.*`: command prompt plus cute face, cropped tightly for small icon sizes.
+- `12-mobaile-smile-orb.*`: compact orb mascot with high contrast and simple colorful side controls.
 
 ## Illustration-Only
 
@@ -22,4 +27,4 @@ The tracked app logo and app icon history currently points to the descriptive ho
 
 ## Current Recommendation
 
-Start from `01-friendly-bot-refined.*` or `05-cute-control-face.*`. Those retain the approachable character that made the cute direction memorable while still fitting a higher-quality product surface.
+Start from `08-pocket-pal-closeup.*`, `09-terminal-smile-closeup.*`, or `12-mobaile-smile-orb.*`. They are tightly cropped, colorful, and hold up best when reduced to small app-icon sizes.
