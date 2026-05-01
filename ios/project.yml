@@ -48,7 +48,7 @@ targets:
         MOBAILE_URL_SCHEME: mobaile
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: 1.1.1
+        MARKETING_VERSION: 1.1.2
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: G9VZ6PWF3Z
         TARGETED_DEVICE_FAMILY: "1"
@@ -111,7 +111,7 @@ targets:
         MOBAILE_URL_SCHEME: mobaile
         PRODUCT_BUNDLE_IDENTIFIER: com.vemundss.voiceagentapp.widget
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: 1.1.1
+        MARKETING_VERSION: 1.1.2
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: G9VZ6PWF3Z
         TARGETED_DEVICE_FAMILY: "1"

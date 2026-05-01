@@ -12,8 +12,8 @@ COPY = {
         "body": "Pair your Mac or Linux machine once, then start the next repo or terminal task from the phone.",
     },
     "02-live-conversation": {
-        "headline": "Watch the run\nstay readable",
-        "body": "Progress, results, and follow-up stay together in one live thread.",
+        "headline": "Review results\nat a glance",
+        "body": "Changed files, verification, progress, and follow-up stay together in one readable thread.",
     },
     "03-voice-recording": {
         "headline": "Use voice when\ntyping is awkward",

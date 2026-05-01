@@ -100,11 +100,30 @@ struct WorkspaceBrowserSheet: View {
                 Text("Browsing")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(browsedDirectoryLabel)
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "folder.fill")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 28, height: 28)
+                        .background(Color.accentColor.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(browsedDirectoryTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        if let context = browsedDirectoryContext {
+                            Text(context)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
 
                 if canUseBrowsedDirectory {
                     Button {
@@ -440,6 +459,14 @@ struct WorkspaceBrowserSheet: View {
         return browsed.isEmpty ? runtimeDirectoryLabel : browsed
     }
 
+    private var browsedDirectoryTitle: String {
+        shortPathLabel(browsedDirectoryLabel)
+    }
+
+    private var browsedDirectoryContext: String? {
+        parentPathLabel(for: browsedDirectoryLabel)
+    }
+
     private var selectedWorkspacePath: String {
         let selected = runtimeDirectoryLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         return selected.isEmpty ? "~" : selected
@@ -483,6 +510,15 @@ struct WorkspaceBrowserSheet: View {
         let last = url.lastPathComponent
         guard !last.isEmpty else { return trimmed }
         return last
+    }
+
+    private func parentPathLabel(for path: String) -> String? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "/" else { return nil }
+
+        let parent = URL(fileURLWithPath: trimmed).deletingLastPathComponent().path
+        guard !parent.isEmpty, parent != trimmed, parent != "." else { return nil }
+        return parent
     }
 
     @ViewBuilder

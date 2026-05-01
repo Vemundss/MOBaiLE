@@ -1,7 +1,7 @@
 {
   "name": "mobaile",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "MOBaiLE onboarding and utility command wrappers",
   "scripts": {
     "backend:lint": "cd backend && uvx ruff check app tests",

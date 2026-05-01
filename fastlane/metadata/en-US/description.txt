@@ -4,7 +4,7 @@ Pair once with your own backend, send a prompt by text or voice, and watch the r
 
 Use MOBaiLE to:
 - Start repo checks, scripts, and coding-agent tasks away from the keyboard
-- Keep progress, output, artifacts, and next steps in one readable thread
+- Keep progress, changed files, verification, artifacts, and next steps in one readable thread
 - Dictate quick tasks with voice mode and auto-send after silence
 - Switch between workspace chats without losing context
 - Inspect connection, runtime, and personal context settings when something needs attention

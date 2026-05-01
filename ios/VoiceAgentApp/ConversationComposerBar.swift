@@ -617,7 +617,7 @@ struct ConversationComposerBar: View {
 
     private var composerPlaceholder: String {
         if vm.needsConnectionRepair {
-            return "Scan pairing QR again to reconnect"
+            return "Reconnect to send"
         }
         if !vm.hasConfiguredConnection {
             return "Connect backend"

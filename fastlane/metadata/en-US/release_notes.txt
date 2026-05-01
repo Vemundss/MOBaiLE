@@ -1,3 +1,3 @@
-Refined runtime settings, clearer profile context controls, and a more polished first-run presentation.
+Richer run result cards make changed files, verification, warnings, artifacts, and next actions easier to scan from iPhone.
 
-This release also improves live progress in chat, voice capture, thread handling, and reconnect or recovery flows.
+Changed-file and next-action cards can open previews or run logs when backend metadata is available. Workspace browsing and reconnect states are also cleaner.
