@@ -1210,10 +1210,12 @@ struct ChatWarning: Codable, Equatable, Identifiable {
 }
 
 struct ChatNextAction: Codable, Equatable, Identifiable {
-    var id: String { "\(kind)-\(title)-\(detail ?? "")" }
+    var id: String { "\(kind)-\(title)-\(detail ?? "")-\(path ?? "")-\(artifact?.id ?? "")" }
     let title: String
     let detail: String?
     let kind: String
+    let path: String?
+    let artifact: ChatArtifact?
 }
 
 struct ChatAgendaItem: Codable, Equatable, Identifiable {

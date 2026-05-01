@@ -369,7 +369,15 @@ struct ContentView: View {
                                     message: message,
                                     serverURL: vm.serverURL,
                                     apiToken: vm.apiToken,
-                                    workspacePath: runtimeDirectoryLabel
+                                    workspacePath: runtimeDirectoryLabel,
+                                    onOpenLogs: {
+                                        showLogs = true
+                                    },
+                                    onRetryLastPrompt: {
+                                        Task {
+                                            await vm.retryLastPrompt()
+                                        }
+                                    }
                                 )
                                 if message.role != "user" {
                                     Spacer(minLength: 52)

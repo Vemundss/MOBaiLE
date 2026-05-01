@@ -4,8 +4,11 @@ import json
 import mimetypes
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from app.models.schemas import (
     ChatArtifact,
@@ -13,6 +16,7 @@ from app.models.schemas import (
     ChatEnvelope,
     ChatFileChange,
     ChatNextAction,
+    ChatResultManifest,
     ChatSection,
     ChatTestRun,
     ChatWarning,
@@ -82,6 +86,19 @@ _RELATIVE_FILE_REFERENCE_PATTERN = (
     r"(?<![\w/.~-])([A-Za-z0-9_.@~ -]+(?:/[A-Za-z0-9_.@~ -]+)+\.[A-Za-z0-9]{1,8})"
     r"(?=$|[\s),.;:!?])"
 )
+_RESULT_MANIFEST_FENCE_PATTERN = re.compile(
+    r"```(?P<label>[A-Za-z0-9_.-]+)?[ \t]*\n(?P<body>.*?)(?:\n```|```)",
+    re.DOTALL,
+)
+_MANIFEST_FENCE_LABELS = {"mobaile_result", "mobaile-result", "mobaile.result", "mobaile"}
+_MANIFEST_WRAPPER_KEYS = {"mobaile_result", "result_manifest", "chat_result"}
+
+
+@dataclass(frozen=True)
+class ExtractedResultManifest:
+    text: str
+    manifest: ChatResultManifest | None
+    warnings: list[ChatWarning]
 
 
 def parse_chat_envelope_payload(raw_text: str) -> dict[str, object] | None:
@@ -123,6 +140,125 @@ def parse_chat_envelope_payload(raw_text: str) -> dict[str, object] | None:
     if "message_kind" in parsed and str(parsed.get("message_kind", "")).strip() not in _MESSAGE_KINDS:
         parsed["message_kind"] = "final"
     return parsed
+
+
+def extract_result_manifest(raw_text: str) -> ExtractedResultManifest:
+    """Extract a machine-readable result manifest from mixed assistant text."""
+    if "```" not in raw_text:
+        return ExtractedResultManifest(text=raw_text, manifest=None, warnings=[])
+
+    manifests: list[ChatResultManifest] = []
+    warnings: list[ChatWarning] = []
+    chunks: list[str] = []
+    cursor = 0
+
+    for match in _RESULT_MANIFEST_FENCE_PATTERN.finditer(raw_text):
+        label = (match.group("label") or "").strip().lower()
+        body = match.group("body").strip()
+        parsed, should_strip, warning = _parse_manifest_fence(label, body)
+        if parsed is not None:
+            manifests.append(parsed)
+        if warning is not None:
+            warnings.append(warning)
+        if should_strip:
+            chunks.append(raw_text[cursor : match.start()])
+            cursor = match.end()
+
+    if cursor == 0:
+        return ExtractedResultManifest(text=raw_text, manifest=None, warnings=warnings)
+
+    chunks.append(raw_text[cursor:])
+    cleaned_text = _collapse_blank_lines("".join(chunks)).strip()
+    return ExtractedResultManifest(
+        text=cleaned_text,
+        manifest=_merge_result_manifests(manifests),
+        warnings=warnings,
+    )
+
+
+def _parse_manifest_fence(
+    label: str,
+    body: str,
+) -> tuple[ChatResultManifest | None, bool, ChatWarning | None]:
+    is_manifest_label = label in _MANIFEST_FENCE_LABELS
+    is_json_label = label in {"json", "jsonc"}
+    if not is_manifest_label and not is_json_label:
+        return None, False, None
+
+    try:
+        decoded = _loads_json_object(body)
+    except json.JSONDecodeError:
+        if not is_manifest_label:
+            return None, False, None
+        return (
+            None,
+            True,
+            ChatWarning(
+                message="The assistant included a structured result manifest, but it was not valid JSON.",
+                level="warning",
+            ),
+        )
+
+    manifest_payload = _manifest_payload_from_json(decoded, require_wrapper=not is_manifest_label)
+    if manifest_payload is None:
+        return None, False, None
+    try:
+        return ChatResultManifest.model_validate(manifest_payload), True, None
+    except ValidationError:
+        return (
+            None,
+            True,
+            ChatWarning(
+                message="The assistant included a structured result manifest, but one or more fields were invalid.",
+                level="warning",
+            ),
+        )
+
+
+def _loads_json_object(raw_json: str) -> dict[str, object]:
+    candidate = raw_json.strip()
+    for _ in range(2):
+        parsed = json.loads(candidate)
+        if isinstance(parsed, str):
+            candidate = parsed.strip()
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+        raise json.JSONDecodeError("manifest must be a JSON object", candidate, 0)
+    raise json.JSONDecodeError("manifest must be a JSON object", candidate, 0)
+
+
+def _manifest_payload_from_json(
+    decoded: dict[str, object],
+    *,
+    require_wrapper: bool,
+) -> dict[str, object] | None:
+    for key in _MANIFEST_WRAPPER_KEYS:
+        nested = decoded.get(key)
+        if isinstance(nested, dict):
+            return nested
+
+    if decoded.get("type") == "mobaile_result":
+        return {key: value for key, value in decoded.items() if key not in {"type", "version"}}
+
+    if require_wrapper:
+        return None
+    return decoded
+
+
+def _merge_result_manifests(manifests: list[ChatResultManifest]) -> ChatResultManifest | None:
+    if not manifests:
+        return None
+    summary = next((manifest.summary for manifest in manifests if manifest.summary), None)
+    return ChatResultManifest(
+        summary=summary,
+        artifacts=_dedupe_artifacts([artifact for manifest in manifests for artifact in manifest.artifacts]),
+        file_changes=_dedupe_by_id([item for manifest in manifests for item in manifest.file_changes]),
+        commands_run=_dedupe_by_id([item for manifest in manifests for item in manifest.commands_run]),
+        tests_run=_dedupe_by_id([item for manifest in manifests for item in manifest.tests_run]),
+        warnings=_dedupe_by_id([item for manifest in manifests for item in manifest.warnings]),
+        next_actions=_dedupe_by_id([item for manifest in manifests for item in manifest.next_actions]),
+    )
 
 
 def merge_assistant_lines(lines: list[str]) -> str:
@@ -324,12 +460,13 @@ def concise_chat_summary(envelope: ChatEnvelope) -> str | None:
 
 def enhance_chat_envelope(envelope: ChatEnvelope, *, infer_message_kind: bool = False) -> ChatEnvelope:
     text = _envelope_text(envelope)
-    artifacts = envelope.artifacts or extract_artifacts_from_text(text)
+    artifacts = _dedupe_artifacts([*envelope.artifacts, *extract_artifacts_from_text(text)])
     file_changes = envelope.file_changes or extract_file_changes_from_text(text, artifacts)
+    artifacts, file_changes = _with_actionable_file_change_artifacts(artifacts, file_changes)
     commands_run = envelope.commands_run or extract_command_runs_from_text(text)
     tests_run = envelope.tests_run or extract_test_runs_from_text(text, commands_run)
-    warnings = envelope.warnings or extract_warnings_from_text(envelope.sections, text)
-    next_actions = envelope.next_actions or extract_next_actions_from_text(envelope.sections)
+    warnings = _dedupe_by_id([*envelope.warnings, *extract_warnings_from_text(envelope.sections, text)])
+    next_actions = _with_actionable_next_action_artifacts(envelope.next_actions or extract_next_actions_from_text(envelope.sections))
 
     message_kind = envelope.message_kind
     if infer_message_kind:
@@ -552,9 +689,12 @@ def coerce_assistant_text_to_envelope(raw_text: str) -> ChatEnvelope:
             agenda_items=[],
             artifacts=[],
         )
+    manifest_result = extract_result_manifest(text)
+    text = manifest_result.text
+    manifest = manifest_result.manifest
     sections = split_sections_from_text(text)
-    artifacts = extract_artifacts_from_text(text)
-    summary = sections[0].body if sections else text.split("\n", 1)[0]
+    artifacts = _dedupe_artifacts([*(manifest.artifacts if manifest else []), *extract_artifacts_from_text(text)])
+    summary = manifest.summary if manifest and manifest.summary else sections[0].body if sections else text.split("\n", 1)[0]
     summary = summary.strip()
     if not summary:
         summary = "Completed"
@@ -564,6 +704,11 @@ def coerce_assistant_text_to_envelope(raw_text: str) -> ChatEnvelope:
         summary=summary[:280],
         sections=sections,
         artifacts=artifacts,
+        file_changes=manifest.file_changes if manifest else [],
+        commands_run=manifest.commands_run if manifest else [],
+        tests_run=manifest.tests_run if manifest else [],
+        warnings=[*(manifest.warnings if manifest else []), *manifest_result.warnings],
+        next_actions=manifest.next_actions if manifest else [],
     )
     return enhance_chat_envelope(envelope, infer_message_kind=True)
 
@@ -644,6 +789,8 @@ def _compact_envelope(
                 title=_truncate_text(action.title, 96),
                 detail=_truncate_text(action.detail or "", 140) or None,
                 kind=action.kind,
+                path=_truncate_text(action.path or "", 220) or None,
+                artifact=action.artifact,
             )
             for action in envelope.next_actions[:max_items]
         ],
@@ -656,6 +803,100 @@ def _truncate_text(value: str, max_chars: int) -> str:
     if max_chars <= len(TRUNCATION_SUFFIX):
         return TRUNCATION_SUFFIX[-max_chars:]
     return value[: max_chars - len(TRUNCATION_SUFFIX)].rstrip() + TRUNCATION_SUFFIX
+
+
+def _collapse_blank_lines(text: str) -> str:
+    collapsed = re.sub(r"\n{3,}", "\n\n", text)
+    return re.sub(r"[ \t]+\n", "\n", collapsed)
+
+
+def _dedupe_by_id(items: list) -> list:
+    deduped = []
+    seen: set[str] = set()
+    for item in items:
+        key = item.model_dump_json() if hasattr(item, "model_dump_json") else repr(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _dedupe_artifacts(items: list[ChatArtifact]) -> list[ChatArtifact]:
+    deduped: list[ChatArtifact] = []
+    seen: set[str] = set()
+    for artifact in items:
+        key = artifact.path or artifact.url or f"{artifact.type}:{artifact.title}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(artifact)
+    return deduped
+
+
+def _with_actionable_file_change_artifacts(
+    artifacts: list[ChatArtifact],
+    file_changes: list[ChatFileChange],
+) -> tuple[list[ChatArtifact], list[ChatFileChange]]:
+    artifact_list = _dedupe_artifacts(artifacts)
+    artifacts_by_reference = _artifacts_by_reference(artifact_list)
+    normalized_changes: list[ChatFileChange] = []
+
+    for change in file_changes:
+        artifact = change.artifact or artifacts_by_reference.get(change.path) or _artifact_from_reference(change.path)
+        if artifact is None:
+            normalized_changes.append(change)
+            continue
+        artifact_list = _dedupe_artifacts([*artifact_list, artifact])
+        artifacts_by_reference = _artifacts_by_reference(artifact_list)
+        normalized_changes.append(change.model_copy(update={"artifact": artifact}))
+
+    return artifact_list, normalized_changes
+
+
+def _with_actionable_next_action_artifacts(next_actions: list[ChatNextAction]) -> list[ChatNextAction]:
+    normalized: list[ChatNextAction] = []
+    for action in next_actions:
+        artifact = action.artifact or _artifact_from_reference(action.path or "")
+        if artifact is None:
+            normalized.append(action)
+            continue
+        normalized.append(action.model_copy(update={"artifact": artifact, "path": action.path or artifact.path or artifact.url}))
+    return normalized
+
+
+def _artifact_from_reference(reference: str) -> ChatArtifact | None:
+    raw = reference.strip()
+    if not raw:
+        return None
+    cleaned = _clean_artifact_reference(raw) or raw
+    if "path/to/" in cleaned.lower() or "absolute/path" in cleaned.lower():
+        return None
+    if not cleaned.startswith(("http://", "https://")) and not _looks_like_file_reference(cleaned):
+        return None
+
+    mime, _ = mimetypes.guess_type(cleaned.split("?", 1)[0])
+    name = Path(cleaned.split("?", 1)[0]).name or "file"
+    artifact_type = _artifact_type_for_reference(cleaned, mime)
+    if cleaned.startswith(("http://", "https://")):
+        return ChatArtifact(type=artifact_type, title=name, mime=mime, url=cleaned)
+    return ChatArtifact(type=artifact_type, title=name, path=cleaned, mime=mime)
+
+
+def _artifact_type_for_reference(reference: str, mime: str | None) -> str:
+    lower_mime = (mime or "").lower()
+    if lower_mime.startswith("image/"):
+        return "image"
+    if lower_mime.startswith("text/"):
+        return "code"
+    suffix = Path(reference.split("?", 1)[0]).suffix.lower()
+    if suffix in {".c", ".cc", ".cpp", ".css", ".go", ".h", ".hpp", ".html", ".java", ".js", ".json"}:
+        return "code"
+    if suffix in {".kt", ".md", ".mjs", ".php", ".py", ".rb", ".rs", ".sh", ".sql", ".swift"}:
+        return "code"
+    if suffix in {".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml"}:
+        return "code"
+    return "file"
 
 
 def _clean_summary(raw_text: str) -> str | None:

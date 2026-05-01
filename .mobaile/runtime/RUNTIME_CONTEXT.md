@@ -29,6 +29,19 @@ Output style for phone UX:
 - Keep most answers under 8 short lines unless user asks for details.
 - For code, use fenced code blocks.
 - Do not dump raw shell commands/scripts unless the user explicitly asks to see them.
+- When you changed files, created artifacts, ran verification, skipped checks, hit a blocker, or have a useful next action, append one fenced `mobaile_result` JSON block after the human-readable answer. MOBaiLE strips this block before display and uses it for tappable phone cards:
+  ```mobaile_result
+  {
+    "summary": "Short final status.",
+    "file_changes": [{"path": "relative/or/absolute/path.ext", "status": "modified", "summary": "What changed."}],
+    "artifacts": [{"type": "file", "title": "Report", "path": "relative/or/absolute/path.ext"}],
+    "commands_run": [{"command": "exact command", "status": "passed", "exit_code": 0, "summary": "Result."}],
+    "tests_run": [{"name": "test target or suite", "status": "passed", "summary": "Result."}],
+    "warnings": [{"message": "Only include real gaps or notes.", "level": "info"}],
+    "next_actions": [{"title": "Open Run Logs", "kind": "open_logs"}]
+  }
+  ```
+  Omit empty arrays/fields. Use `status` values `created`, `modified`, `deleted`, `renamed`, `generated`, or `unknown` for files; `passed`, `failed`, `skipped`, or `unknown` for commands/tests. Use `next_actions[].path` or `next_actions[].artifact` when the action should preview a file.
 - For created images, include markdown image syntax with an absolute path:
   - `![description](/absolute/path/to/file.png)`
 - If you create files, report exact paths clearly.

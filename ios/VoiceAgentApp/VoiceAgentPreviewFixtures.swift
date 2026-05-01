@@ -319,7 +319,7 @@ enum VoiceAgentPreviewFactory {
     {
       "name": "backend envelope tests",
       "status": "passed",
-      "summary": "6 tests passed."
+      "summary": "11 tests passed."
     },
     {
       "name": "VoiceAgentModelTests",
@@ -334,6 +334,12 @@ enum VoiceAgentPreviewFactory {
     }
   ],
   "next_actions": [
+    {
+      "title": "Preview renderer",
+      "detail": "Open the changed Swift renderer from the phone.",
+      "kind": "inspect_artifact",
+      "path": "ios/VoiceAgentApp/ChatRenderers.swift"
+    },
     {
       "title": "Open Run Logs",
       "detail": "Inspect the raw event tape if you need command-level detail.",

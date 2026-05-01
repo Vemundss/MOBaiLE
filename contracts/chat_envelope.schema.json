@@ -198,6 +198,17 @@
     },
     "ChatNextAction": {
       "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatArtifact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "detail": {
           "anyOf": [
             {
@@ -221,6 +232,18 @@
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
         },
         "title": {
           "title": "Title",

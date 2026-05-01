@@ -69,6 +69,7 @@ The phone UI is built around a typed chat envelope, not raw terminal text.
 
 - `ChatEnvelope` carries `summary`, `sections`, `agenda_items`, `artifacts`, and typed phone-surface metadata for changed files, commands/tests, warnings, and next actions
 - `message_kind` separates replaceable live progress from final user-facing results
+- backend-launched agents can append a fenced `mobaile_result` JSON manifest; the backend strips it from display text and lifts it into typed envelope fields before sending it to the phone
 - SSE run events include chat-oriented events and log-oriented events
 - message IDs and timestamps are part of the schema for stable reconciliation
 

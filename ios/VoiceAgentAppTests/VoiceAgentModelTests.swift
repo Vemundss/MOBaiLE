@@ -786,7 +786,7 @@ final class VoiceAgentModelTests: XCTestCase {
           "commands_run":[{"command":"cd backend && uv run pytest tests/test_chat_envelope.py","status":"passed","summary":"pytest passed"}],
           "tests_run":[{"name":"tests/test_chat_envelope.py","status":"passed","summary":"passed"}],
           "warnings":[{"message":"Screenshot verification was skipped.","level":"warning"}],
-          "next_actions":[{"title":"Open Run Logs","detail":"Review raw output if needed.","kind":"open_logs"}]
+          "next_actions":[{"title":"Preview hello.py","detail":"Open the changed file.","kind":"inspect_artifact","path":"/Users/test/hello.py","artifact":{"type":"file","title":"hello.py","path":"/Users/test/hello.py","mime":"text/x-python"}}]
         }
         """
         let data = Data(json.utf8)
@@ -799,7 +799,9 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(decoded.commandsRun.first?.status, "passed")
         XCTAssertEqual(decoded.testsRun.first?.name, "tests/test_chat_envelope.py")
         XCTAssertEqual(decoded.warnings.first?.level, "warning")
-        XCTAssertEqual(decoded.nextActions.first?.kind, "open_logs")
+        XCTAssertEqual(decoded.nextActions.first?.kind, "inspect_artifact")
+        XCTAssertEqual(decoded.nextActions.first?.path, "/Users/test/hello.py")
+        XCTAssertEqual(decoded.nextActions.first?.artifact?.path, "/Users/test/hello.py")
     }
 
     func testChatEnvelopeTypedResultSegmentsRenderBeforeFallbackSections() {
@@ -820,13 +822,28 @@ final class VoiceAgentModelTests: XCTestCase {
           "commands_run":[{"command":"uv run pytest","status":"passed","summary":"passed"}],
           "tests_run":[{"name":"uv run pytest","status":"passed","summary":"passed"}],
           "warnings":[{"message":"iOS screenshot was skipped.","level":"warning"}],
-          "next_actions":[{"title":"Open Run Logs","detail":"Inspect raw output.","kind":"open_logs"}]
+          "next_actions":[
+            {"title":"Preview renderer","detail":"Inspect changed Swift file.","kind":"inspect_artifact","path":"ios/VoiceAgentApp/ChatRenderers.swift"},
+            {"title":"Open Run Logs","detail":"Inspect raw output.","kind":"open_logs"}
+          ]
         }
         """
 
         let kinds = _test_messageSegmentKindNames(envelope, serverURL: "http://127.0.0.1:8000")
+        let fileURLs = _test_fileChangePreviewURLs(
+            envelope,
+            serverURL: "http://127.0.0.1:8000",
+            workspacePath: "/Users/test/MOBaiLE"
+        )
+        let nextActionURLs = _test_nextActionPreviewURLs(
+            envelope,
+            serverURL: "http://127.0.0.1:8000",
+            workspacePath: "/Users/test/MOBaiLE"
+        )
 
         XCTAssertEqual(kinds, ["markdown", "warnings", "fileChanges", "verification", "section", "nextActions"])
+        XCTAssertEqual(fileURLs.first, "http://127.0.0.1:8000/v1/files?path=/Users/test/MOBaiLE/backend/app/chat_envelope.py")
+        XCTAssertEqual(nextActionURLs.first, "http://127.0.0.1:8000/v1/files?path=/Users/test/MOBaiLE/ios/VoiceAgentApp/ChatRenderers.swift")
     }
 
     func testExtractImagePathKeepsAbsolutePathWithSpaces() {

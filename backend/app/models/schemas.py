@@ -116,6 +116,18 @@ class ChatNextAction(BaseModel):
     title: str
     detail: str | None = None
     kind: Literal["continue", "retry", "open_logs", "inspect_artifact", "custom"] = "custom"
+    path: str | None = None
+    artifact: ChatArtifact | None = None
+
+
+class ChatResultManifest(BaseModel):
+    summary: str | None = None
+    artifacts: list["ChatArtifact"] = Field(default_factory=list)
+    file_changes: list[ChatFileChange] = Field(default_factory=list)
+    commands_run: list[ChatCommandRun] = Field(default_factory=list)
+    tests_run: list[ChatTestRun] = Field(default_factory=list)
+    warnings: list[ChatWarning] = Field(default_factory=list)
+    next_actions: list[ChatNextAction] = Field(default_factory=list)
 
 
 class HumanUnblockRequest(BaseModel):

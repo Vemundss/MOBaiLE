@@ -216,6 +216,62 @@ def test_coerce_assistant_text_to_envelope_extracts_phone_surface_metadata():
     assert envelope.next_actions[0].kind == "open_logs"
 
 
+def test_coerce_assistant_text_to_envelope_lifts_structured_result_manifest():
+    module = reload_module("app.chat_envelope")
+    envelope = module.coerce_assistant_text_to_envelope(
+        "## Result\n"
+        "Phone result cards now use explicit metadata.\n\n"
+        "```mobaile_result\n"
+        "{\n"
+        '  "summary": "Structured result ready.",\n'
+        '  "file_changes": [\n'
+        '    {"path": "backend/app/chat_envelope.py", "status": "modified", "summary": "Added manifest support."}\n'
+        "  ],\n"
+        '  "commands_run": [\n'
+        '    {"command": "uv run pytest tests/test_chat_envelope.py", "status": "passed", "exit_code": 0}\n'
+        "  ],\n"
+        '  "tests_run": [\n'
+        '    {"name": "tests/test_chat_envelope.py", "status": "passed", "summary": "10 passed"}\n'
+        "  ],\n"
+        '  "warnings": [\n'
+        '    {"message": "Visual screenshots still need review.", "level": "info"}\n'
+        "  ],\n"
+        '  "next_actions": [\n'
+        '    {"title": "Preview parser", "kind": "inspect_artifact", "path": "backend/app/chat_envelope.py"},\n'
+        '    {"title": "Open Run Logs", "kind": "open_logs"}\n'
+        "  ]\n"
+        "}\n"
+        "```\n"
+    )
+
+    rendered = envelope.model_dump_json()
+
+    assert envelope.summary == "Structured result ready."
+    assert envelope.file_changes[0].path == "backend/app/chat_envelope.py"
+    assert envelope.file_changes[0].artifact is not None
+    assert envelope.file_changes[0].artifact.path == "backend/app/chat_envelope.py"
+    assert envelope.commands_run[0].exit_code == 0
+    assert envelope.tests_run[0].summary == "10 passed"
+    assert envelope.warnings[0].level == "info"
+    assert envelope.next_actions[0].artifact is not None
+    assert envelope.next_actions[0].artifact.path == "backend/app/chat_envelope.py"
+    assert "mobaile_result" not in rendered
+    assert "Added manifest support." in rendered
+
+
+def test_coerce_assistant_text_to_envelope_lifts_json_wrapped_result_manifest():
+    module = reload_module("app.chat_envelope")
+    envelope = module.coerce_assistant_text_to_envelope(
+        "Done.\n\n"
+        "```json\n"
+        '{"mobaile_result":{"file_changes":[{"path":"ios/VoiceAgentApp/ChatRenderers.swift","status":"modified"}]}}\n'
+        "```"
+    )
+
+    assert envelope.file_changes[0].path == "ios/VoiceAgentApp/ChatRenderers.swift"
+    assert envelope.file_changes[0].artifact is not None
+
+
 def test_coerce_assistant_text_to_envelope_marks_progress_messages():
     module = reload_module("app.chat_envelope")
     envelope = module.coerce_assistant_text_to_envelope("Running the test suite now...")

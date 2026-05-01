@@ -9,12 +9,30 @@ struct MessageBubble: View {
     let serverURL: String
     let apiToken: String
     let workspacePath: String?
+    let onOpenLogs: () -> Void
+    let onRetryLastPrompt: () -> Void
     @State private var artifactOpenError: String = ""
     @State private var openingArtifactID: String?
     @State private var previewDocument: PreviewDocument?
     @State private var textPreviewDocument: TextPreviewDocument?
     private let client = APIClient()
     private let maxPreviewFileBytes: Int64 = AttachmentDraftPolicy.defaultMaxAttachmentBytes
+
+    init(
+        message: ConversationMessage,
+        serverURL: String,
+        apiToken: String,
+        workspacePath: String?,
+        onOpenLogs: @escaping () -> Void = {},
+        onRetryLastPrompt: @escaping () -> Void = {}
+    ) {
+        self.message = message
+        self.serverURL = serverURL
+        self.apiToken = apiToken
+        self.workspacePath = workspacePath
+        self.onOpenLogs = onOpenLogs
+        self.onRetryLastPrompt = onRetryLastPrompt
+    }
 
     var body: some View {
         bubbleSurface
@@ -94,6 +112,8 @@ struct MessageBubble: View {
                     case let .fileChanges(items):
                         FileChangesCard(
                             items: items,
+                            serverURL: serverURL,
+                            workspacePath: workspacePath,
                             openingArtifactID: openingArtifactID,
                             onOpen: { artifact in
                                 Task {
@@ -106,7 +126,17 @@ struct MessageBubble: View {
                     case let .warnings(items):
                         WarningsCard(items: items)
                     case let .nextActions(items):
-                        NextActionsCard(items: items)
+                        NextActionsCard(
+                            items: items,
+                            openingArtifactID: openingArtifactID,
+                            onOpenLogs: onOpenLogs,
+                            onRetryLastPrompt: onRetryLastPrompt,
+                            onOpenArtifact: { artifact in
+                                Task {
+                                    await openArtifact(artifact)
+                                }
+                            }
+                        )
                     case let .artifact(item):
                         ArtifactCard(
                             artifact: item,
@@ -596,6 +626,8 @@ private struct SectionCard: View {
 
 private struct FileChangesCard: View {
     let items: [ChatFileChange]
+    let serverURL: String
+    let workspacePath: String?
     let openingArtifactID: String?
     let onOpen: (ChatArtifact) -> Void
 
@@ -603,6 +635,7 @@ private struct FileChangesCard: View {
         TypedResultCard(title: "Changed Files", systemImage: "folder.badge.gearshape", tint: .blue) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(items) { item in
+                    let artifact = previewArtifact(for: item)
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: fileChangeIcon(for: item.status))
                             .font(.caption.weight(.semibold))
@@ -645,7 +678,12 @@ private struct FileChangesCard: View {
                             }
                         }
 
-                        if let artifact = item.artifact {
+                        if let artifact,
+                           ChatArtifactResolution.resolvedURL(
+                               for: artifact,
+                               serverURL: serverURL,
+                               workspacePath: workspacePath
+                           ) != nil {
                             Button {
                                 onOpen(artifact)
                             } label: {
@@ -660,12 +698,17 @@ private struct FileChangesCard: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(.blue)
                             .frame(width: 32, height: 32)
+                            .disabled(openingArtifactID == artifact.id)
                             .accessibilityLabel("Open \(artifact.title)")
                         }
                     }
                 }
             }
         }
+    }
+
+    private func previewArtifact(for item: ChatFileChange) -> ChatArtifact? {
+        item.artifact ?? synthesizedArtifact(forPath: item.path)
     }
 }
 
@@ -791,11 +834,16 @@ private struct WarningsCard: View {
 
 private struct NextActionsCard: View {
     let items: [ChatNextAction]
+    let openingArtifactID: String?
+    let onOpenLogs: () -> Void
+    let onRetryLastPrompt: () -> Void
+    let onOpenArtifact: (ChatArtifact) -> Void
 
     var body: some View {
         TypedResultCard(title: "Next Actions", systemImage: "arrow.right.circle", tint: .indigo) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(items) { item in
+                    let artifact = previewArtifact(for: item)
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: nextActionIcon(for: item.kind))
                             .font(.caption.weight(.semibold))
@@ -816,10 +864,83 @@ private struct NextActionsCard: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
+
+                        if hasAction(for: item, artifact: artifact) {
+                            Spacer(minLength: 6)
+                            actionButton(for: item, artifact: artifact)
+                        }
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func actionButton(for item: ChatNextAction, artifact: ChatArtifact?) -> some View {
+        switch item.kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "open_logs":
+            Button {
+                onOpenLogs()
+            } label: {
+                Label("Logs", systemImage: "doc.text.magnifyingglass")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("Open Run Logs")
+        case "retry":
+            Button {
+                onRetryLastPrompt()
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("Retry last prompt")
+        case "inspect_artifact":
+            artifactButton(artifact)
+        default:
+            if artifact != nil {
+                artifactButton(artifact)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func artifactButton(_ artifact: ChatArtifact?) -> some View {
+        if let artifact {
+            Button {
+                onOpenArtifact(artifact)
+            } label: {
+                if openingArtifactID == artifact.id {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Label("Preview", systemImage: "eye")
+                        .labelStyle(.iconOnly)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(openingArtifactID == artifact.id)
+            .accessibilityLabel("Preview \(artifact.title)")
+        }
+    }
+
+    private func hasAction(for item: ChatNextAction, artifact: ChatArtifact?) -> Bool {
+        switch item.kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "open_logs", "retry":
+            return true
+        case "inspect_artifact":
+            return artifact != nil
+        default:
+            return artifact != nil
+        }
+    }
+
+    private func previewArtifact(for item: ChatNextAction) -> ChatArtifact? {
+        item.artifact ?? item.path.flatMap { synthesizedArtifact(forPath: $0) }
     }
 }
 
@@ -858,6 +979,53 @@ private struct TypedResultCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(tint.opacity(0.12), lineWidth: 1)
         )
+    }
+}
+
+private func synthesizedArtifact(forPath path: String) -> ChatArtifact? {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let lower = trimmed.lowercased()
+    guard !lower.contains("path/to/"), !lower.contains("absolute/path") else {
+        return nil
+    }
+    guard trimmed.hasPrefix("http://") ||
+        trimmed.hasPrefix("https://") ||
+        trimmed.hasPrefix("/") ||
+        trimmed.hasPrefix("~") ||
+        trimmed.hasPrefix("./") ||
+        trimmed.hasPrefix("../") ||
+        trimmed.contains("/") else {
+        return nil
+    }
+
+    let referenceForTitle = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")
+        ? URL(string: trimmed)?.path ?? trimmed
+        : trimmed
+    let title = URL(fileURLWithPath: referenceForTitle).lastPathComponent
+    let resolvedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "File" : title
+    let mime = ChatArtifactResolution.inferArtifactMimeType(from: resolvedTitle)
+    let type = synthesizedArtifactType(fileName: resolvedTitle, mime: mime)
+    if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+        return ChatArtifact(type: type, title: resolvedTitle, path: nil, mime: mime, url: trimmed)
+    }
+    return ChatArtifact(type: type, title: resolvedTitle, path: trimmed, mime: mime, url: nil)
+}
+
+private func synthesizedArtifactType(fileName: String, mime: String?) -> String {
+    let lowerMime = (mime ?? "").lowercased()
+    if lowerMime.hasPrefix("image/") {
+        return "image"
+    }
+    if lowerMime.hasPrefix("text/") {
+        return "code"
+    }
+    switch URL(fileURLWithPath: fileName).pathExtension.lowercased() {
+    case "c", "cc", "cpp", "css", "go", "h", "hpp", "html", "java", "js", "json", "kt", "md", "mjs",
+         "php", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "tsx", "txt", "xml", "yaml", "yml":
+        return "code"
+    default:
+        return "file"
     }
 }
 
@@ -2086,6 +2254,38 @@ func _test_messageSegmentKindNames(_ text: String, serverURL: String, workspaceP
             return "agenda"
         case .emailDigest:
             return "emailDigest"
+        }
+    }
+}
+
+func _test_fileChangePreviewURLs(_ text: String, serverURL: String, workspacePath: String? = nil) -> [String] {
+    parseSegments(from: text, serverURL: serverURL, workspacePath: workspacePath).flatMap { segment -> [String] in
+        guard case let .fileChanges(items) = segment.kind else { return [] }
+        return items.compactMap { item in
+            let artifact = item.artifact ?? synthesizedArtifact(forPath: item.path)
+            return artifact.flatMap {
+                ChatArtifactResolution.resolvedURL(
+                    for: $0,
+                    serverURL: serverURL,
+                    workspacePath: workspacePath
+                )?.absoluteString
+            }
+        }
+    }
+}
+
+func _test_nextActionPreviewURLs(_ text: String, serverURL: String, workspacePath: String? = nil) -> [String] {
+    parseSegments(from: text, serverURL: serverURL, workspacePath: workspacePath).flatMap { segment -> [String] in
+        guard case let .nextActions(items) = segment.kind else { return [] }
+        return items.compactMap { item in
+            let artifact = item.artifact ?? item.path.flatMap { synthesizedArtifact(forPath: $0) }
+            return artifact.flatMap {
+                ChatArtifactResolution.resolvedURL(
+                    for: $0,
+                    serverURL: serverURL,
+                    workspacePath: workspacePath
+                )?.absoluteString
+            }
         }
     }
 }
