@@ -12,6 +12,7 @@ struct WorkspaceBrowserSheet: View {
     @Binding var isCreatingDirectory: Bool
     let onDismiss: () -> Void
     private let directoryBrowserPanelID = "workspace-directory-browser-panel"
+    private let directoryDefaultAutoRefreshKey = "__workspace_browser_default__"
     private let maxPreviewFileBytes: Int64 = AttachmentDraftPolicy.defaultMaxAttachmentBytes
     @State private var openingFilePath: String?
     @State private var fileOpenError: String = ""
@@ -705,7 +706,7 @@ struct WorkspaceBrowserSheet: View {
 
     private var directoryAutoRefreshKey: String {
         let path = vm.directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? "__workspace_browser_default__" : path
+        return path.isEmpty ? directoryDefaultAutoRefreshKey : path
     }
 
     @MainActor
@@ -720,7 +721,8 @@ struct WorkspaceBrowserSheet: View {
                   shouldAutoRefreshDirectoryBrowser(path: path) else {
                 continue
             }
-            await vm.refreshDirectoryBrowser()
+            let refreshPath = path == directoryDefaultAutoRefreshKey ? nil : path
+            await vm.refreshDirectoryBrowser(path: refreshPath, presentation: .background)
         }
     }
 

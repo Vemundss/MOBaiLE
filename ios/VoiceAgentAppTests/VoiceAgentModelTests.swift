@@ -263,6 +263,34 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertFalse(VoiceAgentDirectoryBrowser.canNavigateUp(from: "/"))
     }
 
+    @MainActor
+    func testBackgroundDirectoryRefreshPreservesVisibleListingWithoutCredentials() async {
+        let harness = makeIsolatedPersistenceHarness()
+        defer { harness.cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: harness.store,
+            defaults: harness.defaults,
+            draftAttachmentDirectory: harness.draftDirectory
+        )
+        let entries = [
+            DirectoryEntry(name: "Sources", path: "/repo/Sources", isDirectory: true),
+            DirectoryEntry(name: "README.md", path: "/repo/README.md", isDirectory: false),
+        ]
+        vm.serverURL = ""
+        vm.apiToken = ""
+        vm.directoryBrowserPath = "/repo"
+        vm.directoryBrowserEntries = entries
+        vm.directoryBrowserTruncated = true
+
+        await vm.refreshDirectoryBrowser(presentation: .background)
+
+        XCTAssertFalse(vm.isLoadingDirectoryBrowser)
+        XCTAssertEqual(vm.directoryBrowserPath, "/repo")
+        XCTAssertEqual(vm.directoryBrowserEntries.map(\.path), entries.map(\.path))
+        XCTAssertTrue(vm.directoryBrowserTruncated)
+        XCTAssertEqual(vm.directoryBrowserError, "")
+    }
+
     func testDirectoryEntryDecodesPreviewMetadata() throws {
         let json = #"{"name":"README.md","path":"/repo/README.md","is_directory":false,"size_bytes":42,"mime":"text/markdown","modified_at":"2026-04-28T20:10:00Z"}"#
 

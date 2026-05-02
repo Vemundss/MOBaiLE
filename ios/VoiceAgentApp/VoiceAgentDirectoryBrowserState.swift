@@ -1,5 +1,14 @@
 import Foundation
 
+enum DirectoryBrowserRefreshPresentation {
+    case foreground
+    case background
+
+    var showsBlockingLoading: Bool {
+        self == .foreground
+    }
+}
+
 extension VoiceAgentViewModel {
     func toggleDirectoryBrowser() async {
         if showDirectoryBrowser {
@@ -109,21 +118,32 @@ extension VoiceAgentViewModel {
         }
     }
 
-    func refreshDirectoryBrowser(path: String? = nil) async {
+    func refreshDirectoryBrowser(
+        path: String? = nil,
+        presentation: DirectoryBrowserRefreshPresentation = .foreground
+    ) async {
+        let showsBlockingLoading = presentation.showsBlockingLoading
+        let hasVisibleListing = !directoryBrowserEntries.isEmpty
         let token = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedServerURL.isEmpty, !token.isEmpty else {
-            directoryBrowserEntries = []
-            directoryBrowserTruncated = false
-            directoryBrowserError = "Set server URL and API token to browse cwd."
-            directoryBrowserMissingPath = ""
-            directoryBrowserPath = ""
-            isLoadingDirectoryBrowser = false
+            if showsBlockingLoading || !hasVisibleListing {
+                directoryBrowserEntries = []
+                directoryBrowserTruncated = false
+                directoryBrowserError = "Set server URL and API token to browse cwd."
+                directoryBrowserMissingPath = ""
+                directoryBrowserPath = ""
+            }
+            if showsBlockingLoading {
+                isLoadingDirectoryBrowser = false
+            }
             return
         }
 
-        isLoadingDirectoryBrowser = true
-        directoryBrowserError = ""
-        directoryBrowserMissingPath = ""
+        if showsBlockingLoading {
+            isLoadingDirectoryBrowser = true
+            directoryBrowserError = ""
+            directoryBrowserMissingPath = ""
+        }
         let explicitPath = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let browserPath = directoryBrowserPath.trimmingCharacters(in: .whitespacesAndNewlines)
         let preferredPath: String?
@@ -143,32 +163,29 @@ extension VoiceAgentViewModel {
             directoryBrowserEntries = response.entries
             directoryBrowserTruncated = response.truncated
             directoryBrowserPath = response.path
-        } catch let apiError as APIError {
-            if case let .httpError(code, body) = apiError, code == 404 {
-                let lower = body.lowercased()
-                if lower.contains("not found") && !lower.contains("directory not found") {
-                    directoryBrowserError = "Backend does not support folder listing yet. Pull latest backend and restart."
-                } else {
-                    if let missing = preferredPath?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !missing.isEmpty {
-                        directoryBrowserMissingPath = missing
-                        directoryBrowserError = "Directory not found. You can create it from here."
-                    } else {
-                        directoryBrowserError = "Directory not found. Check the working directory in Settings."
-                    }
-                }
-            } else {
-                directoryBrowserError = registerConnectionRepairIfNeeded(from: apiError) ?? apiError.localizedDescription
-            }
-            directoryBrowserEntries = []
-            directoryBrowserTruncated = false
-        } catch {
-            directoryBrowserEntries = []
-            directoryBrowserTruncated = false
-            directoryBrowserError = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
+            directoryBrowserError = ""
             directoryBrowserMissingPath = ""
+        } catch let apiError as APIError {
+            if showsBlockingLoading || !hasVisibleListing {
+                applyDirectoryBrowserError(apiError, preferredPath: preferredPath)
+                directoryBrowserEntries = []
+                directoryBrowserTruncated = false
+            } else {
+                _ = registerConnectionRepairIfNeeded(from: apiError)
+            }
+        } catch {
+            if showsBlockingLoading || !hasVisibleListing {
+                directoryBrowserEntries = []
+                directoryBrowserTruncated = false
+                directoryBrowserError = registerConnectionRepairIfNeeded(from: error) ?? error.localizedDescription
+                directoryBrowserMissingPath = ""
+            } else {
+                _ = registerConnectionRepairIfNeeded(from: error)
+            }
         }
-        isLoadingDirectoryBrowser = false
+        if showsBlockingLoading {
+            isLoadingDirectoryBrowser = false
+        }
     }
 
     func createDirectoryFromBrowser() async {
@@ -248,6 +265,26 @@ extension VoiceAgentViewModel {
 }
 
 private extension VoiceAgentViewModel {
+    func applyDirectoryBrowserError(_ apiError: APIError, preferredPath: String?) {
+        if case let .httpError(code, body) = apiError, code == 404 {
+            let lower = body.lowercased()
+            if lower.contains("not found") && !lower.contains("directory not found") {
+                directoryBrowserError = "Backend does not support folder listing yet. Pull latest backend and restart."
+                directoryBrowserMissingPath = ""
+            } else if let missing = preferredPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !missing.isEmpty {
+                directoryBrowserMissingPath = missing
+                directoryBrowserError = "Directory not found. You can create it from here."
+            } else {
+                directoryBrowserError = "Directory not found. Check the working directory in Settings."
+                directoryBrowserMissingPath = ""
+            }
+        } else {
+            directoryBrowserError = registerConnectionRepairIfNeeded(from: apiError) ?? apiError.localizedDescription
+            directoryBrowserMissingPath = ""
+        }
+    }
+
     var directoryPathForListing: String? {
         let resolved = resolvedWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         if !resolved.isEmpty {
