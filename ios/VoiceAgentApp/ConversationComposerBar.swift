@@ -2,6 +2,26 @@ import QuickLook
 import SwiftUI
 import UIKit
 
+private let composerEstimatedCharactersPerLine = 38
+
+private func estimatedComposerDisplayLineCount(
+    _ text: String,
+    charactersPerLine: Int = composerEstimatedCharactersPerLine
+) -> Int {
+    let safeCharactersPerLine = max(1, charactersPerLine)
+    let paragraphs = text.split(separator: "\n", omittingEmptySubsequences: false)
+    guard !paragraphs.isEmpty else { return 1 }
+
+    return paragraphs.reduce(0) { total, paragraph in
+        let wrappedLines = max(1, (paragraph.count + safeCharactersPerLine - 1) / safeCharactersPerLine)
+        return total + wrappedLines
+    }
+}
+
+func _test_estimatedComposerDisplayLineCount(_ text: String, charactersPerLine: Int) -> Int {
+    estimatedComposerDisplayLineCount(text, charactersPerLine: charactersPerLine)
+}
+
 struct ConversationComposerBar: View {
     @ObservedObject var vm: VoiceAgentViewModel
     let composerFocused: FocusState<Bool>.Binding
@@ -17,6 +37,11 @@ struct ConversationComposerBar: View {
     let onSelectSlashCommand: (ComposerSlashCommand, ComposerSlashCommandState) -> Void
     @State private var previewAttachment: DraftAttachment?
     @State private var attachmentPreviewError: String = ""
+    @ScaledMetric(relativeTo: .body) private var composerCompactHeight: CGFloat = 40
+    @ScaledMetric(relativeTo: .body) private var composerExpandedMinimumHeight: CGFloat = 88
+    @ScaledMetric(relativeTo: .body) private var composerMaximumHeight: CGFloat = 158
+    @ScaledMetric(relativeTo: .body) private var composerLineHeight: CGFloat = 22
+    @ScaledMetric(relativeTo: .body) private var composerVerticalChrome: CGFloat = 28
 
     var body: some View {
         VStack(spacing: 8) {
@@ -226,15 +251,15 @@ struct ConversationComposerBar: View {
     }
 
     private var standardComposerRow: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            embeddedComposerUtilityActions
-            composerTextEditorSurface
-                .frame(maxWidth: .infinity)
-                .layoutPriority(1)
-            composerPrimaryActionButton
+        Group {
+            if shouldUseExpandedComposerLayout {
+                expandedStandardComposerRow
+            } else {
+                compactStandardComposerRow
+            }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
+        .padding(.horizontal, shouldUseExpandedComposerLayout ? 10 : 6)
+        .padding(.vertical, shouldUseExpandedComposerLayout ? 8 : 6)
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
@@ -246,6 +271,47 @@ struct ConversationComposerBar: View {
                     lineWidth: 1
                 )
         )
+        .animation(.easeInOut(duration: 0.18), value: shouldUseExpandedComposerLayout)
+    }
+
+    private var compactStandardComposerRow: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            embeddedComposerUtilityActions
+            composerTextEditorSurface
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
+            composerPrimaryActionButton
+        }
+    }
+
+    private var expandedStandardComposerRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            expandedComposerTextEditorSurface
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+            HStack(alignment: .center, spacing: 10) {
+                embeddedComposerUtilityActions
+                Spacer(minLength: 0)
+                composerPrimaryActionButton
+            }
+        }
+    }
+
+    private var expandedComposerTextEditorSurface: some View {
+        composerTextEditorSurface
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
+            )
+    }
+
+    private var shouldUseExpandedComposerLayout: Bool {
+        composerFocused.wrappedValue || vm.hasDraftContent
     }
 
     private var composerTextEditorSurface: some View {
@@ -253,12 +319,15 @@ struct ConversationComposerBar: View {
             TextEditor(text: $vm.promptText)
                 .focused(composerFocused)
                 .accessibilityIdentifier("composer.textEditor")
+                .accessibilityLabel("Prompt")
+                .font(.body)
+                .lineSpacing(2)
                 .textInputAutocapitalization(.sentences)
                 .textContentType(.none)
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 2)
                 .padding(.vertical, 6)
-                .frame(height: composerHeight)
+                .frame(height: composerHeight, alignment: .topLeading)
                 .onTapGesture {
                     composerFocused.wrappedValue = true
                 }
@@ -608,11 +677,15 @@ struct ConversationComposerBar: View {
 
     private var composerHeight: CGFloat {
         let trimmed = vm.promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !composerFocused.wrappedValue && trimmed.isEmpty {
-            return 40
+        if !shouldUseExpandedComposerLayout && trimmed.isEmpty {
+            return composerCompactHeight
         }
-        let lineCount = max(1, vm.promptText.split(separator: "\n", omittingEmptySubsequences: false).count)
-        return min(118, max(44, CGFloat(lineCount) * 22 + 22))
+
+        let displayLineCount = estimatedComposerDisplayLineCount(vm.promptText)
+        let naturalHeight = CGFloat(displayLineCount) * composerLineHeight + composerVerticalChrome
+        let minimumHeight = shouldUseExpandedComposerLayout ? composerExpandedMinimumHeight : composerCompactHeight
+        let maximumHeight = max(minimumHeight, composerMaximumHeight)
+        return min(maximumHeight, max(minimumHeight, naturalHeight))
     }
 
     private var composerPlaceholder: String {
