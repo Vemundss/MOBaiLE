@@ -125,7 +125,7 @@ struct ConnectionSettingsSheet: View {
                     }
 
                     Section {
-                        Toggle("AirPods Click To Record", isOn: $vm.airPodsClickToRecordEnabled)
+                        Toggle("AirPods & Headset Controls", isOn: $vm.airPodsClickToRecordEnabled)
                         Toggle("Haptic Cues", isOn: $vm.hapticCuesEnabled)
                         Toggle("Audio Cues", isOn: $vm.audioCuesEnabled)
                         Toggle("Speak Replies", isOn: $vm.speakRepliesEnabled)
@@ -142,7 +142,7 @@ struct ConnectionSettingsSheet: View {
                         Text(
                             vm.autoSendAfterSilenceEnabled
                                 ? "Auto-send uses the selected silence delay for one-shot recordings. Voice mode uses a faster handoff and reopens the mic after each reply."
-                                : "AirPods click can start recording and stop+send. Audio cues confirm start and send. Speak Replies reads cleaned assistant responses for voice turns."
+                                : "AirPods and headset media controls start voice mode, stop+send while listening, and can stop the voice loop while a reply is running."
                         )
                     }
 

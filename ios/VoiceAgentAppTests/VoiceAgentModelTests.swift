@@ -2752,6 +2752,79 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testAirPodsControlResumesLastVoiceThreadAndStartsListening() async throws {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let recorder = SuccessfulAudioRecorder()
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory,
+            recorder: recorder
+        )
+        vm.serverURL = "http://127.0.0.1:8000"
+        vm.apiToken = "token"
+        let firstThreadID = try XCTUnwrap(vm.activeThreadID)
+        vm.createNewThread()
+        let secondThreadID = try XCTUnwrap(vm.activeThreadID)
+
+        vm.switchToThread(firstThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: firstThreadID)
+        vm.switchToThread(secondThreadID)
+
+        await vm.toggleRecordingFromHeadsetControl()
+
+        XCTAssertEqual(vm.activeThreadID, firstThreadID)
+        XCTAssertTrue(vm.voiceModeEnabled)
+        XCTAssertTrue(vm.isVoiceModeActiveForCurrentThread)
+        XCTAssertTrue(vm.isRecording)
+        XCTAssertEqual(recorder.startCallCount, 1)
+    }
+
+    @MainActor
+    func testAirPodsControlStopsVoiceLoopWhileReplyContinues() async throws {
+        let vm = VoiceAgentViewModel()
+        vm.serverURL = "http://127.0.0.1:8000"
+        vm.apiToken = "token"
+        let threadID = try XCTUnwrap(vm.activeThreadID)
+        vm._test_setVoiceModeEnabled(true, threadID: threadID)
+        vm.isLoading = true
+        vm.statusText = "Running backend checks"
+
+        await vm.toggleRecordingFromHeadsetControl()
+
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertFalse(vm.isVoiceModeActiveForCurrentThread)
+        XCTAssertTrue(vm.isLoading)
+        XCTAssertEqual(vm.statusText, "Running backend checks")
+        XCTAssertEqual(vm._test_voiceInteractionNoticeText(), "Voice mode will stop")
+    }
+
+    @MainActor
+    func testAirPodsControlDisabledDoesNotStartListening() async {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+
+        let recorder = SuccessfulAudioRecorder()
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory,
+            recorder: recorder
+        )
+        vm.serverURL = "http://127.0.0.1:8000"
+        vm.apiToken = "token"
+        vm.airPodsClickToRecordEnabled = false
+
+        await vm.toggleRecordingFromHeadsetControl()
+
+        XCTAssertFalse(vm.voiceModeEnabled)
+        XCTAssertFalse(vm.isRecording)
+        XCTAssertEqual(recorder.startCallCount, 0)
+    }
+
+    @MainActor
     func testLastVoiceModeThreadPersistsAcrossReload() {
         let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
         defer { cleanup() }
@@ -3143,6 +3216,22 @@ private final class FailingAudioRecorder: AudioRecording {
 
     func stop() -> URL? {
         nil
+    }
+}
+
+private final class SuccessfulAudioRecorder: AudioRecording {
+    private(set) var startCallCount = 0
+
+    func start(
+        silenceConfig: AudioRecorderService.SilenceConfig?,
+        onSilenceDetected: (() -> Void)?
+    ) async throws {
+        startCallCount += 1
+    }
+
+    func stop() -> URL? {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("voice-agent-test-recording-\(UUID().uuidString).m4a")
     }
 }
 

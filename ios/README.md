@@ -107,6 +107,7 @@ The checked-in project does not hard-code a development team, so Xcode should le
 ## Features Worth Turning On
 
 - **Widget:** add `Resume Voice Mode` to reopen the active or last voice thread hands-free
+- **AirPods and headset controls:** use the media click to start voice mode, stop and send while listening, or stop the voice loop during a reply
 - **Haptic and audio cues:** helpful when you are using the app while walking or multitasking
 - **Auto-send after silence:** useful for one-shot voice capture without turning on persistent voice mode
 - **Siri and Shortcuts:** `Resume Voice Mode` returns to the active or last voice thread, while `Start New Voice Thread` creates a fresh thread and starts voice mode there

@@ -108,6 +108,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
+    private enum HeadsetRemoteCommandIntent {
+        case toggle
+        case start
+        case stop
+    }
+
     @Published var serverURL: String = ""
     @Published var apiToken: String = ""
     @Published var sessionID: String = "iphone-app"
@@ -129,7 +135,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
     @Published private(set) var draftAttachmentTransferStates: [UUID: DraftAttachmentTransferState] = [:]
-    @Published var isLoading: Bool = false
+    @Published var isLoading: Bool = false {
+        didSet { updateRemoteCommandStateIfConfigured() }
+    }
     @Published var statusText: String = "Idle"
     @Published var runID: String = ""
     @Published var summaryText: String = ""
@@ -143,11 +151,17 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published private(set) var runLogErrorText: String = ""
     @Published var conversation: [ConversationMessage] = []
     @Published var resolvedWorkingDirectory: String = ""
-    @Published var isRecording: Bool = false
+    @Published var isRecording: Bool = false {
+        didSet { updateRemoteCommandStateIfConfigured() }
+    }
     @Published var recordingStartedAt: Date?
     @Published var didCompleteRun: Bool = false
-    @Published var voiceModeEnabled: Bool = false
-    @Published var isSpeakingReply: Bool = false
+    @Published var voiceModeEnabled: Bool = false {
+        didSet { updateRemoteCommandStateIfConfigured() }
+    }
+    @Published var isSpeakingReply: Bool = false {
+        didSet { updateRemoteCommandStateIfConfigured() }
+    }
     @Published var activeRunExecutor: String = "codex"
     @Published var threads: [ChatThread] = []
     @Published var activeThreadID: UUID?
@@ -173,7 +187,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var runStartedAt: Date?
     @Published var runEndedAt: Date?
     @Published var directoryBrowserPath: String = ""
-    @Published var airPodsClickToRecordEnabled: Bool = true
+    @Published var airPodsClickToRecordEnabled: Bool = true {
+        didSet { updateRemoteCommandStateIfConfigured() }
+    }
     @Published var hideDotFoldersInBrowser: Bool = true
     @Published var hapticCuesEnabled: Bool = true
     @Published var audioCuesEnabled: Bool = true
@@ -1022,12 +1038,42 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     func toggleRecordingFromHeadsetControl() async {
+        await handleHeadsetRemoteCommand(.toggle)
+    }
+
+    private func handleHeadsetRemoteCommand(_ intent: HeadsetRemoteCommandIntent) async {
         guard airPodsClickToRecordEnabled else { return }
+
         if isRecording {
+            guard intent != .start else { return }
             await stopRecordingAndSend()
-        } else if !isLoading {
-            await startExternalVoiceModeIfPossible()
+            return
         }
+
+        if voiceModeEnabled {
+            switch intent {
+            case .start:
+                guard !isLoading else {
+                    publishVoiceInteractionNotice("Voice mode will continue")
+                    return
+                }
+                let didStartRecording = await startRecording()
+                if !didStartRecording {
+                    deactivateVoiceMode(stopSpeaking: false)
+                }
+            case .stop, .toggle:
+                deactivateVoiceMode(stopSpeaking: true)
+                publishVoiceInteractionNotice(isLoading ? "Voice mode will stop" : "Voice mode ended")
+            }
+            return
+        }
+
+        guard intent != .stop else { return }
+        guard !isLoading else {
+            publishVoiceInteractionNotice("Run in progress")
+            return
+        }
+        await startExternalVoiceModeIfPossible()
     }
 
     func handleStartVoiceTaskShortcut() async {
@@ -1811,25 +1857,35 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             Task { @MainActor in
-                await self.toggleRecordingFromHeadsetControl()
+                await self.handleHeadsetRemoteCommand(.toggle)
             }
             return .success
         }
         commandCenter.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             Task { @MainActor in
-                if self.airPodsClickToRecordEnabled, !self.isRecording, !self.isLoading {
-                    await self.startExternalVoiceModeIfPossible()
-                }
+                await self.handleHeadsetRemoteCommand(.start)
             }
             return .success
         }
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             Task { @MainActor in
-                if self.airPodsClickToRecordEnabled, self.isRecording {
-                    await self.stopRecordingAndSend()
-                }
+                await self.handleHeadsetRemoteCommand(.stop)
+            }
+            return .success
+        }
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in
+                await self.handleHeadsetRemoteCommand(.toggle)
+            }
+            return .success
+        }
+        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in
+                await self.handleHeadsetRemoteCommand(.toggle)
             }
             return .success
         }
@@ -1838,21 +1894,78 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         updateRemoteCommandState()
     }
 
+    private func updateRemoteCommandStateIfConfigured() {
+        guard didConfigureRemoteCommands else { return }
+        updateRemoteCommandState()
+    }
+
     private func updateRemoteCommandState() {
         let commandCenter = MPRemoteCommandCenter.shared()
-        let canStartRecording = airPodsClickToRecordEnabled
-        commandCenter.togglePlayPauseCommand.isEnabled = canStartRecording
-        commandCenter.playCommand.isEnabled = canStartRecording
-        commandCenter.pauseCommand.isEnabled = canStartRecording && isRecording
+        let canUseHeadsetControls = airPodsClickToRecordEnabled
+        commandCenter.togglePlayPauseCommand.isEnabled = canUseHeadsetControls
+        commandCenter.playCommand.isEnabled = canUseHeadsetControls && !isRecording
+        commandCenter.pauseCommand.isEnabled = canUseHeadsetControls && (isRecording || voiceModeEnabled)
+        commandCenter.nextTrackCommand.isEnabled = canUseHeadsetControls
+        commandCenter.previousTrackCommand.isEnabled = canUseHeadsetControls
 
-        if isRecording {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-                MPMediaItemPropertyTitle: "MOBaiLE Recording",
-                MPNowPlayingInfoPropertyPlaybackRate: 1
-            ]
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        if canUseHeadsetControls, let nowPlayingState = headsetNowPlayingState {
+            nowPlayingCenter.nowPlayingInfo = nowPlayingState.info
+            nowPlayingCenter.playbackState = nowPlayingState.playbackState
         } else {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            nowPlayingCenter.nowPlayingInfo = nil
+            nowPlayingCenter.playbackState = .stopped
         }
+    }
+
+    private var headsetNowPlayingState: (info: [String: Any], playbackState: MPNowPlayingPlaybackState)? {
+        if isRecording {
+            return (
+                [
+                    MPMediaItemPropertyTitle: "MOBaiLE Listening",
+                    MPMediaItemPropertyArtist: "Click again to send",
+                    MPNowPlayingInfoPropertyIsLiveStream: true,
+                    MPNowPlayingInfoPropertyPlaybackRate: 1.0
+                ],
+                .playing
+            )
+        }
+
+        if isSpeakingReply {
+            return (
+                [
+                    MPMediaItemPropertyTitle: "MOBaiLE Speaking",
+                    MPMediaItemPropertyArtist: "Click to stop voice mode",
+                    MPNowPlayingInfoPropertyIsLiveStream: true,
+                    MPNowPlayingInfoPropertyPlaybackRate: 1.0
+                ],
+                .playing
+            )
+        }
+
+        if voiceModeEnabled {
+            let subtitle = isLoading ? "Replying on your computer" : "Click to listen"
+            return (
+                [
+                    MPMediaItemPropertyTitle: "MOBaiLE Voice Mode",
+                    MPMediaItemPropertyArtist: subtitle,
+                    MPNowPlayingInfoPropertyIsLiveStream: true,
+                    MPNowPlayingInfoPropertyPlaybackRate: 0.0
+                ],
+                .paused
+            )
+        }
+
+        guard hasConfiguredConnection else { return nil }
+        return (
+            [
+                MPMediaItemPropertyTitle: "MOBaiLE Ready",
+                MPMediaItemPropertyArtist: "Click to start voice mode",
+                MPNowPlayingInfoPropertyIsLiveStream: true,
+                MPNowPlayingInfoPropertyPlaybackRate: 0.0
+            ],
+            .paused
+        )
     }
 
     private func emitRecordingStartedFeedback() {
