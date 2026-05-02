@@ -251,12 +251,12 @@ struct ConversationComposerBar: View {
     }
 
     private var standardComposerRow: some View {
-        Group {
-            if shouldUseExpandedComposerLayout {
-                expandedStandardComposerRow
-            } else {
-                compactStandardComposerRow
-            }
+        HStack(alignment: .bottom, spacing: 10) {
+            embeddedComposerUtilityActions
+            composerTextEditorSurface
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
+            composerPrimaryActionButton
         }
         .padding(.horizontal, shouldUseExpandedComposerLayout ? 10 : 6)
         .padding(.vertical, shouldUseExpandedComposerLayout ? 8 : 6)
@@ -271,43 +271,6 @@ struct ConversationComposerBar: View {
                     lineWidth: 1
                 )
         )
-        .animation(.easeInOut(duration: 0.18), value: shouldUseExpandedComposerLayout)
-    }
-
-    private var compactStandardComposerRow: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            embeddedComposerUtilityActions
-            composerTextEditorSurface
-                .frame(maxWidth: .infinity)
-                .layoutPriority(1)
-            composerPrimaryActionButton
-        }
-    }
-
-    private var expandedStandardComposerRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            expandedComposerTextEditorSurface
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-
-            HStack(alignment: .center, spacing: 10) {
-                embeddedComposerUtilityActions
-                Spacer(minLength: 0)
-                composerPrimaryActionButton
-            }
-        }
-    }
-
-    private var expandedComposerTextEditorSurface: some View {
-        composerTextEditorSurface
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
-            )
     }
 
     private var shouldUseExpandedComposerLayout: Bool {
@@ -343,7 +306,6 @@ struct ConversationComposerBar: View {
                     .allowsHitTesting(false)
             }
         }
-        .animation(.easeInOut(duration: 0.16), value: composerHeight)
     }
 
     private var embeddedComposerUtilityActions: some View {
