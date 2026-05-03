@@ -236,6 +236,48 @@ def test_utterance_service_uses_session_defaults_for_local_runs(monkeypatch, tmp
     assert launched[0][1][2] == project_dir
 
 
+def test_utterance_service_marks_run_failed_when_background_launch_fails(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path)
+    run_state = _run_state(tmp_path)
+    execution = FakeExecutionService()
+
+    def fail_to_launch(*_args: object) -> None:
+        raise RuntimeError("cannot start worker thread")
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="local",
+            resolved_working_directory=str(env.default_workdir),
+        ),
+        background_launcher=fail_to_launch,
+        run_id_factory=lambda: "run-launch-failed",
+        plan_builder=lambda prompt: ActionPlan(
+            goal=prompt,
+            actions=[Action(type="run_command", command="python3 hello.py")],
+        ),
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-launch-failed",
+            utterance_text="create a hello python script and run it",
+        )
+    )
+
+    assert result.status == "rejected"
+    assert result.run_id == "run-launch-failed"
+    run = run_state.get_run("run-launch-failed")
+    assert run is not None
+    assert run.status == "failed"
+    assert run.summary == "Local run failed to start"
+    assert [event.type for event in run.events] == ["activity.completed", "action.stderr", "run.failed"]
+    assert "cannot start worker thread" in run.events[1].message
+
+
 def test_utterance_service_passes_profile_context_toggles_to_agent_runs(monkeypatch, tmp_path: Path) -> None:
     env = _environment(
         monkeypatch,

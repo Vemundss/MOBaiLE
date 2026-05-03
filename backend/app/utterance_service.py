@@ -189,10 +189,13 @@ class UtteranceService:
 
         if self.calendar_request_detector(prepared.effective_text):
             self._record_running_run(prepared, precreated=precreated)
-            self.background_launcher(
+            if not self._launch_background_run(
+                prepared.run_id,
                 self.execution_service.run_calendar_adapter,
                 (prepared.run_id, prepared.effective_text),
-            )
+                failure_summary="Calendar run failed to start",
+            ):
+                return self._rejected_response(prepared.run_id, "Calendar run failed to start")
             return self._accepted_response(prepared.run_id)
 
         guardrail_status, guardrail_message = self.environment.evaluate_runtime_guardrails(prepared.effective_text)
@@ -207,7 +210,8 @@ class UtteranceService:
             return self._rejected_response(prepared.run_id, guardrail_message)
 
         self._record_running_run(prepared, precreated=precreated)
-        self.background_launcher(
+        if not self._launch_background_run(
+            prepared.run_id,
             self.execution_service.run_agent,
             (
                 prepared.run_id,
@@ -224,7 +228,9 @@ class UtteranceService:
                 include_profile_memory,
                 guardrail_message if guardrail_status == "warn" else None,
             ),
-        )
+            failure_summary="Agent run failed to start",
+        ):
+            return self._rejected_response(prepared.run_id, "Agent run failed to start")
         return self._accepted_response(prepared.run_id)
 
     @staticmethod
@@ -266,11 +272,43 @@ class UtteranceService:
             return self._rejected_response(prepared.run_id, message)
 
         self._record_running_run(prepared, plan=plan, precreated=precreated)
-        self.background_launcher(
+        if not self._launch_background_run(
+            prepared.run_id,
             self.execution_service.run_local_plan,
             (prepared.run_id, plan, prepared.workdir),
-        )
+            failure_summary="Local run failed to start",
+        ):
+            return self._rejected_response(prepared.run_id, "Local run failed to start")
         return self._accepted_response(prepared.run_id)
+
+    def _launch_background_run(
+        self,
+        run_id: str,
+        target: Callable[..., None],
+        args: tuple[object, ...],
+        *,
+        failure_summary: str,
+    ) -> bool:
+        try:
+            self.background_launcher(target, args)
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}".strip()
+            self.run_state.append_activity_event(
+                run_id,
+                stage="failed",
+                title="Failed",
+                display_message=failure_summary,
+                level="error",
+                event_type="activity.completed",
+            )
+            self.run_state.append_event(
+                run_id,
+                ExecutionEvent(type="action.stderr", action_index=0, message=f"{failure_summary}: {detail}"),
+            )
+            self.run_state.append_event(run_id, ExecutionEvent(type="run.failed", message=failure_summary))
+            self.run_state.set_run_status(run_id, "failed", failure_summary)
+            return False
+        return True
 
     @staticmethod
     def _accepted_response(run_id: str) -> UtteranceResponse:

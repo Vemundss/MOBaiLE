@@ -229,6 +229,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     private var backendTranscribeProvider: String = "unknown"
     private var backendTranscribeReady = false
     private var observedRunContexts: [String: ObservedRunContext] = [:]
+    private var runRecoveryTasks: [String: Task<Void, Never>] = [:]
     private var pagedRunLogRunID: String?
     private var nextRunLogBeforeSeq: Int?
     var lastHydratedSessionContextID: String?
@@ -282,6 +283,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     deinit {
         pendingDraftPersistenceTask?.cancel()
         clearVoiceInteractionNoticeTask?.cancel()
+        for task in runRecoveryTasks.values {
+            task.cancel()
+        }
     }
 
     private enum DefaultsKey {
@@ -1310,6 +1314,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func pollRunUntilDone(runID: String, threadID: UUID, timeoutSec: TimeInterval?) async throws {
         let deadline = timeoutSec.map { Date().addingTimeInterval($0) }
+        var consecutiveFetchFailures = 0
+        var lastFailureSeq = observedRunContexts[runID]?.lastEventSeq ?? -1
         while true {
             if let deadline, Date() >= deadline {
                 break
@@ -1334,12 +1340,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 if activeThreadID == threadID, run.status == "running", runPhaseText == "Planning" || runPhaseText == "Idle" {
                     runPhaseText = "Executing"
                 }
-                try await fetchAndIngestRunEventsPage(runID: runID, threadID: threadID)
+                try await fetchAndIngestMissingRunEvents(runID: runID, threadID: threadID)
 
                 if isTerminalStatus(run.status) {
                     applyTerminalRunStateIfNeeded(run, threadID: threadID)
                     return
                 }
+                consecutiveFetchFailures = 0
+                lastFailureSeq = observedRunContexts[runID]?.lastEventSeq ?? -1
             } catch {
                 if let repairMessage = registerConnectionRepairIfNeeded(from: error) {
                     if activeThreadID == threadID {
@@ -1355,6 +1363,17 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     return
                 }
                 if isTerminalStatusText(statusText(for: threadID)) {
+                    return
+                }
+                let currentSeq = observedRunContexts[runID]?.lastEventSeq ?? -1
+                if currentSeq > lastFailureSeq {
+                    consecutiveFetchFailures = 0
+                } else {
+                    consecutiveFetchFailures += 1
+                }
+                lastFailureSeq = currentSeq
+                if consecutiveFetchFailures >= 20 {
+                    markRunObservationUnavailable(runID: runID, threadID: threadID)
                     return
                 }
             }
@@ -1377,16 +1396,36 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         removeObservedRunContext(runID: runID)
     }
 
-    private func fetchAndIngestRunEventsPage(runID: String, threadID: UUID) async throws {
-        let lastSeq = observedRunContexts[runID]?.lastEventSeq ?? -1
-        let page = try await client.fetchRunEventsPage(
-            serverURL: normalizedServerURL,
-            token: apiToken,
-            runID: runID,
-            limit: 500,
-            afterSeq: lastSeq >= 0 ? lastSeq : nil
-        )
-        ingestEvents(page.events, runID: runID, threadID: threadID)
+    private func markRunObservationUnavailable(runID: String, threadID: UUID) {
+        if activeThreadID == threadID {
+            isLoading = false
+            errorText = "Couldn't refresh the run state from the backend."
+            statusText = "Run state unavailable"
+            runPhaseText = "Reconnect"
+            runEndedAt = Date()
+        }
+        updateThreadMetadata(threadID: threadID, statusText: "Run state unavailable")
+        removeObservedRunContext(runID: runID, preserveVisibleEvents: true)
+        persistThreadSnapshot(threadID: threadID)
+    }
+
+    func fetchAndIngestMissingRunEvents(runID: String, threadID: UUID) async throws {
+        while true {
+            let lastSeq = observedRunContexts[runID]?.lastEventSeq ?? -1
+            let page = try await client.fetchRunEventsPage(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                runID: runID,
+                limit: 500,
+                afterSeq: lastSeq >= 0 ? lastSeq : nil
+            )
+            ingestEvents(page.events, runID: runID, threadID: threadID)
+
+            let updatedLastSeq = observedRunContexts[runID]?.lastEventSeq ?? lastSeq
+            if page.events.isEmpty || updatedLastSeq <= lastSeq || !page.hasMoreAfter {
+                return
+            }
+        }
     }
 
     private func streamRunUntilDone(runID: String, threadID: UUID, timeoutSec: TimeInterval?) async throws {
@@ -2113,6 +2152,77 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         threads.sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    private func shouldRecoverRunState(runID: String, statusText: String) -> Bool {
+        let trimmedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRunID.isEmpty else { return false }
+        guard !isTerminalStatusText(statusText) else { return false }
+        guard hasConfiguredConnection else { return false }
+        guard PreviewScenario.current == nil else { return false }
+        return true
+    }
+
+    private func scheduleRunStateRecoveryIfNeeded(runID: String, threadID: UUID, statusText: String) {
+        let trimmedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard shouldRecoverRunState(runID: trimmedRunID, statusText: statusText) else { return }
+        guard runRecoveryTasks[trimmedRunID] == nil else { return }
+
+        runRecoveryTasks[trimmedRunID] = Task { [weak self] in
+            guard let self else { return }
+            await self.recoverRunState(runID: trimmedRunID, threadID: threadID)
+            await MainActor.run {
+                self.runRecoveryTasks[trimmedRunID] = nil
+            }
+        }
+    }
+
+    private func recoverRunState(runID: String, threadID: UUID) async {
+        do {
+            let run = try await client.fetchRun(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                runID: runID,
+                eventsLimit: 0
+            )
+            try await fetchAndIngestMissingRunEvents(runID: runID, threadID: threadID)
+            if isTerminalStatus(run.status) {
+                applyTerminalRunStateIfNeeded(run, threadID: threadID)
+                return
+            }
+            if run.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "running" {
+                try await observeRun(runID: runID, threadID: threadID)
+                return
+            }
+            updateThreadMetadata(
+                threadID: threadID,
+                summaryText: run.summary,
+                statusText: "Run status: \(run.status)",
+                resolvedWorkingDirectory: run.workingDirectory,
+                persist: true
+            )
+            if activeThreadID == threadID {
+                isLoading = false
+                runPhaseText = phaseText(forRunStatus: run.status)
+                runEndedAt = Date()
+            }
+            removeObservedRunContext(runID: runID, preserveVisibleEvents: true)
+        } catch {
+            if let repairMessage = registerConnectionRepairIfNeeded(from: error) {
+                if activeThreadID == threadID {
+                    isLoading = false
+                    errorText = repairMessage
+                    statusText = "Connection needs repair"
+                    runPhaseText = "Reconnect"
+                    runEndedAt = Date()
+                }
+                updateThreadMetadata(threadID: threadID, statusText: "Connection needs repair")
+                removeObservedRunContext(runID: runID, preserveVisibleEvents: true)
+                persistThreadSnapshot(threadID: threadID)
+                return
+            }
+            markRunObservationUnavailable(runID: runID, threadID: threadID)
+        }
+    }
+
     func switchToThread(_ threadID: UUID) {
         guard let idx = threadIndex(for: threadID) else { return }
         clearVoiceInteractionNotice()
@@ -2154,7 +2264,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             runPhaseText = phaseText(forStatusText: thread.statusText)
             runStartedAt = nil
             runEndedAt = nil
-            isLoading = hasObservedRun || thread.statusText.lowercased().contains("running")
+            let shouldRecoverRun = shouldRecoverRunState(
+                runID: restoredRunID,
+                statusText: thread.statusText
+            )
+            isLoading = hasObservedRun || shouldRecoverRun
             resolvedWorkingDirectory = thread.resolvedWorkingDirectory
             activeRunExecutor = thread.activeRunExecutor
             errorText = ""
@@ -2162,6 +2276,11 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             didCompleteRun = isTerminalStatusText(thread.statusText)
         }
         defaults.set(threadID.uuidString, forKey: DefaultsKey.activeThreadID)
+        scheduleRunStateRecoveryIfNeeded(
+            runID: restoredRunID,
+            threadID: threadID,
+            statusText: thread.statusText
+        )
     }
 
     func createNewThread() {
@@ -2564,7 +2683,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             || normalized == "timed out"
     }
 
-    private func applyTerminalRunStateIfNeeded(_ run: RunRecord, threadID: UUID) {
+    func applyTerminalRunStateIfNeeded(_ run: RunRecord, threadID: UUID) {
         if activeThreadID == threadID, didCompleteRun && summaryText == run.summary {
             return
         }
@@ -4182,6 +4301,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
 
     func _test_isRunActivelyObserved(_ runID: String) -> Bool {
         isRunActivelyObserved(runID)
+    }
+
+    func _test_shouldRecoverRunState(runID: String, statusText: String) -> Bool {
+        shouldRecoverRunState(runID: runID, statusText: statusText)
+    }
+
+    func _test_markRunObservationUnavailable(runID: String, threadID: UUID) {
+        markRunObservationUnavailable(runID: runID, threadID: threadID)
     }
 
     func _test_applyTerminalRunState(

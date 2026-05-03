@@ -1586,6 +1586,92 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testReloadedRunningThreadWithoutObservedRunDoesNotLockComposerOffline() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+        let threadID = UUID()
+        let runID = "stale-running-\(UUID().uuidString)"
+
+        store.upsertThread(
+            ChatThread(
+                id: threadID,
+                title: "Stale Running Thread",
+                updatedAt: Date(),
+                conversation: [],
+                runID: runID,
+                summaryText: "Run started",
+                transcriptText: "",
+                statusText: "Running...",
+                resolvedWorkingDirectory: "",
+                activeRunExecutor: "codex"
+            )
+        )
+        defaults.set(threadID.uuidString, forKey: "mobaile.active_thread_id")
+
+        let reloaded = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+
+        XCTAssertEqual(reloaded.activeThreadID, threadID)
+        XCTAssertEqual(reloaded.runID, runID)
+        XCTAssertFalse(reloaded.isLoading)
+        XCTAssertFalse(reloaded._test_hasObservedRunContext(runID: runID, threadID: threadID))
+    }
+
+    @MainActor
+    func testRunStateRecoveryRequiresBackendConnectionAndNonTerminalRun() {
+        let vm = VoiceAgentViewModel()
+        vm.serverURL = ""
+        vm.apiToken = ""
+
+        XCTAssertFalse(vm._test_shouldRecoverRunState(runID: "run-1", statusText: "Running..."))
+
+        vm.serverURL = "http://127.0.0.1:8000"
+        vm.apiToken = "token"
+
+        XCTAssertTrue(vm._test_shouldRecoverRunState(runID: "run-1", statusText: "Running..."))
+        XCTAssertFalse(vm._test_shouldRecoverRunState(runID: "run-1", statusText: "Run status: completed"))
+        XCTAssertFalse(vm._test_shouldRecoverRunState(runID: "", statusText: "Running..."))
+    }
+
+    @MainActor
+    func testUnavailableRunObservationUnlocksThreadButKeepsVisibleEvents() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        let runID = "unavailable-run-\(UUID().uuidString)"
+        let event = ExecutionEvent(
+            type: "activity.updated",
+            message: "Running backend checks.",
+            stage: "executing",
+            title: "Executing",
+            displayMessage: "Running backend checks.",
+            level: "info",
+            eventID: "evt-\(UUID().uuidString)",
+            createdAt: nil
+        )
+
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Running...",
+            activeRunExecutor: "codex"
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: threadID)
+        vm._test_ingestRunEvents([event], runID: runID, threadID: threadID)
+        vm.isLoading = true
+
+        vm._test_markRunObservationUnavailable(runID: runID, threadID: threadID)
+
+        XCTAssertFalse(vm.isLoading)
+        XCTAssertEqual(vm.statusText, "Run state unavailable")
+        XCTAssertEqual(vm.events.map(\.message), ["Running backend checks."])
+        XCTAssertFalse(vm._test_hasObservedRunContext(runID: runID, threadID: threadID))
+    }
+
+    @MainActor
     func testTypedActivityEventUpdatesLiveActivityCardWithoutAssistantBubble() {
         let vm = VoiceAgentViewModel()
         vm.createNewThread()

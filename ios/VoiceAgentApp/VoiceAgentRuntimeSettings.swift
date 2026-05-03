@@ -258,14 +258,14 @@ extension VoiceAgentViewModel {
                 try await observeRun(runID: latestRunID, threadID: targetThreadID)
             }
         } else if isTerminalStatus(latestStatus) {
-            if activeThreadID == targetThreadID {
-                isLoading = false
-                didCompleteRun = true
-                runPhaseText = phaseText(forRunStatus: latestStatus)
-                if runEndedAt == nil {
-                    runEndedAt = Date()
-                }
-            }
+            let run = try await client.fetchRun(
+                serverURL: normalizedServerURL,
+                token: apiToken,
+                runID: latestRunID,
+                eventsLimit: 0
+            )
+            try await fetchAndIngestMissingRunEvents(runID: latestRunID, threadID: targetThreadID)
+            applyTerminalRunStateIfNeeded(run, threadID: targetThreadID)
         }
 
         persistThreadSnapshot(threadID: targetThreadID)
