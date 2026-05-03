@@ -308,36 +308,6 @@ non_negative_int_or_default() {
   fi
 }
 
-wait_for_active_run_to_finish() {
-  local run_id="${1}"
-  local db_path="${2:-}"
-  local timeout_sec
-  local interval_sec
-  timeout_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_TIMEOUT_SEC:-3600}" "3600")"
-  interval_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_POLL_INTERVAL_SEC:-2}" "2")"
-  if [[ "${interval_sec}" == "0" ]]; then
-    interval_sec="1"
-  fi
-
-  if [[ -z "${db_path}" ]] || [[ ! -f "${db_path}" ]] || ! command -v sqlite3 > /dev/null 2>&1; then
-    sleep "$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_FALLBACK_DELAY_SEC:-60}" "60")"
-    return 0
-  fi
-
-  local deadline=$((SECONDS + timeout_sec))
-  local escaped_run_id="${run_id//\'/\'\'}"
-  local status=""
-  while ((SECONDS < deadline)); do
-    if status="$(sqlite3 "${db_path}" "SELECT status FROM runs WHERE run_id='${escaped_run_id}' LIMIT 1;" 2> /dev/null)"; then
-      if [[ "${status}" != "running" ]]; then
-        return 0
-      fi
-    fi
-    sleep "${interval_sec}"
-  done
-  return 1
-}
-
 defer_restart_if_needed() {
   if [[ "${MOBAILE_RESTART_NOW:-}" == "1" ]]; then
     return 1
@@ -350,18 +320,115 @@ defer_restart_if_needed() {
   local db_path="${MOBAILE_RUNS_DB_PATH:-}"
   local script_path
   script_path="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
-  (
-    trap '' HUP
-    if wait_for_active_run_to_finish "${run_id}" "${db_path}"; then
-      env \
-        -u MOBAILE_ACTIVE_RUN_ID \
-        -u MOBAILE_DEFER_SERVICE_RESTART \
-        -u MOBAILE_RUNS_DB_PATH \
-        MOBAILE_RESTART_NOW=1 \
-        bash "${script_path}" restart
-    fi
-  ) > /dev/null 2>&1 &
-  disown "$!" 2> /dev/null || true
+  local timeout_sec
+  local interval_sec
+  local fallback_delay_sec
+  timeout_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_TIMEOUT_SEC:-3600}" "3600")"
+  interval_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_POLL_INTERVAL_SEC:-2}" "2")"
+  fallback_delay_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_FALLBACK_DELAY_SEC:-60}" "60")"
+
+  python3 - "${run_id}" "${db_path}" "${script_path}" "${timeout_sec}" "${interval_sec}" "${fallback_delay_sec}" << 'PY'
+from __future__ import annotations
+
+import os
+import sqlite3
+import subprocess
+import sys
+import textwrap
+
+run_id, db_path, script_path, timeout_sec, interval_sec, fallback_delay_sec = sys.argv[1:7]
+child = r"""
+from __future__ import annotations
+
+import os
+import sqlite3
+import subprocess
+import sys
+import time
+
+
+def positive_int(value: str, default: int) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+def non_negative_int(value: str, default: int) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed >= 0 else default
+
+
+run_id, db_path, script_path, timeout_raw, interval_raw, fallback_raw = sys.argv[1:7]
+timeout_sec = non_negative_int(timeout_raw, 3600)
+interval_sec = positive_int(interval_raw, 2)
+fallback_delay_sec = non_negative_int(fallback_raw, 60)
+
+
+def active_run_finished() -> bool:
+    if not db_path or not os.path.exists(db_path):
+        time.sleep(fallback_delay_sec)
+        return True
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT status FROM runs WHERE run_id = ? LIMIT 1",
+                (run_id,),
+            ).fetchone()
+    except sqlite3.Error:
+        return False
+    return row is None or row[0] != "running"
+
+
+deadline = time.monotonic() + timeout_sec
+while time.monotonic() < deadline:
+    if active_run_finished():
+        break
+    time.sleep(interval_sec)
+else:
+    raise SystemExit(0)
+
+env = os.environ.copy()
+for key in (
+    "MOBAILE_ACTIVE_RUN_ID",
+    "MOBAILE_DEFER_SERVICE_RESTART",
+    "MOBAILE_RUNS_DB_PATH",
+):
+    env.pop(key, None)
+env["MOBAILE_RESTART_NOW"] = "1"
+subprocess.run(
+    ["bash", script_path, "restart"],
+    env=env,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    check=False,
+)
+"""
+
+env = os.environ.copy()
+subprocess.Popen(
+    [
+        sys.executable,
+        "-c",
+        textwrap.dedent(child),
+        run_id,
+        db_path,
+        script_path,
+        timeout_sec,
+        interval_sec,
+        fallback_delay_sec,
+    ],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    env=env,
+    start_new_session=True,
+)
+PY
 
   echo "Active MOBaiLE run detected; backend restart deferred until this run finishes."
   return 0
