@@ -95,7 +95,13 @@ final class VoiceAgentModelTests: XCTestCase {
 
     @MainActor
     func testRegisterConnectionRepairIfNeededStagesReconnectState() {
-        let vm = VoiceAgentViewModel()
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
         vm.serverURL = "http://vemunds-macbook-air.tail6a5903.ts.net:8000"
         vm.apiToken = "stale-token"
 
@@ -115,7 +121,13 @@ final class VoiceAgentModelTests: XCTestCase {
 
     @MainActor
     func testRegisterConnectionRepairIfNeededIgnoresNonAuthErrors() {
-        let vm = VoiceAgentViewModel()
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
 
         let message = vm.registerConnectionRepairIfNeeded(
             from: APIError.httpError(503, #"{"detail":"server auth token is not configured"}"#)

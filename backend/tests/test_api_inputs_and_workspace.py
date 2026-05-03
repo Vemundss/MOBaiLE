@@ -163,9 +163,14 @@ def test_audio_mock_flow(make_client):
 
 
 def test_audio_mock_flow_preserves_draft_context_and_attachments(make_client, tmp_path: Path):
-    client, token = make_client(provider="mock")
-    attachment_path = tmp_path / "notes.txt"
+    workspace = tmp_path / "workspace"
+    attachment_path = workspace / "notes.txt"
+    attachment_path.parent.mkdir(parents=True, exist_ok=True)
     attachment_path.write_text("hello-file", encoding="utf-8")
+    client, token = make_client(
+        provider="mock",
+        extra_env={"VOICE_AGENT_DEFAULT_WORKDIR": str(workspace)},
+    )
     attachment = {
         "type": "file",
         "title": "notes.txt",
