@@ -95,100 +95,97 @@ struct MessageBubble: View {
     private var bubbleSurface: some View {
         if isLiveActivity {
             LiveActivityCard(text: message.text)
+        } else if isUser {
+            messageSegments
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .foregroundStyle(Color.white)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.17, green: 0.48, blue: 0.96),
+                                    Color(red: 0.12, green: 0.39, blue: 0.90)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         } else {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(segments) { segment in
-                    switch segment.kind {
-                    case .markdown:
-                        ExpandableMarkdownBlock(text: segment.content, isUser: isUser)
-                    case let .code(language):
-                        CodeBlock(text: segment.content, language: language)
-                    case let .status(text):
-                        AgentStatusCard(text: text)
-                    case let .image(url):
-                        RemoteImageView(urlString: url, serverURL: serverURL, apiToken: apiToken)
-                    case let .section(title, body):
-                        SectionCard(title: title, content: body, isUser: isUser)
-                    case let .fileChanges(items):
-                        FileChangesCard(
-                            items: items,
-                            serverURL: serverURL,
-                            workspacePath: workspacePath,
-                            openingArtifactID: openingArtifactID,
-                            onOpen: { artifact in
-                                Task {
-                                    await openArtifact(artifact)
-                                }
+            messageSegments
+                .padding(.horizontal, 2)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var messageSegments: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(segments) { segment in
+                switch segment.kind {
+                case .markdown:
+                    ExpandableMarkdownBlock(text: segment.content, isUser: isUser)
+                case let .code(language):
+                    CodeBlock(text: segment.content, language: language)
+                case let .status(text):
+                    AgentStatusCard(text: text)
+                case let .image(url):
+                    RemoteImageView(urlString: url, serverURL: serverURL, apiToken: apiToken)
+                case let .section(title, body):
+                    SectionCard(title: title, content: body, isUser: isUser)
+                case let .fileChanges(items):
+                    FileChangesCard(
+                        items: items,
+                        serverURL: serverURL,
+                        workspacePath: workspacePath,
+                        openingArtifactID: openingArtifactID,
+                        onOpen: { artifact in
+                            Task {
+                                await openArtifact(artifact)
                             }
-                        )
-                    case let .verification(commands, tests):
-                        VerificationCard(commands: commands, tests: tests)
-                    case let .warnings(items):
-                        WarningsCard(items: items)
-                    case let .nextActions(items):
-                        NextActionsCard(
-                            items: items,
-                            openingArtifactID: openingArtifactID,
-                            onOpenLogs: onOpenLogs,
-                            onRetryLastPrompt: onRetryLastPrompt,
-                            onOpenArtifact: { artifact in
-                                Task {
-                                    await openArtifact(artifact)
-                                }
+                        }
+                    )
+                case let .verification(commands, tests):
+                    VerificationCard(commands: commands, tests: tests)
+                case let .warnings(items):
+                    WarningsCard(items: items)
+                case let .nextActions(items):
+                    NextActionsCard(
+                        items: items,
+                        openingArtifactID: openingArtifactID,
+                        onOpenLogs: onOpenLogs,
+                        onRetryLastPrompt: onRetryLastPrompt,
+                        onOpenArtifact: { artifact in
+                            Task {
+                                await openArtifact(artifact)
                             }
-                        )
-                    case let .artifact(item):
-                        ArtifactCard(
-                            artifact: item,
-                            serverURL: serverURL,
-                            workspacePath: workspacePath,
-                            isOpening: openingArtifactID == item.id,
-                            onOpen: {
-                                Task {
-                                    await openArtifact(item)
-                                }
+                        }
+                    )
+                case let .artifact(item):
+                    ArtifactCard(
+                        artifact: item,
+                        serverURL: serverURL,
+                        workspacePath: workspacePath,
+                        isOpening: openingArtifactID == item.id,
+                        onOpen: {
+                            Task {
+                                await openArtifact(item)
                             }
-                        )
-                    case let .agenda(items):
-                        AgendaCard(items: items)
-                    case let .emailDigest(items):
-                        EmailDigestCard(items: items)
-                    }
+                        }
+                    )
+                case let .agenda(items):
+                    AgendaCard(items: items)
+                case let .emailDigest(items):
+                    EmailDigestCard(items: items)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .foregroundStyle(isUser ? Color.white : Color.primary)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        isUser
-                            ? AnyShapeStyle(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.17, green: 0.48, blue: 0.96),
-                                        Color(red: 0.12, green: 0.39, blue: 0.90)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            : AnyShapeStyle(Color(.systemBackground))
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(
-                        isUser ? Color.white.opacity(0.14) : Color(.separator).opacity(0.18),
-                        lineWidth: 1
-                    )
-            )
-            .shadow(
-                color: isUser ? Color.clear : Color.black.opacity(0.04),
-                radius: isUser ? 0 : 10,
-                y: isUser ? 0 : 3
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
     }
 

@@ -1132,14 +1132,14 @@ struct ThreadsView: View {
     @State private var renameTitle: String = ""
     @State private var pendingDeleteThread: ChatThread?
 
-    private var displayedThreads: [ChatThread] {
-        guard let activeThreadID,
-              let activeIndex = threads.firstIndex(where: { $0.id == activeThreadID }) else {
-            return threads
-        }
-        var ordered = threads
-        let active = ordered.remove(at: activeIndex)
-        return [active] + ordered
+    private var activeThread: ChatThread? {
+        guard let activeThreadID else { return nil }
+        return threads.first { $0.id == activeThreadID }
+    }
+
+    private var recentThreads: [ChatThread] {
+        guard let activeThreadID else { return threads }
+        return threads.filter { $0.id != activeThreadID }
     }
 
     var body: some View {
@@ -1153,97 +1153,17 @@ struct ThreadsView: View {
                     )
                 } else {
                     List {
-                        Section {
-                            SheetIntroCard(
-                                title: "Chats",
-                                message: "Switch threads here. The current thread stays pinned at the top so it is easy to jump back.",
-                                systemImage: "bubble.left.and.bubble.right",
-                                tint: .blue
-                            )
-                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        if let activeThread {
+                            Section("Current") {
+                                threadButton(for: activeThread)
+                            }
                         }
 
-                        ForEach(displayedThreads) { thread in
-                            Button {
-                                onSelect(thread.id)
-                            } label: {
-                                HStack(alignment: .top, spacing: 12) {
-                                    threadIcon(for: thread)
-
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                            Text(thread.title)
-                                                .font(.body.weight(activeThreadID == thread.id ? .semibold : .regular))
-                                                .lineLimit(1)
-
-                                            Spacer(minLength: 0)
-
-                                            Text(thread.updatedAt, style: .relative)
-                                                .font(.caption2.weight(.medium))
-                                                .foregroundStyle(.secondary)
-                                        }
-
-                                        Text(threadPreview(for: thread))
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-
-                                        HStack(spacing: 8) {
-                                            Text(threadStatusText(for: thread))
-                                                .font(.caption2.weight(.semibold))
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(threadStatusColor(for: thread).opacity(0.14))
-                                                .foregroundStyle(threadStatusColor(for: thread))
-                                                .clipShape(Capsule())
-
-                                            if activeThreadID == thread.id {
-                                                Text("Current")
-                                                    .font(.caption2.weight(.semibold))
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.vertical, 4)
-                                                    .background(Color.accentColor.opacity(0.12))
-                                                    .foregroundStyle(Color.accentColor)
-                                                    .clipShape(Capsule())
-                                            }
-                                        }
-                                    }
+                        if !recentThreads.isEmpty {
+                            Section(activeThread == nil ? "Chats" : "Recent") {
+                                ForEach(recentThreads) { thread in
+                                    threadButton(for: thread)
                                 }
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(activeThreadID == thread.id ? Color.accentColor.opacity(0.06) : Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(
-                                        activeThreadID == thread.id
-                                            ? Color.accentColor.opacity(0.16)
-                                            : Color(.separator).opacity(0.08),
-                                        lineWidth: 1
-                                    )
-                            )
-                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    pendingDeleteThread = thread
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                                Button {
-                                    renamingThreadID = thread.id
-                                    renameTitle = thread.title
-                                } label: {
-                                    Label("Rename", systemImage: "pencil")
-                                }
-                                .tint(.indigo)
                             }
                         }
                     }
@@ -1261,10 +1181,12 @@ struct ThreadsView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New Chat") {
+                    Button {
                         onNewChat()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .accessibilityLabel("New Chat")
                 }
             }
             .alert("Rename Thread", isPresented: Binding(
@@ -1298,6 +1220,85 @@ struct ThreadsView: View {
             } message: {
                 Text("This removes the thread history stored on the device.")
             }
+        }
+    }
+
+    private func threadButton(for thread: ChatThread) -> some View {
+        let isActive = activeThreadID == thread.id
+
+        return Button {
+            onSelect(thread.id)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                threadIcon(for: thread)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(thread.title)
+                            .font(.body.weight(isActive ? .semibold : .regular))
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
+
+                        Text(thread.updatedAt, style: .relative)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+
+                        if isActive {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityHidden(true)
+                        }
+                    }
+
+                    Text(threadPreview(for: thread))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+
+                    Text(threadStatusText(for: thread))
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(threadStatusColor(for: thread).opacity(0.14))
+                        .foregroundStyle(threadStatusColor(for: thread))
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isActive ? Color.accentColor.opacity(0.06) : Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(
+                    isActive
+                        ? Color.accentColor.opacity(0.16)
+                        : Color(.separator).opacity(0.08),
+                    lineWidth: 1
+                )
+        )
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                pendingDeleteThread = thread
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            Button {
+                renamingThreadID = thread.id
+                renameTitle = thread.title
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            .tint(.indigo)
         }
     }
 

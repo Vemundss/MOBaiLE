@@ -2407,6 +2407,7 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(_test_estimatedComposerDisplayLineCount("short", charactersPerLine: 8), 1)
         XCTAssertEqual(_test_estimatedComposerDisplayLineCount("123456789", charactersPerLine: 8), 2)
         XCTAssertEqual(_test_estimatedComposerDisplayLineCount("first\n\nsecond", charactersPerLine: 8), 3)
+        XCTAssertEqual(_test_estimatedComposerDisplayLineCount("abc", charactersPerLine: 0), 3)
     }
 
     func testSlashCommandStateForBareSlashShowsCatalog() {
