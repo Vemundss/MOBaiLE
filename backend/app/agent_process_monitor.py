@@ -55,6 +55,7 @@ class AgentProcessMonitor:
 
         linked_session_id = resume_session_id
         cancelled = False
+        cancel_reason: str | None = None
         timed_out = False
         blocked = False
         resume_failure_reason: str | None = None
@@ -88,6 +89,7 @@ class AgentProcessMonitor:
 
             if self.run_state.is_cancelled(run_id):
                 cancelled = True
+                cancel_reason = self.run_state.cancel_reason(run_id)
                 break
             run = self.run_state.get_run(run_id)
             if run is not None and run.status == "blocked":
@@ -105,9 +107,11 @@ class AgentProcessMonitor:
         exit_code = proc.wait()
         if not cancelled and self.run_state.is_cancelled(run_id):
             cancelled = True
+            cancel_reason = self.run_state.cancel_reason(run_id)
         return AgentRunOutcome(
             exit_code=exit_code,
             cancelled=cancelled,
+            cancel_reason=cancel_reason,
             timed_out=timed_out,
             blocked=blocked,
             resume_failure_reason=resume_failure_reason,

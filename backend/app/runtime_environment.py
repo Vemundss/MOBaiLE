@@ -93,6 +93,7 @@ class RuntimeEnvironment:
     profile_id: str
     profile_agents_max_chars: int
     profile_memory_max_chars: int
+    skip_cloud_workdir_profile_staging: bool
     max_audio_mb: float
     max_audio_bytes: int
     max_upload_mb: float
@@ -153,6 +154,7 @@ class RuntimeEnvironment:
             profile_id=profile.profile_id,
             profile_agents_max_chars=profile.profile_agents_max_chars,
             profile_memory_max_chars=profile.profile_memory_max_chars,
+            skip_cloud_workdir_profile_staging=profile.skip_cloud_workdir_staging,
             max_audio_mb=service.max_audio_mb,
             max_audio_bytes=service.max_audio_bytes,
             max_upload_mb=service.max_upload_mb,

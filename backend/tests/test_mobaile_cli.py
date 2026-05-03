@@ -10,6 +10,27 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def create_fake_codex_bin(tmp_path: Path) -> Path:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    (fake_bin / "codex").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            if [[ "${1:-}" == "--version" ]]; then
+              echo "codex 9.9.9"
+              exit 0
+            fi
+            echo "fake codex"
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "codex").chmod(0o755)
+    return fake_bin
+
+
 def run_git(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
@@ -304,9 +325,10 @@ def test_mobaile_status_does_not_report_existing_qr_as_ready_when_pairing_expire
 def test_mobaile_doctor_passes_for_tailscale_pairing(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"
+    fake_bin = create_fake_codex_bin(tmp_path)
     backend_dir.mkdir(parents=True)
     (backend_dir / ".env").write_text(
-        "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale\n",
+        "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale\nVOICE_AGENT_DEFAULT_EXECUTOR=codex\n",
         encoding="utf-8",
     )
     (backend_dir / "pairing.json").write_text(
@@ -333,7 +355,9 @@ def test_mobaile_doctor_passes_for_tailscale_pairing(tmp_path: Path):
             "MOBAILE_REPO_ROOT": str(repo),
             "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_TEST_KEEP_AWAKE_STATE": "running",
             "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+            "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
         },
         capture_output=True,
         text=True,
@@ -342,6 +366,102 @@ def test_mobaile_doctor_passes_for_tailscale_pairing(tmp_path: Path):
 
     assert result.returncode == 0
     assert "[ok] Tailscale mode advertises a Tailscale phone path" in result.stdout
+    assert "[ok] Codex binary is available: codex 9.9.9" in result.stdout
+    assert "[ok] Keep-awake service is running" in result.stdout
+    assert "Doctor result: ready" in result.stdout
+
+
+def test_mobaile_doctor_fails_when_default_codex_binary_is_missing(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=codex",
+                "VOICE_AGENT_CODEX_BINARY=/missing/codex",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://mobaile.tail6a5903.ts.net:8000",
+                "server_urls": ["http://mobaile.tail6a5903.ts.net:8000"],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_TEST_KEEP_AWAKE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Default executor is Codex, but the Codex binary is unavailable: /missing/codex" in result.stdout
+    assert "Doctor result: attention needed" in result.stdout
+
+
+def test_mobaile_doctor_warns_when_keep_awake_is_stopped(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    fake_bin = create_fake_codex_bin(tmp_path)
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale\nVOICE_AGENT_DEFAULT_EXECUTOR=codex\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://mobaile.tail6a5903.ts.net:8000",
+                "server_urls": ["http://mobaile.tail6a5903.ts.net:8000"],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_TEST_KEEP_AWAKE_STATE": "stopped",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+            "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "[warn] Keep-awake service is not running; run mobaile awake" in result.stdout
     assert "Doctor result: ready" in result.stdout
 
 

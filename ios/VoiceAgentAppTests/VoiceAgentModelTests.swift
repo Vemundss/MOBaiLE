@@ -222,6 +222,62 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertFalse(vm.needsConnectionRepair)
     }
 
+    @MainActor
+    func testBackendProfilesRememberMultiplePairingsAndSwitchCredentials() throws {
+        let harness = makeIsolatedPersistenceHarness()
+        defer { harness.cleanup() }
+        let vm = VoiceAgentViewModel(
+            threadStore: harness.store,
+            defaults: harness.defaults,
+            draftAttachmentDirectory: harness.draftDirectory
+        )
+        var profileIDsToCleanUp: [UUID] = []
+        defer {
+            for id in profileIDsToCleanUp {
+                KeychainStore.delete(service: "MOBaiLE", account: "api_token.\(id.uuidString)")
+                KeychainStore.delete(service: "MOBaiLE", account: "refresh_token.\(id.uuidString)")
+            }
+        }
+
+        vm.applyPairedClientCredentials(
+            PairExchangeResponse(
+                apiToken: "mac-mini-token",
+                refreshToken: "mac-mini-refresh",
+                sessionId: "iphone-app",
+                securityMode: "full-access",
+                serverURL: "http://mac-mini.tail6a5903.ts.net:8000",
+                serverURLs: ["http://mac-mini.tail6a5903.ts.net:8000"]
+            ),
+            fallbackPrimaryServerURL: "http://mac-mini.tail6a5903.ts.net:8000"
+        )
+        let firstProfileID = try XCTUnwrap(vm.activeBackendProfileID)
+        profileIDsToCleanUp.append(firstProfileID)
+
+        vm.applyPairedClientCredentials(
+            PairExchangeResponse(
+                apiToken: "macbook-token",
+                refreshToken: "macbook-refresh",
+                sessionId: "iphone-app",
+                securityMode: "safe",
+                serverURL: "http://macbook.tail6a5903.ts.net:8000",
+                serverURLs: ["http://macbook.tail6a5903.ts.net:8000"]
+            ),
+            fallbackPrimaryServerURL: "http://macbook.tail6a5903.ts.net:8000"
+        )
+        let secondProfileID = try XCTUnwrap(vm.activeBackendProfileID)
+        profileIDsToCleanUp.append(secondProfileID)
+
+        XCTAssertNotEqual(firstProfileID, secondProfileID)
+        XCTAssertEqual(vm.backendProfiles.count, 2)
+        XCTAssertEqual(vm.apiToken, "macbook-token")
+
+        vm.switchBackendProfile(firstProfileID)
+
+        XCTAssertEqual(vm.serverURL, "http://mac-mini.tail6a5903.ts.net:8000")
+        XCTAssertEqual(vm.apiToken, "mac-mini-token")
+        XCTAssertEqual(vm.activeBackendProfileID, firstProfileID)
+    }
+
     func testPairingQRCodeImageDecoderDecodesGeneratedQRCode() throws {
         let payload = "mobaile://pair?server_url=http%3A%2F%2F127.0.0.1%3A8000&pair_code=abc123"
         let filter = CIFilter.qrCodeGenerator()
@@ -3236,6 +3292,47 @@ final class VoiceAgentModelTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminalRunStateStillClearsLiveActivityWhenAlreadyMarkedComplete() {
+        let vm = VoiceAgentViewModel()
+        vm.createNewThread()
+        let threadID = try! XCTUnwrap(vm.activeThreadID)
+        let runID = "already-complete-\(UUID().uuidString)"
+        let event = ExecutionEvent(
+            type: "activity.updated",
+            message: "Summarizing the final result.",
+            stage: "summarizing",
+            title: "Summarizing",
+            displayMessage: "Summarizing the final result.",
+            level: "info",
+            eventID: "evt-\(UUID().uuidString)",
+            createdAt: nil
+        )
+
+        vm._test_updateThreadMetadata(
+            threadID: threadID,
+            runID: runID,
+            statusText: "Running...",
+            runStatus: "running",
+            activeRunExecutor: "codex"
+        )
+        vm._test_bindObservedRun(runID: runID, threadID: threadID)
+        vm._test_ingestRunEvents([event], runID: runID, threadID: threadID)
+        vm.summaryText = "Done"
+        vm.didCompleteRun = true
+
+        vm._test_applyTerminalRunState(
+            runID: runID,
+            threadID: threadID,
+            status: "completed",
+            summary: "Done",
+            events: [event]
+        )
+
+        XCTAssertFalse(vm.conversation.contains { $0.presentation == .liveActivity })
+        XCTAssertFalse(vm._test_hasObservedRunContext(runID: runID, threadID: threadID))
+    }
+
+    @MainActor
     func testCompletedRunIDIsNotCancellableWhileNextRunPrepares() {
         let vm = VoiceAgentViewModel()
         vm.createNewThread()
@@ -3549,6 +3646,8 @@ private extension VoiceAgentModelTests {
 
         let cleanup = {
             defaults.removePersistentDomain(forName: suiteName)
+            KeychainStore.delete(service: "MOBaiLE", account: "api_token")
+            KeychainStore.delete(service: "MOBaiLE", account: "refresh_token")
             try? FileManager.default.removeItem(at: baseURL)
         }
 

@@ -85,9 +85,15 @@ def build_agent_prompt(
     if session_sections:
         session_block = "\n\n".join(session_sections) + "\n\n"
         if include_profile_memory:
+            memory_hint = memory_file_hint.strip()
+            session_block += "Persistence guidance:\n"
+            if memory_hint:
+                session_block += f"- If you learn durable facts, update `{memory_hint}`.\n"
+            else:
+                session_block += (
+                    "- This workspace has no staged MEMORY file for this run; treat the memory above as read-only.\n"
+                )
             session_block += (
-                "Persistence guidance:\n"
-                f"- If you learn durable facts, update `{memory_file_hint}`.\n"
                 f"- Do not store MOBaiLE persistence in `{global_agent_home}`.\n"
                 "- Keep notes concise, deduplicated, and non-sensitive.\n\n"
             )

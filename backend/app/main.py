@@ -86,6 +86,7 @@ PROFILE_STORE = ProfileStore(
     profile_id=ENV.profile_id,
     profile_agents_max_chars=ENV.profile_agents_max_chars,
     profile_memory_max_chars=ENV.profile_memory_max_chars,
+    skip_cloud_workdir_staging=ENV.skip_cloud_workdir_profile_staging,
 )
 EXECUTION_SERVICE = ExecutionService(
     environment=ENV,

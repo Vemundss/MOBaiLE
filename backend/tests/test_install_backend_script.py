@@ -75,7 +75,9 @@ def test_install_backend_script_persists_phone_access_and_pairing_urls(tmp_path:
         ),
         encoding="utf-8",
     )
+    (fake_bin / "codex").write_text("#!/usr/bin/env bash\necho codex-cli 0.128.0\n", encoding="utf-8")
     os.chmod(fake_bin / "uv", 0o755)
+    os.chmod(fake_bin / "codex", 0o755)
     os.chmod(fake_bin / "tailscale", 0o755)
 
     env = os.environ.copy()
@@ -145,6 +147,8 @@ def test_install_backend_script_updates_existing_env_file(tmp_path: Path):
         encoding="utf-8",
     )
     os.chmod(fake_bin / "uv", 0o755)
+    (fake_bin / "codex").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    os.chmod(fake_bin / "codex", 0o755)
 
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
@@ -167,7 +171,10 @@ def test_install_backend_script_updates_existing_env_file(tmp_path: Path):
     assert "VOICE_AGENT_HOST=127.0.0.1" in env_contents
     assert "VOICE_AGENT_PHONE_ACCESS_MODE=local" in env_contents
     assert "VOICE_AGENT_SECURITY_MODE=safe" in env_contents
+    assert "VOICE_AGENT_DEFAULT_EXECUTOR=codex" in env_contents
+    assert f"VOICE_AGENT_CODEX_BINARY={fake_bin / 'codex'}" in env_contents
     assert "VOICE_AGENT_USE_RUNTIME_CONTEXT=true" in env_contents
+    assert "VOICE_AGENT_SKIP_CLOUD_WORKDIR_PROFILE_STAGING=true" in env_contents
     assert "VOICE_AGENT_RUNTIME_CONTEXT_FILE=../.mobaile/runtime/RUNTIME_CONTEXT.md" in env_contents
     assert "VOICE_AGENT_CODEX_CONTEXT_FILE=" not in env_contents
 

@@ -114,6 +114,32 @@ def test_agent_run_finalizer_marks_timed_out_runs(tmp_path: Path) -> None:
     assert profile_store.synced_paths == [workdir_memory_path]
 
 
+def test_agent_run_finalizer_describes_superseded_cancelled_runs(tmp_path: Path) -> None:
+    run_state = _run_state(tmp_path)
+    profile_store = _FakeProfileStore()
+    finalizer = AgentRunFinalizer(
+        run_state=run_state,
+        profile_store=profile_store,  # type: ignore[arg-type]
+        timeout_resolver=lambda executor: 60,
+    )
+    workdir_memory_path = tmp_path / "MEMORY.md"
+
+    finalizer.finalize_run(
+        "run-1",
+        executor="codex",
+        outcome=AgentRunOutcome(exit_code=-15, cancelled=True, cancel_reason="superseded"),
+        workdir_memory_path=workdir_memory_path,
+    )
+
+    run = run_state.get_run("run-1")
+    assert run is not None
+    assert run.status == "cancelled"
+    assert run.summary == "Run stopped because a newer prompt started"
+    assert [event.type for event in run.events] == ["action.completed", "run.cancelled"]
+    assert run.events[-1].message == "Run stopped because a newer prompt started"
+    assert profile_store.synced_paths == [workdir_memory_path]
+
+
 def test_agent_run_finalizer_marks_successful_runs_completed(tmp_path: Path) -> None:
     run_state = _run_state(tmp_path)
     profile_store = _FakeProfileStore()

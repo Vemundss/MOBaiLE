@@ -120,7 +120,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var workingDirectory: String = "~"
     @Published var runTimeoutSeconds: String = "0"
     @Published var executor: String = "codex"
-    @Published private(set) var runtimeSettingOverrides: [String: [String: String]] = [:]
+    @Published var runtimeSettingOverrides: [String: [String: String]] = [:]
     @Published var responseMode: String = "concise"
     @Published var agentGuidanceMode: String = "guided"
     @Published var developerMode: Bool = false
@@ -183,6 +183,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     @Published var directoryBrowserMissingPath: String = ""
     @Published var pendingPairing: PendingPairing?
     @Published private(set) var connectionRepairState: ConnectionRepairState?
+    @Published var backendProfiles: [BackendConnectionProfile] = []
+    @Published var activeBackendProfileID: UUID?
     @Published var runPhaseText: String = "Idle"
     @Published var runStartedAt: Date?
     @Published var runEndedAt: Date?
@@ -215,7 +217,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     var pairedRefreshToken: String = ""
     private var lastSubmittedUserMessage: ConversationMessage?
     private var hasSeenMicrophonePrimer = false
-    private var didBootstrapSession = false
+    var didBootstrapSession = false
     var trustedPairHosts: Set<String> = []
     var connectionCandidateServerURLs: [String] = []
     private var didConfigureRemoteCommands = false
@@ -288,7 +290,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
-    private enum DefaultsKey {
+    enum DefaultsKey {
         static let serverURL = "mobaile.server_url"
         static let serverURLCandidates = "mobaile.server_url_candidates"
         static let apiToken = "mobaile.api_token_legacy"
@@ -309,6 +311,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         static let lastVoiceModeThreadID = "mobaile.last_voice_mode_thread_id"
         static let trustedPairHosts = "mobaile.trusted_pair_hosts"
         static let connectionRepairState = "mobaile.connection_repair_state"
+        static let backendProfiles = "mobaile.backend_profiles"
+        static let activeBackendProfileID = "mobaile.active_backend_profile_id"
         static let airPodsClickToRecordEnabled = "mobaile.airpods_click_to_record"
         static let hideDotFoldersInBrowser = "mobaile.hide_dot_folders"
         static let hapticCuesEnabled = "mobaile.haptic_cues_enabled"
@@ -2159,6 +2163,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         defaults.set(autoSendAfterSilenceEnabled, forKey: DefaultsKey.autoSendAfterSilenceEnabled)
         normalizeAutoSendAfterSilenceSetting()
         defaults.set(autoSendAfterSilenceSeconds, forKey: DefaultsKey.autoSendAfterSilenceSeconds)
+        _ = persistCurrentBackendProfile()
         refreshClientConnectionCandidates()
         updateRemoteCommandState()
     }
@@ -2681,7 +2686,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         return values
     }
 
-    private func normalizedRuntimeSettingOverrides(_ raw: [String: [String: String]]) -> [String: [String: String]] {
+    func normalizedRuntimeSettingOverrides(_ raw: [String: [String: String]]) -> [String: [String: String]] {
         var normalized: [String: [String: String]] = [:]
         for (executorID, settings) in raw {
             let normalizedExecutorValue = normalizedExecutor(from: executorID) ?? executorID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -2777,9 +2782,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
     }
 
     func applyTerminalRunStateIfNeeded(_ run: RunRecord, threadID: UUID) {
-        if activeThreadID == threadID, didCompleteRun && summaryText == run.summary {
-            return
-        }
+        let isDuplicateActiveTerminalUpdate = activeThreadID == threadID && didCompleteRun && summaryText == run.summary
         if let context = observedRunContexts[run.runId], !context.hasReceivedFinalAssistantMessage {
             compressLiveActivityIfNeeded(
                 runID: run.runId,
@@ -2816,10 +2819,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             if runEndedAt == nil {
                 runEndedAt = Date()
             }
-            if shouldContinueVoiceMode && run.status == "completed" {
-                scheduleVoiceModeResumeAfterCurrentReply(threadID: threadID, replyText: spokenReply ?? "")
-            } else if let spokenReply {
-                speak(spokenReply)
+            if !isDuplicateActiveTerminalUpdate {
+                if shouldContinueVoiceMode && run.status == "completed" {
+                    scheduleVoiceModeResumeAfterCurrentReply(threadID: threadID, replyText: spokenReply ?? "")
+                } else if let spokenReply {
+                    speak(spokenReply)
+                }
             }
         }
 
@@ -3618,6 +3623,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
         hasSeenMicrophonePrimer = defaults.bool(forKey: DefaultsKey.microphonePrimerSeen)
         trustedPairHosts = Set(defaults.stringArray(forKey: DefaultsKey.trustedPairHosts) ?? [])
+        loadBackendProfiles()
         refreshClientConnectionCandidates()
     }
 
@@ -3653,7 +3659,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         defaults.set("0", forKey: DefaultsKey.runTimeoutSeconds)
     }
 
-    private func clearRuntimeConfiguration() {
+    func clearRuntimeConfiguration() {
         backendSecurityMode = "unknown"
         backendDefaultExecutor = "codex"
         backendAvailableExecutors = ["codex"]

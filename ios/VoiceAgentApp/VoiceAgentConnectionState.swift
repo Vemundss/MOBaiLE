@@ -379,6 +379,15 @@ extension VoiceAgentViewModel {
         connectionCandidateServerURLs
     }
 
+    var activeBackendProfileName: String {
+        guard let activeBackendProfileID,
+              let profile = backendProfiles.first(where: { $0.id == activeBackendProfileID }) else {
+            return backendProfileName(for: normalizedServerURL)
+        }
+        let trimmed = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? profile.hostLabel : trimmed
+    }
+
     var needsConnectionRepair: Bool {
         connectionRepairState != nil
     }
@@ -507,15 +516,214 @@ extension VoiceAgentViewModel {
     func clearConnectionRepairState() {
         setConnectionRepairState(nil)
     }
+
+    @discardableResult
+    func saveCurrentBackendProfile() -> BackendConnectionProfile? {
+        persistCurrentBackendProfile()
+    }
+
+    func switchBackendProfile(_ profileID: UUID) {
+        guard let profile = backendProfiles.first(where: { $0.id == profileID }) else { return }
+        if activeBackendProfileID != profileID {
+            _ = persistCurrentBackendProfile()
+        }
+        applyBackendProfile(profile)
+        persistSettings()
+    }
+
+    func forgetActiveBackendProfile() {
+        guard let activeBackendProfileID else { return }
+        backendProfiles.removeAll { $0.id == activeBackendProfileID }
+        KeychainStore.delete(service: "MOBaiLE", account: profileAPITokenAccount(activeBackendProfileID))
+        KeychainStore.delete(service: "MOBaiLE", account: profileRefreshTokenAccount(activeBackendProfileID))
+        if let next = backendProfiles.first {
+            applyBackendProfile(next)
+        } else {
+            self.activeBackendProfileID = nil
+            serverURL = ""
+            connectionCandidateServerURLs = []
+            apiToken = ""
+            pairedRefreshToken = ""
+            clearRuntimeConfiguration()
+            clearConnectionRepairState()
+            refreshClientConnectionCandidates()
+        }
+        persistSettings()
+    }
+
     func normalized(_ rawURL: String) -> String {
         rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 }
 
-private extension VoiceAgentViewModel {
+extension VoiceAgentViewModel {
     var normalizedRefreshToken: String {
         pairedRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func loadBackendProfiles() {
+        if let data = defaults.data(forKey: DefaultsKey.backendProfiles),
+           let decoded = try? JSONDecoder().decode([BackendConnectionProfile].self, from: data) {
+            backendProfiles = normalizedBackendProfiles(decoded)
+        }
+        if let rawID = defaults.string(forKey: DefaultsKey.activeBackendProfileID),
+           let uuid = UUID(uuidString: rawID),
+           backendProfiles.contains(where: { $0.id == uuid }) {
+            activeBackendProfileID = uuid
+        }
+
+        if backendProfiles.isEmpty {
+            if hasConfiguredConnection {
+                _ = persistCurrentBackendProfile()
+            }
+            return
+        }
+
+        let selectedID = activeBackendProfileID ?? backendProfiles.first?.id
+        guard let selectedID,
+              let profile = backendProfiles.first(where: { $0.id == selectedID }) else {
+            return
+        }
+        applyBackendProfile(profile, persistSelection: false)
+    }
+
+    func persistCurrentBackendProfile() -> BackendConnectionProfile? {
+        let normalizedServer = normalizedServerURL
+        guard !normalizedServer.isEmpty else {
+            saveBackendProfiles()
+            return nil
+        }
+
+        let now = Date()
+        let activeExisting = activeBackendProfileID.flatMap { id in
+            backendProfiles.first(where: { $0.id == id })
+        }
+        let shouldReplaceActive = activeExisting.map { normalized($0.serverURL) == normalizedServer } ?? false
+        let profileID = shouldReplaceActive ? (activeBackendProfileID ?? UUID()) : UUID()
+        let existing = backendProfiles.first(where: { $0.id == profileID })
+        let candidates = connectionCandidateServerURLs.isEmpty
+            ? normalizedServerURLs(preferredServerURL: normalizedServer)
+            : normalizedServerURLs(preferredServerURL: normalizedServer, additionalServerURLs: connectionCandidateServerURLs)
+        let profile = BackendConnectionProfile(
+            id: profileID,
+            name: existing?.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? existing?.name ?? backendProfileName(for: normalizedServer)
+                : backendProfileName(for: normalizedServer),
+            serverURL: normalizedServer,
+            serverURLs: candidates,
+            sessionID: sessionID,
+            workingDirectory: workingDirectory,
+            executor: executor,
+            runtimeSettingOverrides: runtimeSettingOverrides,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now
+        )
+
+        if let index = backendProfiles.firstIndex(where: { $0.id == profileID }) {
+            backendProfiles[index] = profile
+        } else {
+            backendProfiles.append(profile)
+        }
+        activeBackendProfileID = profileID
+        saveProfileCredentials(profileID)
+        saveBackendProfiles()
+        return profile
+    }
+
+    func applyBackendProfile(_ profile: BackendConnectionProfile, persistSelection: Bool = true) {
+        activeBackendProfileID = profile.id
+        serverURL = profile.serverURL
+        connectionCandidateServerURLs = normalizedServerURLs(
+            preferredServerURL: profile.serverURL,
+            additionalServerURLs: profile.serverURLs
+        )
+        preferHighestReachabilityServerURL()
+        sessionID = profile.sessionID
+        workingDirectory = profile.workingDirectory
+        executor = profile.executor
+        runtimeSettingOverrides = normalizedRuntimeSettingOverrides(profile.runtimeSettingOverrides)
+        apiToken = KeychainStore.load(service: "MOBaiLE", account: profileAPITokenAccount(profile.id)) ?? ""
+        pairedRefreshToken = KeychainStore.load(service: "MOBaiLE", account: profileRefreshTokenAccount(profile.id)) ?? ""
+        clearConnectionRepairState()
+        clearRuntimeConfiguration()
+        didBootstrapSession = false
+        lastHydratedSessionContextID = nil
+        lastHydratedSessionContextServerURL = nil
+        refreshClientConnectionCandidates()
+        if persistSelection {
+            defaults.set(profile.id.uuidString, forKey: DefaultsKey.activeBackendProfileID)
+        }
+    }
+
+    func saveBackendProfiles() {
+        backendProfiles = normalizedBackendProfiles(backendProfiles)
+        if let data = try? JSONEncoder().encode(backendProfiles) {
+            defaults.set(data, forKey: DefaultsKey.backendProfiles)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.backendProfiles)
+        }
+        if let activeBackendProfileID {
+            defaults.set(activeBackendProfileID.uuidString, forKey: DefaultsKey.activeBackendProfileID)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.activeBackendProfileID)
+        }
+    }
+
+    func normalizedBackendProfiles(_ profiles: [BackendConnectionProfile]) -> [BackendConnectionProfile] {
+        var seen: Set<UUID> = []
+        return profiles.compactMap { profile in
+            guard seen.insert(profile.id).inserted else { return nil }
+            let serverURL = normalized(profile.serverURL)
+            guard !serverURL.isEmpty else { return nil }
+            var next = profile
+            next.serverURL = serverURL
+            next.serverURLs = normalizedServerURLs(preferredServerURL: serverURL, additionalServerURLs: profile.serverURLs)
+            next.sessionID = profile.sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "iphone-app"
+                : profile.sessionID
+            next.workingDirectory = profile.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "~"
+                : profile.workingDirectory
+            next.executor = normalizedExecutor(from: profile.executor) ?? "codex"
+            next.runtimeSettingOverrides = normalizedRuntimeSettingOverrides(profile.runtimeSettingOverrides)
+            if next.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                next.name = backendProfileName(for: serverURL)
+            }
+            return next
+        }
+    }
+
+    func saveProfileCredentials(_ profileID: UUID) {
+        let trimmedToken = apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedToken.isEmpty {
+            KeychainStore.delete(service: "MOBaiLE", account: profileAPITokenAccount(profileID))
+        } else {
+            KeychainStore.save(value: trimmedToken, service: "MOBaiLE", account: profileAPITokenAccount(profileID))
+        }
+
+        let trimmedRefreshToken = pairedRefreshToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedRefreshToken.isEmpty {
+            KeychainStore.delete(service: "MOBaiLE", account: profileRefreshTokenAccount(profileID))
+        } else {
+            KeychainStore.save(value: trimmedRefreshToken, service: "MOBaiLE", account: profileRefreshTokenAccount(profileID))
+        }
+    }
+
+    func profileAPITokenAccount(_ profileID: UUID) -> String {
+        "api_token.\(profileID.uuidString)"
+    }
+
+    func profileRefreshTokenAccount(_ profileID: UUID) -> String {
+        "refresh_token.\(profileID.uuidString)"
+    }
+
+    func backendProfileName(for serverURL: String) -> String {
+        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let host = URL(string: trimmed)?.host, !host.isEmpty else {
+            return trimmed.isEmpty ? "Backend" : trimmed
+        }
+        return host
     }
 
     func validatedPairingURLCandidate(_ candidate: String) -> URL? {

@@ -60,6 +60,20 @@ print(secrets.token_urlsafe(10))
 PY
 }
 
+detect_codex_binary() {
+  local codex_path=""
+  if command -v codex > /dev/null 2>&1; then
+    codex_path="$(command -v codex)"
+  fi
+  if [[ -z "${codex_path}" && "$(uname -s)" == "Darwin" && -x "/Applications/Codex.app/Contents/Resources/codex" ]]; then
+    codex_path="/Applications/Codex.app/Contents/Resources/codex"
+  fi
+  if [[ -z "${codex_path}" ]]; then
+    codex_path="codex"
+  fi
+  printf "%s\n" "${codex_path}"
+}
+
 pair_code_expiry() {
   PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - << 'PY'
 from datetime import datetime, timedelta, timezone
@@ -149,10 +163,13 @@ write_env_file() {
   local host_value="127.0.0.1"
   local public_url_value="${PUBLIC_SERVER_URL%/}"
   local phone_access_value="${PHONE_ACCESS_MODE}"
+  local default_executor_value="codex"
+  local codex_binary_value
   local codex_home_value="${HOME}/.codex"
   local codex_model_value="auto"
   local codex_search_value="true"
   local use_runtime_context_value="true"
+  local skip_cloud_profile_staging_value="true"
   local context_file_value="../.mobaile/runtime/RUNTIME_CONTEXT.md"
   local playwright_output_value="data/playwright"
   local playwright_profile_value="data/playwright-profile"
@@ -163,6 +180,7 @@ write_env_file() {
     codex_unrestricted="true"
     allow_abs_reads="true"
   fi
+  codex_binary_value="$(detect_codex_binary)"
   if [[ -f "${ENV_FILE}" ]]; then
     if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
       echo "Keeping existing ${ENV_FILE}"
@@ -176,10 +194,13 @@ write_env_file() {
       -v host="${host_value}" \
       -v public_url="${public_url_value}" \
       -v phone_access="${phone_access_value}" \
+      -v default_executor="${default_executor_value}" \
+      -v codex_binary="${codex_binary_value}" \
       -v codex_home="${codex_home_value}" \
       -v codex_model="${codex_model_value}" \
       -v codex_search="${codex_search_value}" \
       -v use_runtime_context="${use_runtime_context_value}" \
+      -v skip_cloud_profile_staging="${skip_cloud_profile_staging_value}" \
       -v context_file="${context_file_value}" \
       -v playwright_output="${playwright_output_value}" \
       -v playwright_profile="${playwright_profile_value}" \
@@ -191,10 +212,13 @@ write_env_file() {
         seen_host=0
         seen_public_url=0
         seen_phone_access=0
+        seen_default_executor=0
+        seen_codex_binary=0
         seen_codex_home=0
         seen_codex_model=0
         seen_codex_search=0
         seen_use_runtime_context=0
+        seen_skip_cloud_profile_staging=0
         seen_context_file=0
         seen_playwright_output=0
         seen_playwright_profile=0
@@ -219,6 +243,16 @@ write_env_file() {
       /^VOICE_AGENT_PHONE_ACCESS_MODE=/ {
         print "VOICE_AGENT_PHONE_ACCESS_MODE=" phone_access
         seen_phone_access=1
+        next
+      }
+      /^VOICE_AGENT_DEFAULT_EXECUTOR=/ {
+        print "VOICE_AGENT_DEFAULT_EXECUTOR=" default_executor
+        seen_default_executor=1
+        next
+      }
+      /^VOICE_AGENT_CODEX_BINARY=/ {
+        print "VOICE_AGENT_CODEX_BINARY=" codex_binary
+        seen_codex_binary=1
         next
       }
       /^VOICE_AGENT_CODEX_UNRESTRICTED=/ {
@@ -249,6 +283,11 @@ write_env_file() {
       /^VOICE_AGENT_USE_RUNTIME_CONTEXT=/ {
         seen_use_runtime_context=1
         print
+        next
+      }
+      /^VOICE_AGENT_SKIP_CLOUD_WORKDIR_PROFILE_STAGING=/ {
+        seen_skip_cloud_profile_staging=1
+        print "VOICE_AGENT_SKIP_CLOUD_WORKDIR_PROFILE_STAGING=" skip_cloud_profile_staging
         next
       }
       /^VOICE_AGENT_CODEX_USE_CONTEXT=/ {
@@ -287,12 +326,15 @@ write_env_file() {
         if (!seen_mode) print "VOICE_AGENT_SECURITY_MODE=" mode
         if (!seen_public_url && public_url != "") print "VOICE_AGENT_PUBLIC_SERVER_URL=" public_url
         if (!seen_phone_access) print "VOICE_AGENT_PHONE_ACCESS_MODE=" phone_access
+        if (!seen_default_executor) print "VOICE_AGENT_DEFAULT_EXECUTOR=" default_executor
+        if (!seen_codex_binary) print "VOICE_AGENT_CODEX_BINARY=" codex_binary
         if (!seen_codex) print "VOICE_AGENT_CODEX_UNRESTRICTED=" codex
         if (!seen_reads) print "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=" reads
         if (!seen_codex_home) print "VOICE_AGENT_CODEX_HOME=" codex_home
         if (!seen_codex_model) print "VOICE_AGENT_CODEX_MODEL=" codex_model
         if (!seen_codex_search) print "VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=" codex_search
         if (!seen_use_runtime_context) print "VOICE_AGENT_USE_RUNTIME_CONTEXT=" use_runtime_context
+        if (!seen_skip_cloud_profile_staging) print "VOICE_AGENT_SKIP_CLOUD_WORKDIR_PROFILE_STAGING=" skip_cloud_profile_staging
         if (!seen_context_file) print "VOICE_AGENT_RUNTIME_CONTEXT_FILE=" context_file
         if (!seen_playwright_output) print "VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=" playwright_output
         if (!seen_playwright_profile) print "VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=" playwright_profile
@@ -317,7 +359,7 @@ EOF
   fi
   cat >> "${ENV_FILE}" << EOF
 VOICE_AGENT_DEFAULT_EXECUTOR=codex
-VOICE_AGENT_CODEX_BINARY=codex
+VOICE_AGENT_CODEX_BINARY=${codex_binary_value}
 VOICE_AGENT_CODEX_HOME=${codex_home_value}
 VOICE_AGENT_CODEX_MODEL=${codex_model_value}
 VOICE_AGENT_CODEX_UNRESTRICTED=${codex_unrestricted}
@@ -325,6 +367,7 @@ VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=${codex_search_value}
 VOICE_AGENT_CODEX_GUARDRAILS=warn
 VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]
 VOICE_AGENT_USE_RUNTIME_CONTEXT=${use_runtime_context_value}
+VOICE_AGENT_SKIP_CLOUD_WORKDIR_PROFILE_STAGING=${skip_cloud_profile_staging_value}
 VOICE_AGENT_RUNTIME_CONTEXT_FILE=${context_file_value}
 # Optional Claude Code support:
 VOICE_AGENT_CLAUDE_BINARY=claude

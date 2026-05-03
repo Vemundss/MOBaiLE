@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
+from app.cloud_paths import is_cloud_synced_path
+
 CodexResumeFailureReason = Literal["stale_session"]
 
 
@@ -16,8 +18,10 @@ class CodexExecutor:
         *,
         codex_home: Path | None = None,
         enable_web_search: bool | None = None,
+        launch_cwd: Path | None = None,
     ) -> None:
         self.workdir = workdir.resolve()
+        self.launch_cwd = (launch_cwd or self.workdir).resolve()
         self.binary = binary or os.getenv("VOICE_AGENT_CODEX_BINARY", "codex")
         codex_home_raw = os.getenv("VOICE_AGENT_CODEX_HOME", "").strip()
         self.codex_home = codex_home or (Path(codex_home_raw).expanduser().resolve() if codex_home_raw else None)
@@ -42,6 +46,7 @@ class CodexExecutor:
         reasoning_effort_override: str | None = None,
         env_overrides: dict[str, str] | None = None,
     ) -> subprocess.Popen[str]:
+        prompt = self._launch_prompt(prompt)
         cmd = self._build_command(
             prompt,
             resume_session_id=resume_session_id,
@@ -55,7 +60,7 @@ class CodexExecutor:
             env.update(env_overrides)
         return subprocess.Popen(
             cmd,
-            cwd=str(self.workdir),
+            cwd=str(self.launch_cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -90,6 +95,23 @@ class CodexExecutor:
             cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
         cmd.append(prompt)
         return cmd
+
+    def _launch_prompt(self, prompt: str) -> str:
+        if self.launch_cwd == self.workdir:
+            return prompt
+        return (
+            "MOBaiLE launch note:\n"
+            f"- The requested project root is `{self.workdir}`.\n"
+            f"- This Codex process was launched from `{self.launch_cwd}` to avoid cloud-drive cwd startup stalls.\n"
+            "- Treat the requested project root as the working directory; use absolute paths or `cd` there inside commands when needed.\n\n"
+            f"{prompt}"
+        )
+
+    @staticmethod
+    def cloud_safe_launch_cwd(workdir: Path, fallback_cwd: Path) -> Path | None:
+        if is_cloud_synced_path(workdir):
+            return fallback_cwd
+        return None
 
     @staticmethod
     def classify_resume_failure(message: str) -> CodexResumeFailureReason | None:

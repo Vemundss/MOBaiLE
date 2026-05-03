@@ -2,6 +2,7 @@
 set -euo pipefail
 
 LABEL="com.mobile.voiceagent.backend"
+KEEP_AWAKE_LABEL="com.mobile.voiceagent.keepawake"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BACKEND_DIR="${REPO_ROOT}/backend"
@@ -11,6 +12,7 @@ LOG_DIR="${RUNTIME_DIR}/logs"
 WARMUP_SCRIPT="${REPO_ROOT}/scripts/warmup_capabilities.sh"
 WARMUP_ON_START="${VOICE_AGENT_WARMUP_ON_START:-true}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+KEEP_AWAKE_PLIST_PATH="${HOME}/Library/LaunchAgents/${KEEP_AWAKE_LABEL}.plist"
 DOMAIN="gui/$(id -u)"
 
 usage() {
@@ -27,6 +29,9 @@ Commands:
   status     Show launchd service state
   logs       Tail backend service logs
   warmup     Run capability warmup against current backend
+  keep-awake-install    Keep this Mac reachable while logged in
+  keep-awake-uninstall  Remove the keep-awake launch agent
+  keep-awake-status     Show keep-awake launch agent state
 EOF
 }
 
@@ -208,6 +213,33 @@ write_plist() {
 EOF
 }
 
+write_keep_awake_plist() {
+  mkdir -p "${HOME}/Library/LaunchAgents" "${LOG_DIR}"
+  cat > "${KEEP_AWAKE_PLIST_PATH}" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${KEEP_AWAKE_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/caffeinate</string>
+      <string>-ims</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${LOG_DIR}/keepawake.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_DIR}/keepawake.err.log</string>
+  </dict>
+</plist>
+EOF
+}
+
 run_warmup_if_enabled() {
   if [[ "${WARMUP_ON_START}" != "true" ]]; then
     return
@@ -239,6 +271,10 @@ run_warmup_if_enabled() {
 
 bootout_if_loaded() {
   launchctl bootout "${DOMAIN}" "${PLIST_PATH}" > /dev/null 2>&1 || true
+}
+
+bootout_keep_awake_if_loaded() {
+  launchctl bootout "${DOMAIN}" "${KEEP_AWAKE_PLIST_PATH}" > /dev/null 2>&1 || true
 }
 
 install_service() {
@@ -291,6 +327,29 @@ logs_service() {
   tail -n 80 -f "${LOG_DIR}/backend.out.log" "${LOG_DIR}/backend.err.log"
 }
 
+install_keep_awake_service() {
+  write_keep_awake_plist
+  bootout_keep_awake_if_loaded
+  launchctl bootstrap "${DOMAIN}" "${KEEP_AWAKE_PLIST_PATH}"
+  launchctl enable "${DOMAIN}/${KEEP_AWAKE_LABEL}" || true
+  launchctl kickstart -k "${DOMAIN}/${KEEP_AWAKE_LABEL}"
+  echo "Keep-awake service installed and running."
+}
+
+uninstall_keep_awake_service() {
+  bootout_keep_awake_if_loaded
+  rm -f "${KEEP_AWAKE_PLIST_PATH}"
+  echo "Keep-awake service removed."
+}
+
+status_keep_awake_service() {
+  if launchctl print "${DOMAIN}/${KEEP_AWAKE_LABEL}" > /dev/null 2>&1; then
+    launchctl print "${DOMAIN}/${KEEP_AWAKE_LABEL}" | sed -n '1,80p'
+  else
+    echo "${KEEP_AWAKE_LABEL} is not loaded"
+  fi
+}
+
 is_truthy() {
   case "${1:-}" in
     1 | true | TRUE | yes | YES | on | ON) return 0 ;;
@@ -327,7 +386,7 @@ defer_restart_if_needed() {
   interval_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_POLL_INTERVAL_SEC:-2}" "2")"
   fallback_delay_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_FALLBACK_DELAY_SEC:-60}" "60")"
 
-  python3 - "${run_id}" "${db_path}" "${script_path}" "${timeout_sec}" "${interval_sec}" "${fallback_delay_sec}" << 'PY'
+  python3 - "${run_id}" "${db_path}" "${script_path}" "${timeout_sec}" "${interval_sec}" "${fallback_delay_sec}" "${DOMAIN}" "${LABEL}" << 'PY'
 from __future__ import annotations
 
 import os
@@ -336,7 +395,7 @@ import subprocess
 import sys
 import textwrap
 
-run_id, db_path, script_path, timeout_sec, interval_sec, fallback_delay_sec = sys.argv[1:7]
+run_id, db_path, script_path, timeout_sec, interval_sec, fallback_delay_sec, launchd_domain, launchd_label = sys.argv[1:9]
 child = r"""
 from __future__ import annotations
 
@@ -363,7 +422,7 @@ def non_negative_int(value: str, default: int) -> int:
     return parsed if parsed >= 0 else default
 
 
-run_id, db_path, script_path, timeout_raw, interval_raw, fallback_raw = sys.argv[1:7]
+run_id, db_path, script_path, timeout_raw, interval_raw, fallback_raw, launchd_domain, launchd_label = sys.argv[1:9]
 timeout_sec = non_negative_int(timeout_raw, 3600)
 interval_sec = positive_int(interval_raw, 2)
 fallback_delay_sec = non_negative_int(fallback_raw, 60)
@@ -400,6 +459,25 @@ for key in (
 ):
     env.pop(key, None)
 env["MOBAILE_RESTART_NOW"] = "1"
+
+service_target = f"{launchd_domain}/{launchd_label}" if launchd_domain and launchd_label else ""
+if service_target:
+    service_is_loaded = subprocess.run(
+        ["launchctl", "print", service_target],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode == 0
+    if service_is_loaded:
+        kickstart = subprocess.run(
+            ["launchctl", "kickstart", "-k", service_target],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if kickstart.returncode == 0:
+            raise SystemExit(0)
+
 subprocess.run(
     ["bash", script_path, "restart"],
     env=env,
@@ -421,6 +499,8 @@ subprocess.Popen(
         timeout_sec,
         interval_sec,
         fallback_delay_sec,
+        launchd_domain,
+        launchd_label,
     ],
     stdin=subprocess.DEVNULL,
     stdout=subprocess.DEVNULL,
@@ -451,6 +531,9 @@ main() {
       ;;
     start) start_service ;;
     stop) stop_service ;;
+    keep-awake-install) install_keep_awake_service ;;
+    keep-awake-uninstall) uninstall_keep_awake_service ;;
+    keep-awake-status) status_keep_awake_service ;;
     restart)
       if defer_restart_if_needed; then
         return

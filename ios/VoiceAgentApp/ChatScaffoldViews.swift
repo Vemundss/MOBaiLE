@@ -969,7 +969,13 @@ private func logEventDescriptor(for event: ExecutionEvent) -> LogEventDescriptor
     case "run.blocked":
         return LogEventDescriptor(title: "Needs Input", systemImage: "hand.raised.fill", tint: .orange, usesMonospacedBody: false)
     case "run.cancelled":
-        return LogEventDescriptor(title: "Run Cancelled", systemImage: "slash.circle.fill", tint: .secondary, usesMonospacedBody: false)
+        let isSuperseded = lowerMessage.contains("newer prompt")
+        return LogEventDescriptor(
+            title: isSuperseded ? "Run Superseded" : "Run Cancelled",
+            systemImage: "slash.circle.fill",
+            tint: .secondary,
+            usesMonospacedBody: false
+        )
     case "log.message":
         return LogEventDescriptor(title: "Internal Log", systemImage: "doc.plaintext", tint: .secondary, usesMonospacedBody: true)
     default:

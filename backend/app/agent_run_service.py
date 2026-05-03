@@ -85,7 +85,7 @@ class AgentRunService:
             profile_memory=profile_memory,
             include_profile_agents=include_profile_agents,
             include_profile_memory=include_profile_memory,
-            memory_file_hint=".mobaile/MEMORY.md",
+            memory_file_hint=".mobaile/MEMORY.md" if workdir_memory_path is not None else "",
         )
         normalized_client_thread_id = (client_thread_id or "").strip() or None
         resume_session_id: str | None = None
@@ -339,11 +339,13 @@ class AgentRunService:
 
     def _make_agent_executor(self, executor: AgentExecutorName, workdir: Path) -> CodexExecutor | ClaudeExecutor:
         if executor == "codex":
+            fallback_cwd = getattr(self.environment, "backend_root", workdir)
             return CodexExecutor(
                 workdir,
                 binary=self.environment.codex_binary,
                 codex_home=self.environment.codex_home,
                 enable_web_search=self.environment.codex_enable_web_search,
+                launch_cwd=CodexExecutor.cloud_safe_launch_cwd(workdir, fallback_cwd),
             )
         if executor == "claude":
             return ClaudeExecutor(workdir)

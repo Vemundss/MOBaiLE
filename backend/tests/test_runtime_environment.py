@@ -42,6 +42,7 @@ def test_runtime_environment_defaults_to_safe_and_unbounded_agent_timeout(monkey
     assert env.codex_model_override == "gpt-5.4"
     assert env.codex_timeout_sec == 0
     assert env.claude_timeout_sec == 0
+    assert env.skip_cloud_workdir_profile_staging is True
 
 
 def test_runtime_environment_reads_phone_access_mode(monkeypatch, tmp_path: Path):
@@ -83,3 +84,14 @@ def test_minimal_agent_prompt_omits_phone_feedback_guidance() -> None:
     )
 
     assert "Phone UX feedback guidance:" not in prompt
+
+
+def test_agent_prompt_handles_unstaged_profile_memory() -> None:
+    prompt = build_agent_prompt(
+        "Fix the bug",
+        profile_memory="Durable note",
+        memory_file_hint="",
+    )
+
+    assert "This workspace has no staged MEMORY file for this run" in prompt
+    assert "update ``" not in prompt

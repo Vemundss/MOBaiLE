@@ -43,7 +43,7 @@ If you want the shortest path, do this:
 4. Point the phone at the screen, confirm the pairing, and send a small prompt.
 5. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
-When you want the latest installed CLI/backend later, run `mobaile update`.
+On macOS, run `mobaile awake` if this computer should stay reachable while you are logged in. When you want the latest installed CLI/backend later, run `mobaile update`.
 
 `install.sh` installs or updates MOBaiLE in `~/MOBaiLE`, configures the backend, creates the pairing QR, keeps the service running in the background when supported, and installs the `mobaile` command for status, pairing, and logs.
 

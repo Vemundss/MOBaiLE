@@ -294,7 +294,7 @@ class UtteranceService:
         if previous_status != "running":
             return
         try:
-            self.run_state.request_cancel(previous_run_id)
+            self.run_state.request_cancel(previous_run_id, reason="superseded")
         except (KeyError, ValueError):
             return
         self.execution_service.terminate_active_process(previous_run_id)

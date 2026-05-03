@@ -19,6 +19,7 @@ from app.run_state import RunState
 class AgentRunOutcome:
     exit_code: int
     cancelled: bool = False
+    cancel_reason: str | None = None
     timed_out: bool = False
     blocked: bool = False
     resume_failure_reason: str | None = None
@@ -102,7 +103,7 @@ class AgentRunFinalizer:
             )
 
         if outcome.cancelled:
-            summary = "Run cancelled by user"
+            summary = self._cancelled_summary(outcome.cancel_reason)
             self.run_state.append_event(run_id, ExecutionEvent(type="run.cancelled", message=summary))
             self.run_state.set_run_status(run_id, "cancelled", summary)
             self.profile_store.sync_memory_from_workdir(workdir_memory_path)
@@ -197,3 +198,9 @@ class AgentRunFinalizer:
         )
         self.run_state.set_run_status(run_id, "completed" if success else "failed", summary)
         self.profile_store.sync_memory_from_workdir(workdir_memory_path)
+
+    @staticmethod
+    def _cancelled_summary(reason: str | None) -> str:
+        if reason == "superseded":
+            return "Run stopped because a newer prompt started"
+        return "Run cancelled by user"

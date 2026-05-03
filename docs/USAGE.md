@@ -57,6 +57,14 @@ mobaile status
 
 If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
+On macOS, keep the host reachable while you are logged in:
+
+```bash
+mobaile awake
+```
+
+This installs a small launchd `caffeinate` agent. Check it with `mobaile awake-status`; remove it later with `mobaile sleep`.
+
 When you want the latest MOBaiLE updates later, run:
 
 ```bash
@@ -130,6 +138,7 @@ Service management:
 ```bash
 # macOS
 bash ./scripts/service_macos.sh status
+bash ./scripts/service_macos.sh keep-awake-status
 bash ./scripts/service_macos.sh sync
 bash ./scripts/service_macos.sh restart
 bash ./scripts/service_macos.sh logs
@@ -148,6 +157,7 @@ Notes:
 - Linux service management uses `systemd --user`; on headless hosts you may need `sudo loginctl enable-linger $USER` for reboot persistence.
 - Run `sync` after backend code/config changes, then `restart`.
 - When `restart` is launched from inside an active MOBaiLE agent run, the service defers the actual restart until that run finishes so the phone can receive the final result.
+- On macOS, `mobaile awake` installs a user LaunchAgent running `/usr/bin/caffeinate -ims`; it prevents system idle sleep while your user session is logged in, but it is not a substitute for power, network, or OS-login availability after a reboot.
 
 ## 3) Try the current flow
 
@@ -228,6 +238,7 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_SECURITY_MODE=safe|full-access` controls security defaults.
 - `VOICE_AGENT_DEFAULT_EXECUTOR=codex|claude|local` selects the app/backend default executor.
   - if the selected agent CLI is unavailable, backend falls back to another available agent executor and finally to the internal `local` fallback
+- `VOICE_AGENT_CODEX_BINARY=/path/to/codex` selects the Codex CLI. The installer prefers `codex` from `PATH`, then `/Applications/Codex.app/Contents/Resources/codex` on macOS.
 - `VOICE_AGENT_CODEX_HOME=~/.codex` selects the Codex home used for auth and MCP config.
 - `VOICE_AGENT_CODEX_UNRESTRICTED=true` enables unrestricted Codex execution (recommended only for private trusted hosts).
 - `VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH=true` enables Codex live web search for backend-launched runs.
@@ -238,6 +249,7 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_TIMEOUT_SEC=<seconds>` optionally sets max runtime per Codex run before backend fails it; the default `0` disables the backend executor timeout.
 - `VOICE_AGENT_USE_RUNTIME_CONTEXT=true` prepends MOBaiLE runtime context to backend-launched agent prompts.
 - `VOICE_AGENT_RUNTIME_CONTEXT_FILE=../.mobaile/runtime/RUNTIME_CONTEXT.md` points to the repo-local runtime context file.
+- `VOICE_AGENT_SKIP_CLOUD_WORKDIR_PROFILE_STAGING=true` avoids writing MOBaiLE profile files into iCloud-backed workdirs. Codex is launched from the stable backend runtime directory for those paths and receives the requested project root in its prompt, which avoids CloudDocs cwd startup stalls while still targeting the chosen repo.
 - `VOICE_AGENT_CLAUDE_BINARY=claude` selects the Claude Code CLI binary.
 - `VOICE_AGENT_CLAUDE_MODEL=<model-id>` optionally forces a Claude model.
 - `VOICE_AGENT_CLAUDE_TIMEOUT_SEC=<seconds>` optionally sets max runtime per Claude run before backend fails it; the default inherits the Codex timeout, so `0` disables the backend executor timeout.
@@ -378,7 +390,7 @@ After install + service start:
 mobaile doctor
 ```
 
-`mobaile doctor` checks the active installed backend, the fresh pair code, the QR image, the advertised phone URLs, and `/health` on each advertised URL. In Tailscale mode it fails if the active QR advertises a Wi-Fi-only fallback or only a raw `100.x` Tailscale IP, because those paths can hide a broken cellular path or trigger iOS transport blocking.
+`mobaile doctor` checks the active installed backend, the fresh pair code, the QR image, the advertised phone URLs, `/health` on each advertised URL, Codex executor readiness, and the macOS keep-awake state. In Tailscale mode it fails if the active QR advertises a Wi-Fi-only fallback or only a raw `100.x` Tailscale IP, because those paths can hide a broken cellular path or trigger iOS transport blocking.
 
 To test an authenticated run from the computer side:
 
@@ -431,6 +443,7 @@ Notes:
 - App now confirms pairing details before applying server/session changes.
 - A fresh one-time pair-code QR is treated as an explicit trust action in the app; the app can remember all advertised hosts for that computer after a successful pair.
 - Pairing can advertise multiple candidate server URLs; the app stores them and automatically retries another endpoint if the current host stops responding. In Tailscale mode the app prefers `*.ts.net` MagicDNS over raw `100.x` IPs so release builds stay on the iOS-permitted HTTP path.
+- Pairing another computer creates another saved backend profile. In MOBaiLE Settings, use the `Backend` picker to switch hosts without retyping tokens; `Save` refreshes the current profile and `Forget` removes the selected saved backend.
 - Non-local servers must use `https://` for pairing.
 - Legacy `api_token` pairing links are disabled by default (developer-mode fallback only).
 

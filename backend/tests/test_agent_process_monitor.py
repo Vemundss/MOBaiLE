@@ -129,7 +129,7 @@ def test_agent_process_monitor_stops_cancelled_runs(tmp_path: Path) -> None:
         leak_marker_provider=lambda: [],
     )
     proc = _FakeProcess([], complete_on_drain=False)
-    run_state.request_cancel("run-1")
+    run_state.request_cancel("run-1", reason="superseded")
 
     outcome = monitor.monitor(
         proc,  # type: ignore[arg-type]
@@ -142,6 +142,7 @@ def test_agent_process_monitor_stops_cancelled_runs(tmp_path: Path) -> None:
     )
 
     assert outcome.cancelled is True
+    assert outcome.cancel_reason == "superseded"
     assert proc._terminated is True
 
 

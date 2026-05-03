@@ -378,6 +378,7 @@ def test_utterance_service_cancels_superseded_running_latest_run(monkeypatch, tm
 
     assert result.status == "accepted"
     assert run_state.is_cancelled("run-old") is True
+    assert run_state.cancel_reason("run-old") == "superseded"
     assert execution.terminated_run_ids == ["run-old"]
     assert launched[0][0] == "run_agent"
 

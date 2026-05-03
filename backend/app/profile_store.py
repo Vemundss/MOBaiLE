@@ -4,6 +4,8 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.cloud_paths import is_cloud_synced_path
+
 LEGACY_SESSION_PROFILE_COMPAT_REMOVE_AFTER = "2026-07-01"
 
 DEFAULT_PROFILE_AGENTS = """# MOBaiLE AGENTS
@@ -46,6 +48,7 @@ class ProfileStore:
     profile_memory_max_chars: int
     default_profile_agents: str = DEFAULT_PROFILE_AGENTS
     default_profile_memory: str = DEFAULT_PROFILE_MEMORY
+    skip_cloud_workdir_staging: bool = True
 
     def __post_init__(self) -> None:
         self.profile_state_root.mkdir(parents=True, exist_ok=True)
@@ -71,6 +74,8 @@ class ProfileStore:
         include_agents: bool = True,
         include_memory: bool = True,
     ) -> Path | None:
+        if self.skip_cloud_workdir_staging and is_cloud_synced_path(workdir):
+            return None
         agents_path, memory_path = self.ensure_files(session_id_hint=session_id_hint)
         mobaile_dir = (workdir / ".mobaile").resolve()
         mobaile_dir.mkdir(parents=True, exist_ok=True)

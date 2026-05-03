@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -182,6 +183,56 @@ def test_service_macos_sync_preserves_paired_clients_in_runtime_state(tmp_path: 
         }
     ]
     assert not (runtime_dir / "pairing-qr.png").exists()
+
+
+def test_service_macos_keep_awake_install_writes_caffeinate_agent(tmp_path: Path):
+    repo = tmp_path / "repo"
+    scripts_dir = repo / "scripts"
+    fake_bin = tmp_path / "bin"
+    home = tmp_path / "home"
+    launchctl_log = tmp_path / "launchctl.log"
+    plist_path = home / "Library" / "LaunchAgents" / "com.mobile.voiceagent.keepawake.plist"
+
+    scripts_dir.mkdir(parents=True)
+    fake_bin.mkdir(parents=True)
+    home.mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "service_macos.sh", scripts_dir / "service_macos.sh")
+
+    write_executable(
+        fake_bin / "uname",
+        "#!/usr/bin/env bash\nprintf 'Darwin\\n'\n",
+    )
+    write_executable(
+        fake_bin / "launchctl",
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            printf "%s\\n" "$*" >> "{launchctl_log}"
+            exit 0
+            """
+        ),
+    )
+
+    result = subprocess.run(
+        ["bash", str(scripts_dir / "service_macos.sh"), "keep-awake-install"],
+        cwd=repo,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Keep-awake service installed and running." in result.stdout
+    plist = plist_path.read_text(encoding="utf-8")
+    assert "<string>/usr/bin/caffeinate</string>" in plist
+    assert "<string>-ims</string>" in plist
+    assert "com.mobile.voiceagent.keepawake" in plist
+    assert "bootstrap" in launchctl_log.read_text(encoding="utf-8")
 
 
 def assert_service_sync_preserves_newer_runtime_pair_code(
@@ -361,6 +412,73 @@ def test_service_macos_restart_defers_during_active_mobaile_run(tmp_path: Path) 
         "Darwin",
         "launchctl",
     )
+
+
+def test_service_macos_deferred_restart_kickstarts_loaded_launchd_job(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    scripts_dir = repo / "scripts"
+    fake_bin = tmp_path / "bin"
+    home = tmp_path / "home"
+    db_path = tmp_path / "runs.db"
+    launchctl_log = tmp_path / "launchctl.log"
+
+    scripts_dir.mkdir(parents=True)
+    fake_bin.mkdir(parents=True)
+    home.mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "service_macos.sh", scripts_dir / "service_macos.sh")
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL)")
+        conn.execute("INSERT INTO runs (run_id, status) VALUES ('run-done', 'completed')")
+
+    write_executable(
+        fake_bin / "uname",
+        "#!/usr/bin/env bash\nprintf 'Darwin\\n'\n",
+    )
+    write_executable(
+        fake_bin / "launchctl",
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf "%s\\n" "$*" >> "{launchctl_log}"
+            exit 0
+            """
+        ),
+    )
+
+    result = subprocess.run(
+        ["bash", str(scripts_dir / "service_macos.sh"), "restart"],
+        cwd=repo,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "MOBAILE_ACTIVE_RUN_ID": "run-done",
+            "MOBAILE_DEFER_SERVICE_RESTART": "true",
+            "MOBAILE_RUNS_DB_PATH": str(db_path),
+            "MOBAILE_DEFERRED_RESTART_TIMEOUT_SEC": "5",
+            "MOBAILE_DEFERRED_RESTART_POLL_INTERVAL_SEC": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "backend restart deferred until this run finishes" in result.stdout
+
+    for _ in range(50):
+        if launchctl_log.exists() and "kickstart -k" in launchctl_log.read_text(encoding="utf-8"):
+            break
+        time.sleep(0.1)
+
+    service_target = f"gui/{os.getuid()}/com.mobile.voiceagent.backend"
+    log_text = launchctl_log.read_text(encoding="utf-8")
+    assert f"print {service_target}" in log_text
+    assert f"kickstart -k {service_target}" in log_text
+    assert "bootout" not in log_text
+    assert "bootstrap" not in log_text
 
 
 def test_service_linux_restart_defers_during_active_mobaile_run(tmp_path: Path) -> None:

@@ -21,13 +21,17 @@ Usage: mobaile [command]
 
 Commands:
   status   Show backend status and pairing readiness
-  doctor   Check service, pairing, QR, and advertised phone URLs
+  doctor   Check service, pairing, QR, phone URLs, and executor readiness
   pair     Generate or surface the pairing QR image
   update   Check for or install newer MOBaiLE updates
   logs     Show backend service logs
   restart  Restart the backend service
   start    Start the backend service
   stop     Stop the backend service
+  awake    Keep this Mac reachable while logged in (macOS)
+  awake-status
+           Show keep-awake launch agent state (macOS)
+  sleep    Remove MOBaiLE's keep-awake launch agent (macOS)
   config   Print important config paths and current values
   help     Show this help
 EOF
@@ -295,6 +299,92 @@ service_state_label() {
   fi
 
   printf "Stopped\n"
+}
+
+keep_awake_state_label() {
+  local repo_root="$1"
+  local override="${MOBAILE_TEST_KEEP_AWAKE_STATE:-}"
+
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    printf "Unsupported\n"
+    return
+  fi
+
+  if [[ -n "${override}" ]]; then
+    case "${override}" in
+      running | started | active) printf "Running\n" ;;
+      *) printf "Stopped\n" ;;
+    esac
+    return
+  fi
+
+  local service_script
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ ! -f "${service_script}" ]]; then
+    printf "Stopped\n"
+    return
+  fi
+
+  local status_output lowered
+  status_output="$(bash "${service_script}" keep-awake-status 2>&1 || true)"
+  lowered="$(printf "%s" "${status_output}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ "${lowered}" == *"running"* ]] || [[ "${lowered}" == *"active"* ]] || [[ "${lowered}" == *"pid ="* ]] || [[ "${lowered}" == *"state = running"* ]]; then
+    printf "Running\n"
+    return
+  fi
+
+  printf "Stopped\n"
+}
+
+resolve_executable_path() {
+  local binary="$1"
+
+  if [[ "${binary}" == */* ]]; then
+    if [[ -x "${binary}" ]]; then
+      printf "%s\n" "${binary}"
+      return 0
+    fi
+    return 1
+  fi
+
+  command -v "${binary}" 2> /dev/null
+}
+
+doctor_codex_binary_check() {
+  local env_file="$1"
+  local configured_executor binary executable version lowered_executor
+
+  configured_executor="$(read_env_value "${env_file}" "VOICE_AGENT_DEFAULT_EXECUTOR" "codex")"
+  lowered_executor="$(printf "%s" "${configured_executor}" | tr '[:upper:]' '[:lower:]')"
+  case "${lowered_executor}" in
+    local | codex | claude) ;;
+    *) lowered_executor="codex" ;;
+  esac
+
+  binary="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_BINARY" "codex")"
+
+  if executable="$(resolve_executable_path "${binary}")"; then
+    version="$("${executable}" --version 2>&1 | head -n 1 || true)"
+    if [[ -n "${version}" ]]; then
+      echo "[ok] Codex binary is available: ${version}"
+    else
+      echo "[ok] Codex binary is available: ${executable}"
+    fi
+    if [[ "${lowered_executor}" != "codex" ]]; then
+      echo "[warn] Default executor is ${lowered_executor}, not Codex"
+    fi
+    return 0
+  fi
+
+  if [[ "${lowered_executor}" == "codex" ]]; then
+    echo "[fail] Default executor is Codex, but the Codex binary is unavailable: ${binary}"
+    return 1
+  fi
+
+  echo "[warn] Codex binary is unavailable: ${binary}"
+  echo "[warn] Default executor is ${lowered_executor}, not Codex"
+  return 0
 }
 
 pairing_state_code() {
@@ -701,6 +791,120 @@ doctor_health_check() {
   return 0
 }
 
+doctor_backend_config_check() {
+  local pairing_file="$1"
+  local env_file="$2"
+  local api_token urls=() url code body_file successes=0 failures=0
+
+  if [[ "${MOBAILE_DOCTOR_SKIP_NETWORK:-0}" == "1" ]]; then
+    echo "[warn] Backend executor config check skipped by MOBAILE_DOCTOR_SKIP_NETWORK=1"
+    return 0
+  fi
+  if ! command -v curl > /dev/null 2>&1; then
+    echo "[warn] Backend executor config check skipped because curl is unavailable"
+    return 0
+  fi
+
+  api_token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
+  if [[ -z "${api_token}" ]]; then
+    echo "[warn] Backend executor config check skipped because VOICE_AGENT_API_TOKEN is missing"
+    return 0
+  fi
+
+  while IFS= read -r url; do
+    [[ -n "${url}" ]] && urls+=("${url}")
+  done < <(doctor_urls "${pairing_file}")
+
+  if [[ "${#urls[@]}" -eq 0 ]]; then
+    echo "[warn] Backend executor config check skipped because no advertised URLs are available"
+    return 0
+  fi
+
+  body_file="$(mktemp)"
+  trap 'rm -f "${body_file}"' RETURN
+
+  for url in "${urls[@]}"; do
+    code="$(curl -sS --connect-timeout 3 --max-time 5 -H "Authorization: Bearer ${api_token}" -o "${body_file}" -w "%{http_code}" "${url}/v1/config" 2> /dev/null || true)"
+    if [[ "${code}" != "200" ]]; then
+      continue
+    fi
+
+    if python3 - "${url}" "${body_file}" << 'PY'; then
+import json
+from pathlib import Path
+import sys
+
+url = sys.argv[1]
+body_path = Path(sys.argv[2])
+
+try:
+    payload = json.loads(body_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    print(f"[warn] {url}/v1/config returned unreadable JSON: {exc}")
+    raise SystemExit(2)
+
+default_executor = str(payload.get("default_executor", "")).strip().lower()
+available = {
+    str(value).strip().lower()
+    for value in payload.get("available_executors", [])
+    if str(value).strip()
+}
+codex_descriptor_available = False
+for descriptor in payload.get("executors", []):
+    if not isinstance(descriptor, dict):
+        continue
+    if str(descriptor.get("id", "")).strip().lower() == "codex":
+        codex_descriptor_available = bool(descriptor.get("available", False))
+        break
+
+codex_ready = "codex" in available or codex_descriptor_available
+if codex_ready and default_executor == "codex":
+    print(f"[ok] Backend reports Codex executor ready: {url}/v1/config")
+    raise SystemExit(0)
+if codex_ready:
+    print(f"[warn] Backend reports Codex available, but default executor is {default_executor or 'unknown'}")
+    raise SystemExit(0)
+
+print(f"[fail] Backend does not report Codex as available: {url}/v1/config")
+raise SystemExit(1)
+PY
+      successes=$((successes + 1))
+      break
+    else
+      failures=$((failures + 1))
+    fi
+  done
+
+  if [[ "${successes}" -gt 0 ]]; then
+    return 0
+  fi
+  if [[ "${failures}" -gt 0 ]]; then
+    return 1
+  fi
+
+  echo "[warn] Backend executor config check could not reach /v1/config"
+  return 0
+}
+
+doctor_keep_awake_check() {
+  local repo_root="$1"
+  local state
+
+  state="$(keep_awake_state_label "${repo_root}")"
+  case "${state}" in
+    Running)
+      echo "[ok] Keep-awake service is running"
+      ;;
+    Unsupported)
+      echo "[warn] Keep-awake service is macOS-only"
+      ;;
+    *)
+      echo "[warn] Keep-awake service is not running; run mobaile awake"
+      ;;
+  esac
+  return 0
+}
+
 doctor_command() {
   local repo_root="$1"
   local backend_dir env_file pairing_file qr_path phone_access_mode state failures=0
@@ -730,6 +934,16 @@ doctor_command() {
   if ! doctor_health_check "${pairing_file}"; then
     failures=$((failures + 1))
   fi
+
+  if ! doctor_codex_binary_check "${env_file}"; then
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_backend_config_check "${pairing_file}" "${env_file}"; then
+    failures=$((failures + 1))
+  fi
+
+  doctor_keep_awake_check "${repo_root}"
 
   if [[ "${failures}" -eq 0 ]]; then
     echo "Doctor result: ready"
@@ -927,6 +1141,9 @@ main() {
       esac
       ;;
     logs | restart | start | stop) delegate_service_command "${repo_root}" "${command_name}" ;;
+    awake) delegate_service_command "${repo_root}" "keep-awake-install" ;;
+    awake-status) delegate_service_command "${repo_root}" "keep-awake-status" ;;
+    sleep) delegate_service_command "${repo_root}" "keep-awake-uninstall" ;;
     config) config_command "${repo_root}" ;;
     doctor) doctor_command "${repo_root}" ;;
     -h | --help | help) usage ;;

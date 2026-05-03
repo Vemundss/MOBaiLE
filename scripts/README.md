@@ -20,8 +20,9 @@ bash ./scripts/install.sh --checkout "$PWD"
 The installer asks three simple questions. The normal answers are `Full Access`,
 `Anywhere with Tailscale`, and `Yes` for the background service. After setup, use
 `mobaile status` to check the connection. If your shell does not find it yet, run
-`~/.local/bin/mobaile status`. When you want the latest installed version later,
-run `mobaile update`.
+`~/.local/bin/mobaile status`. On macOS, run `mobaile awake` when this host should
+stay reachable while you are logged in, and `mobaile awake-status` to check it.
+When you want the latest installed version later, run `mobaile update`.
 
 ## Install and Bootstrap
 
@@ -32,8 +33,8 @@ run `mobaile update`.
 
 ## Operations
 
-- `doctor.sh`: host/runtime health checks
-- `service_macos.sh`: launchd install/start/stop/status/logs/sync
+- `doctor.sh`: host/runtime health checks; use `mobaile doctor` for pairing, URL, Codex, and keep-awake readiness
+- `service_macos.sh`: launchd install/start/stop/status/logs/sync plus keep-awake helpers
 - `service_linux.sh`: systemd user-service install/start/stop/status/logs/sync
 - `warmup_capabilities.sh`: preflight capabilities and runtime readiness
 - `pairing_qr.sh`: generate pairing QR from `backend/pairing.json`
@@ -86,6 +87,7 @@ Install those tools with your preferred package manager before running the check
 ```bash
 bash ./scripts/doctor.sh
 bash ./scripts/service_macos.sh status
+bash ./scripts/service_macos.sh keep-awake-status
 bash ./scripts/service_linux.sh status
 bash ./scripts/pairing_qr.sh
 cd backend && uv run python ../scripts/sync_contracts.py --check

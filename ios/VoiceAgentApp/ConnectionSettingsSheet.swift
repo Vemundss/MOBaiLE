@@ -102,6 +102,37 @@ struct ConnectionSettingsSheet: View {
                     }
                 }
 
+                if vm.hasConfiguredConnection || !vm.backendProfiles.isEmpty {
+                    Section {
+                        if vm.backendProfiles.count > 1 {
+                            Picker("Backend", selection: activeBackendProfileBinding) {
+                                ForEach(vm.backendProfiles) { profile in
+                                    Text(profile.name).tag(Optional(profile.id))
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("settings.backend.profile")
+                        } else {
+                            LabeledContent("Backend", value: vm.activeBackendProfileName)
+                        }
+
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) {
+                                saveBackendButton(fillWidth: false)
+                                forgetBackendButton(fillWidth: false)
+                            }
+                            VStack(spacing: 10) {
+                                saveBackendButton(fillWidth: true)
+                                forgetBackendButton(fillWidth: true)
+                            }
+                        }
+                    } header: {
+                        Text("Backend")
+                    } footer: {
+                        Text("Pair another computer to add it here, then switch back without retyping tokens.")
+                    }
+                }
+
                 if canUseConnectedFeatures {
                     Section {
                         Picker("Executor", selection: $vm.executor) {
@@ -498,6 +529,47 @@ struct ConnectionSettingsSheet: View {
             get: { AppAppearancePreference.resolve(from: appearancePreferenceRaw) },
             set: { appearancePreferenceRaw = $0.rawValue }
         )
+    }
+
+    private var activeBackendProfileBinding: Binding<UUID?> {
+        Binding(
+            get: { vm.activeBackendProfileID },
+            set: { profileID in
+                guard let profileID else { return }
+                vm.switchBackendProfile(profileID)
+                settingsConnectionState = .idle
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func saveBackendButton(fillWidth: Bool) -> some View {
+        if vm.hasConfiguredConnection {
+            Button {
+                _ = vm.saveCurrentBackendProfile()
+                settingsConnectionState = .idle
+            } label: {
+                SettingsActionButtonLabel(title: "Save", systemImage: "tray.and.arrow.down")
+                    .frame(maxWidth: fillWidth ? .infinity : nil)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private func forgetBackendButton(fillWidth: Bool) -> some View {
+        if vm.backendProfiles.count > 1 {
+            Button(role: .destructive) {
+                vm.forgetActiveBackendProfile()
+                settingsConnectionState = .idle
+            } label: {
+                SettingsActionButtonLabel(title: "Forget", systemImage: "trash")
+                    .frame(maxWidth: fillWidth ? .infinity : nil)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
     }
 
     private func runtimeSettingBinding(for settingID: String) -> Binding<String> {

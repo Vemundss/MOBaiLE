@@ -193,6 +193,48 @@ struct ChatThread: Identifiable, Equatable, Codable {
     }
 }
 
+struct BackendConnectionProfile: Identifiable, Equatable, Codable {
+    let id: UUID
+    var name: String
+    var serverURL: String
+    var serverURLs: [String]
+    var sessionID: String
+    var workingDirectory: String
+    var executor: String
+    var runtimeSettingOverrides: [String: [String: String]]
+    var createdAt: Date
+    var updatedAt: Date
+
+    var hostLabel: String {
+        let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return URL(string: trimmed)?.host ?? trimmed
+    }
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        serverURL: String,
+        serverURLs: [String],
+        sessionID: String,
+        workingDirectory: String,
+        executor: String,
+        runtimeSettingOverrides: [String: [String: String]] = [:],
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.serverURL = serverURL
+        self.serverURLs = serverURLs
+        self.sessionID = sessionID
+        self.workingDirectory = workingDirectory
+        self.executor = executor
+        self.runtimeSettingOverrides = runtimeSettingOverrides
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 enum ChatThreadPresentationStatus: Equatable {
     case running
     case needsInput

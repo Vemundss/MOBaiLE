@@ -46,6 +46,7 @@ class RunState:
         self._runs_lock = threading.Lock()
         self._runs: dict[str, RunRecord] = {}
         self._cancelled: set[str] = set()
+        self._cancel_reasons: dict[str, str] = {}
 
     def get_run(self, run_id: str) -> RunRecord | None:
         with self._runs_lock:
@@ -285,6 +286,7 @@ class RunState:
             run.pending_human_unblock = effective_pending_human_unblock
             if status in self.TERMINAL_STATUSES:
                 self._cancelled.discard(run_id)
+                self._cancel_reasons.pop(run_id, None)
             self.run_store.update_run_status(
                 run_id,
                 status,
@@ -303,7 +305,11 @@ class RunState:
         with self._runs_lock:
             return run_id in self._cancelled
 
-    def request_cancel(self, run_id: str) -> RunRecord:
+    def cancel_reason(self, run_id: str) -> str | None:
+        with self._runs_lock:
+            return self._cancel_reasons.get(run_id)
+
+    def request_cancel(self, run_id: str, *, reason: str = "user") -> RunRecord:
         run = self.get_run(run_id)
         if run is None:
             raise KeyError("missing")
@@ -314,6 +320,7 @@ class RunState:
             if run.status in self.TERMINAL_STATUSES:
                 raise ValueError(run.status)
             self._cancelled.add(run_id)
+            self._cancel_reasons[run_id] = reason
             return run
 
     def list_session_runs(self, session_id: str, *, limit: int = 20) -> list[RunSummary]:

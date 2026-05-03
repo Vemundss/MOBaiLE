@@ -77,6 +77,7 @@ class ProfileEnvironmentSettings:
     profile_id: str
     profile_agents_max_chars: int
     profile_memory_max_chars: int
+    skip_cloud_workdir_staging: bool
 
 
 @dataclass(frozen=True)
@@ -347,6 +348,10 @@ def load_profile_environment_settings(backend_root: Path) -> ProfileEnvironmentS
                 "VOICE_AGENT_PROFILE_MEMORY_MAX_CHARS",
                 os.getenv("VOICE_AGENT_SESSION_MEMORY_MAX_CHARS", "6000"),
             )
+        ),
+        skip_cloud_workdir_staging=_read_enabled_env(
+            "VOICE_AGENT_SKIP_CLOUD_WORKDIR_PROFILE_STAGING",
+            default=True,
         ),
     )
 

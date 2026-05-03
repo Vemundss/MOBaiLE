@@ -78,3 +78,26 @@ def test_classify_resume_failure_detects_stale_codex_sessions() -> None:
         == "stale_session"
     )
     assert CodexExecutor.classify_resume_failure("unrelated output") is None
+
+
+def test_cloud_safe_launch_cwd_uses_fallback_for_icloud_paths(tmp_path: Path) -> None:
+    cloud_workdir = tmp_path / "Library" / "Mobile Documents" / "com~apple~CloudDocs" / "repo"
+    fallback = tmp_path / "runtime"
+
+    assert CodexExecutor.cloud_safe_launch_cwd(cloud_workdir, fallback) == fallback
+    assert CodexExecutor.cloud_safe_launch_cwd(tmp_path / "repo", fallback) is None
+
+
+def test_launch_prompt_mentions_requested_root_when_cwd_is_rewritten(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VOICE_AGENT_SECURITY_MODE", "safe")
+    workdir = tmp_path / "Library" / "Mobile Documents" / "com~apple~CloudDocs" / "repo"
+    launch_cwd = tmp_path / "runtime"
+    workdir.mkdir(parents=True)
+    launch_cwd.mkdir()
+    executor = CodexExecutor(workdir, binary="codex", enable_web_search=False, launch_cwd=launch_cwd)
+
+    prompt = executor._launch_prompt("Fix the bug")
+
+    assert f"The requested project root is `{workdir.resolve()}`." in prompt
+    assert f"launched from `{launch_cwd.resolve()}`" in prompt
+    assert prompt.endswith("Fix the bug")
