@@ -31,6 +31,7 @@ class ClaudeExecutor:
         *,
         resume_session_id: str | None = None,
         model_override: str | None = None,
+        env_overrides: dict[str, str] | None = None,
     ) -> subprocess.Popen[str]:
         # Claude Code's headless print mode can stream structured JSON events.
         cmd = [self.binary, "-p", prompt, "--output-format", "stream-json", "--verbose"]
@@ -45,6 +46,8 @@ class ClaudeExecutor:
         model = (model_override or self.default_model).strip()
         if model:
             env["ANTHROPIC_MODEL"] = model
+        if env_overrides:
+            env.update(env_overrides)
 
         return subprocess.Popen(
             cmd,

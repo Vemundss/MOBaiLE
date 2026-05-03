@@ -99,12 +99,14 @@ def test_agent_run_service_retries_stale_codex_resume_with_fresh_session(monkeyp
         *,
         agent_executor,
         executor,
+        run_id,
         agent_prompt,
         resume_session_id,
         codex_model_override,
         codex_reasoning_effort_override,
         claude_model_override,
     ):
+        assert run_id == "run-1"
         start_calls.append(resume_session_id)
         return object()
 
@@ -152,6 +154,23 @@ def test_agent_run_service_retries_stale_codex_resume_with_fresh_session(monkeyp
     assert any(event.type == "action.completed" and "resume failed" in event.message for event in run.events)
     assert any(event.type == "action.started" and event.action_index == 1 for event in run.events)
     assert profile_store.synced_paths == [tmp_path / ".mobaile" / "MEMORY.md"]
+
+
+def test_agent_run_service_marks_agent_processes_for_deferred_service_restart(tmp_path: Path) -> None:
+    run_state = _run_state(tmp_path)
+    service = AgentRunService(
+        environment=_FakeEnvironment(),  # type: ignore[arg-type]
+        run_state=run_state,
+        profile_store=_FakeProfileStore(),  # type: ignore[arg-type]
+    )
+
+    env = service._agent_process_env("run-1")
+
+    assert env == {
+        "MOBAILE_ACTIVE_RUN_ID": "run-1",
+        "MOBAILE_DEFER_SERVICE_RESTART": "true",
+        "MOBAILE_RUNS_DB_PATH": str(tmp_path / "runs.db"),
+    }
 
 
 def test_agent_run_service_monitor_process_builds_resume_failure_classifier(tmp_path: Path) -> None:

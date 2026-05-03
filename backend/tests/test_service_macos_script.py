@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import textwrap
 from pathlib import Path
@@ -287,4 +288,85 @@ def test_service_linux_sync_preserves_newer_runtime_pair_code(tmp_path: Path):
         "service_linux.sh",
         "Linux",
         runtime_dir,
+    )
+
+
+def assert_service_restart_defers_during_active_run(
+    tmp_path: Path,
+    script_name: str,
+    platform_name: str,
+    service_binary_name: str,
+) -> None:
+    repo = tmp_path / f"repo-{script_name}"
+    scripts_dir = repo / "scripts"
+    fake_bin = tmp_path / f"bin-{script_name}"
+    home = tmp_path / f"home-{script_name}"
+    db_path = tmp_path / f"{script_name}.db"
+    service_log = tmp_path / f"{script_name}.service.log"
+
+    scripts_dir.mkdir(parents=True)
+    fake_bin.mkdir(parents=True)
+    home.mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / script_name, scripts_dir / script_name)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL)")
+        conn.execute("INSERT INTO runs (run_id, status) VALUES ('run-active', 'running')")
+
+    write_executable(
+        fake_bin / "uname",
+        f"#!/usr/bin/env bash\nprintf '{platform_name}\\n'\n",
+    )
+    write_executable(
+        fake_bin / "sqlite3",
+        "#!/usr/bin/env bash\nprintf 'running\\n'\n",
+    )
+    write_executable(
+        fake_bin / service_binary_name,
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf "%s\\n" "$*" >> "{service_log}"
+            """
+        ),
+    )
+
+    result = subprocess.run(
+        ["bash", str(scripts_dir / script_name), "restart"],
+        cwd=repo,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "MOBAILE_ACTIVE_RUN_ID": "run-active",
+            "MOBAILE_DEFER_SERVICE_RESTART": "true",
+            "MOBAILE_RUNS_DB_PATH": str(db_path),
+            "MOBAILE_DEFERRED_RESTART_TIMEOUT_SEC": "0",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "backend restart deferred until this run finishes" in result.stdout
+    assert not service_log.exists()
+
+
+def test_service_macos_restart_defers_during_active_mobaile_run(tmp_path: Path) -> None:
+    assert_service_restart_defers_during_active_run(
+        tmp_path,
+        "service_macos.sh",
+        "Darwin",
+        "launchctl",
+    )
+
+
+def test_service_linux_restart_defers_during_active_mobaile_run(tmp_path: Path) -> None:
+    assert_service_restart_defers_during_active_run(
+        tmp_path,
+        "service_linux.sh",
+        "Linux",
+        "systemctl",
     )

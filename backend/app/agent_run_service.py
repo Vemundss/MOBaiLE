@@ -122,6 +122,7 @@ class AgentRunService:
             proc = self._start_process(
                 agent_executor=agent_executor,
                 executor=executor,
+                run_id=run_id,
                 agent_prompt=agent_prompt,
                 resume_session_id=resume_session_id,
                 codex_model_override=codex_model_override,
@@ -199,6 +200,7 @@ class AgentRunService:
                 proc = self._start_process(
                     agent_executor=agent_executor,
                     executor=executor,
+                    run_id=run_id,
                     agent_prompt=agent_prompt,
                     resume_session_id=None,
                     codex_model_override=codex_model_override,
@@ -255,6 +257,7 @@ class AgentRunService:
         *,
         agent_executor: CodexExecutor | ClaudeExecutor,
         executor: AgentExecutorName,
+        run_id: str,
         agent_prompt: str,
         resume_session_id: str | None,
         codex_model_override: str | None,
@@ -267,11 +270,13 @@ class AgentRunService:
                 resume_session_id=resume_session_id,
                 model_override=codex_model_override,
                 reasoning_effort_override=codex_reasoning_effort_override,
+                env_overrides=self._agent_process_env(run_id),
             )
         return agent_executor.start(
             agent_prompt,
             resume_session_id=resume_session_id,
             model_override=claude_model_override,
+            env_overrides=self._agent_process_env(run_id),
         )
 
     def _monitor_process(
@@ -348,6 +353,13 @@ class AgentRunService:
         if executor == "claude":
             return self.environment.claude_timeout_sec
         return self.environment.codex_timeout_sec
+
+    def _agent_process_env(self, run_id: str) -> dict[str, str]:
+        return {
+            "MOBAILE_ACTIVE_RUN_ID": run_id,
+            "MOBAILE_DEFER_SERVICE_RESTART": "true",
+            "MOBAILE_RUNS_DB_PATH": str(self.run_state.run_store.db_path),
+        }
 
     @staticmethod
     def _resume_failure_classifier(

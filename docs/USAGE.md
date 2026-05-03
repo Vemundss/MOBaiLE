@@ -147,6 +147,7 @@ Notes:
 - Linux user service runtime is synced to `~/.local/share/MOBaiLE/backend-runtime`.
 - Linux service management uses `systemd --user`; on headless hosts you may need `sudo loginctl enable-linger $USER` for reboot persistence.
 - Run `sync` after backend code/config changes, then `restart`.
+- When `restart` is launched from inside an active MOBaiLE agent run, the service defers the actual restart until that run finishes so the phone can receive the final result.
 
 ## 3) Try the current flow
 

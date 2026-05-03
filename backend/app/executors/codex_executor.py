@@ -40,6 +40,7 @@ class CodexExecutor:
         resume_session_id: str | None = None,
         model_override: str | None = None,
         reasoning_effort_override: str | None = None,
+        env_overrides: dict[str, str] | None = None,
     ) -> subprocess.Popen[str]:
         cmd = self._build_command(
             prompt,
@@ -50,6 +51,8 @@ class CodexExecutor:
         env = os.environ.copy()
         if self.codex_home is not None:
             env["CODEX_HOME"] = str(self.codex_home)
+        if env_overrides:
+            env.update(env_overrides)
         return subprocess.Popen(
             cmd,
             cwd=str(self.workdir),

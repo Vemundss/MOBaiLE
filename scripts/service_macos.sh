@@ -291,6 +291,87 @@ logs_service() {
   tail -n 80 -f "${LOG_DIR}/backend.out.log" "${LOG_DIR}/backend.err.log"
 }
 
+is_truthy() {
+  case "${1:-}" in
+    1 | true | TRUE | yes | YES | on | ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+non_negative_int_or_default() {
+  local value="${1:-}"
+  local default_value="${2}"
+  if [[ "${value}" =~ ^[0-9]+$ ]]; then
+    printf "%s" "${value}"
+  else
+    printf "%s" "${default_value}"
+  fi
+}
+
+wait_for_active_run_to_finish() {
+  local run_id="${1}"
+  local db_path="${2:-}"
+  local timeout_sec
+  local interval_sec
+  timeout_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_TIMEOUT_SEC:-3600}" "3600")"
+  interval_sec="$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_POLL_INTERVAL_SEC:-2}" "2")"
+  if [[ "${interval_sec}" == "0" ]]; then
+    interval_sec="1"
+  fi
+
+  if [[ -z "${db_path}" ]] || [[ ! -f "${db_path}" ]] || ! command -v sqlite3 > /dev/null 2>&1; then
+    sleep "$(non_negative_int_or_default "${MOBAILE_DEFERRED_RESTART_FALLBACK_DELAY_SEC:-60}" "60")"
+    return 0
+  fi
+
+  local deadline=$((SECONDS + timeout_sec))
+  local escaped_run_id="${run_id//\'/\'\'}"
+  local status=""
+  while ((SECONDS < deadline)); do
+    if status="$(sqlite3 "${db_path}" "SELECT status FROM runs WHERE run_id='${escaped_run_id}' LIMIT 1;" 2> /dev/null)"; then
+      if [[ "${status}" != "running" ]]; then
+        return 0
+      fi
+    fi
+    sleep "${interval_sec}"
+  done
+  return 1
+}
+
+defer_restart_if_needed() {
+  if [[ "${MOBAILE_RESTART_NOW:-}" == "1" ]]; then
+    return 1
+  fi
+  if [[ -z "${MOBAILE_ACTIVE_RUN_ID:-}" ]] || ! is_truthy "${MOBAILE_DEFER_SERVICE_RESTART:-}"; then
+    return 1
+  fi
+
+  local run_id="${MOBAILE_ACTIVE_RUN_ID}"
+  local db_path="${MOBAILE_RUNS_DB_PATH:-}"
+  local script_path
+  script_path="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+  (
+    trap '' HUP
+    if wait_for_active_run_to_finish "${run_id}" "${db_path}"; then
+      env \
+        -u MOBAILE_ACTIVE_RUN_ID \
+        -u MOBAILE_DEFER_SERVICE_RESTART \
+        -u MOBAILE_RUNS_DB_PATH \
+        MOBAILE_RESTART_NOW=1 \
+        bash "${script_path}" restart
+    fi
+  ) > /dev/null 2>&1 &
+  disown "$!" 2> /dev/null || true
+
+  echo "Active MOBaiLE run detected; backend restart deferred until this run finishes."
+  return 0
+}
+
+restart_service() {
+  stop_service
+  start_service
+}
+
 main() {
   require_macos
   local cmd="${1:-}"
@@ -304,8 +385,10 @@ main() {
     start) start_service ;;
     stop) stop_service ;;
     restart)
-      stop_service
-      start_service
+      if defer_restart_if_needed; then
+        return
+      fi
+      restart_service
       ;;
     status) status_service ;;
     logs) logs_service ;;

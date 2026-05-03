@@ -90,3 +90,5 @@ bash ./scripts/service_linux.sh status
 bash ./scripts/pairing_qr.sh
 cd backend && uv run python ../scripts/sync_contracts.py --check
 ```
+
+When a backend-launched MOBaiLE agent runs a service `restart`, the service scripts defer the actual restart until the active run leaves `running` state. Human shell restarts still run immediately.
