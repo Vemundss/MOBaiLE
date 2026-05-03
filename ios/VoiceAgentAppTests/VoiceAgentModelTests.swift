@@ -1355,6 +1355,36 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(thread.presentationStatus, .failed)
     }
 
+    func testChatThreadPresentationStatusPrefersTerminalStatusOverProgressWords() {
+        let completedThread = ChatThread(
+            id: UUID(),
+            title: "Completed",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "run-completed",
+            summaryText: "Completed after executing checks",
+            transcriptText: "",
+            statusText: "Run status: completed after executing checks",
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex"
+        )
+        let failedThread = ChatThread(
+            id: UUID(),
+            title: "Failed",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "run-failed",
+            summaryText: "Failed while summarizing",
+            transcriptText: "",
+            statusText: "Run status: failed while summarizing",
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex"
+        )
+
+        XCTAssertEqual(completedThread.presentationStatus, .completed)
+        XCTAssertEqual(failedThread.presentationStatus, .failed)
+    }
+
     func testRunDiagnosticsDerivedCapturesActivityAndErrorSignals() {
         let diagnostics = RunDiagnostics.derived(
             runId: "run-123",
@@ -1583,6 +1613,87 @@ final class VoiceAgentModelTests: XCTestCase {
             }
         )
         XCTAssertTrue(reloaded._test_hasObservedRunContext(runID: runID, threadID: threadID))
+    }
+
+    @MainActor
+    func testReloadDropsPersistedLiveActivityForTerminalThread() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+        let threadID = UUID()
+        let runID = "completed-live-\(UUID().uuidString)"
+
+        store.upsertThread(
+            ChatThread(
+                id: threadID,
+                title: "Completed Live Activity",
+                updatedAt: Date(),
+                conversation: [],
+                runID: runID,
+                summaryText: "Done",
+                transcriptText: "",
+                statusText: "Run status: completed",
+                resolvedWorkingDirectory: "",
+                activeRunExecutor: "codex"
+            )
+        )
+        store.upsertMessage(
+            threadID: threadID,
+            message: ConversationMessage(
+                role: "assistant",
+                text: "Summarizing the final result.",
+                presentation: .liveActivity,
+                sourceRunID: runID
+            ),
+            position: 0
+        )
+        defaults.set(threadID.uuidString, forKey: "mobaile.active_thread_id")
+
+        let reloaded = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+
+        XCTAssertEqual(reloaded.activeThreadID, threadID)
+        XCTAssertFalse(reloaded.isLoading)
+        XCTAssertFalse(reloaded.conversation.contains { $0.presentation == .liveActivity })
+        XCTAssertFalse(store.loadMessages(threadID: threadID).contains { $0.presentation == .liveActivity })
+    }
+
+    @MainActor
+    func testCanRetryThreadUsesPersistedLastUserMessage() {
+        let (store, defaults, draftDirectory, cleanup) = makeIsolatedPersistenceHarness()
+        defer { cleanup() }
+        let threadID = UUID()
+
+        store.upsertThread(
+            ChatThread(
+                id: threadID,
+                title: "Failed Prompt",
+                updatedAt: Date(),
+                conversation: [],
+                runID: "failed-run-\(UUID().uuidString)",
+                summaryText: "Run failed",
+                transcriptText: "",
+                statusText: "Run status: failed",
+                resolvedWorkingDirectory: "",
+                activeRunExecutor: "codex"
+            )
+        )
+        store.upsertMessage(
+            threadID: threadID,
+            message: ConversationMessage(role: "user", text: "Try the failing task again."),
+            position: 0
+        )
+        defaults.set(threadID.uuidString, forKey: "mobaile.active_thread_id")
+
+        let reloaded = VoiceAgentViewModel(
+            threadStore: store,
+            defaults: defaults,
+            draftAttachmentDirectory: draftDirectory
+        )
+
+        XCTAssertTrue(reloaded.canRetryThread(threadID))
     }
 
     @MainActor

@@ -1126,20 +1126,50 @@ struct ThreadsView: View {
     let onRename: (UUID, String) -> Void
     let onDelete: (UUID) -> Void
     let onNewChat: () -> Void
+    let canRetry: (UUID) -> Bool
+    let onOpenLogs: (UUID) -> Void
+    let onRetry: (UUID) -> Void
+    let onRespondToUnblock: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var searchText: String = ""
     @State private var renamingThreadID: UUID?
     @State private var renameTitle: String = ""
     @State private var pendingDeleteThread: ChatThread?
 
+    private var visibleThreads: [ChatThread] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return threads }
+        return threads.filter { threadMatches($0, query: query) }
+    }
+
     private var activeThread: ChatThread? {
         guard let activeThreadID else { return nil }
-        return threads.first { $0.id == activeThreadID }
+        return visibleThreads.first { $0.id == activeThreadID }
     }
 
     private var recentThreads: [ChatThread] {
-        guard let activeThreadID else { return threads }
-        return threads.filter { $0.id != activeThreadID }
+        guard let activeThreadID else { return visibleThreads }
+        return visibleThreads.filter { $0.id != activeThreadID }
+    }
+
+    private var recentThreadSections: [ThreadDateSection] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let sectionOrder = ["today", "yesterday", "previous-week", "older"]
+        var groupedThreads: [String: [ChatThread]] = [:]
+        var sectionTitles: [String: String] = [:]
+
+        for thread in recentThreads {
+            let section = dateSection(for: thread.updatedAt, today: today, calendar: calendar)
+            groupedThreads[section.id, default: []].append(thread)
+            sectionTitles[section.id] = section.title
+        }
+
+        return sectionOrder.compactMap { id in
+            guard let threads = groupedThreads[id], !threads.isEmpty else { return nil }
+            return ThreadDateSection(id: id, title: sectionTitles[id] ?? "Chats", threads: threads)
+        }
     }
 
     var body: some View {
@@ -1151,6 +1181,8 @@ struct ThreadsView: View {
                         systemImage: "text.bubble",
                         description: Text("Start a chat and it will show up here for quick switching later.")
                     )
+                } else if visibleThreads.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
                 } else {
                     List {
                         if let activeThread {
@@ -1159,9 +1191,9 @@ struct ThreadsView: View {
                             }
                         }
 
-                        if !recentThreads.isEmpty {
-                            Section(activeThread == nil ? "Chats" : "Recent") {
-                                ForEach(recentThreads) { thread in
+                        ForEach(recentThreadSections) { section in
+                            Section(section.title) {
+                                ForEach(section.threads) { thread in
                                     threadButton(for: thread)
                                 }
                             }
@@ -1174,6 +1206,7 @@ struct ThreadsView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Chats")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search Chats")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") {
@@ -1226,48 +1259,58 @@ struct ThreadsView: View {
     private func threadButton(for thread: ChatThread) -> some View {
         let isActive = activeThreadID == thread.id
 
-        return Button {
-            onSelect(thread.id)
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                threadIcon(for: thread)
+        return HStack(alignment: .top, spacing: 12) {
+            threadIcon(for: thread)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(thread.title)
-                            .font(.body.weight(isActive ? .semibold : .regular))
-                            .lineLimit(1)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(thread.title)
+                        .font(.body.weight(isActive ? .semibold : .regular))
+                        .lineLimit(1)
 
-                        Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
-                        Text(thread.updatedAt, style: .relative)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
+                    Text(thread.updatedAt, style: .relative)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
 
-                        if isActive {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.accentColor)
-                                .accessibilityHidden(true)
+                    if isActive {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityHidden(true)
+                    }
+                }
+
+                Text(threadPreview(for: thread))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                HStack(spacing: 8) {
+                    threadStatusBadge(for: thread)
+
+                    if let action = primaryAction(for: thread) {
+                        Button {
+                            perform(action, for: thread)
+                        } label: {
+                            Label(action.title, systemImage: action.systemImage)
+                                .labelStyle(.titleAndIcon)
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .tint(action.tint)
+                        .accessibilityLabel(action.accessibilityLabel)
                     }
 
-                    Text(threadPreview(for: thread))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-
-                    Text(threadStatusText(for: thread))
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(threadStatusColor(for: thread).opacity(0.14))
-                        .foregroundStyle(threadStatusColor(for: thread))
-                        .clipShape(Capsule())
+                    Spacer(minLength: 0)
                 }
             }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect(thread.id)
+        }
         .padding(.horizontal, 12)
         .padding(.vertical, 14)
         .background(
@@ -1299,7 +1342,45 @@ struct ThreadsView: View {
                 Label("Rename", systemImage: "pencil")
             }
             .tint(.indigo)
+            if let action = primaryAction(for: thread) {
+                Button {
+                    perform(action, for: thread)
+                } label: {
+                    Label(action.title, systemImage: action.systemImage)
+                }
+                .tint(action.tint)
+            }
         }
+        .contextMenu {
+            if let action = primaryAction(for: thread) {
+                Button {
+                    perform(action, for: thread)
+                } label: {
+                    Label(action.title, systemImage: action.systemImage)
+                }
+            }
+            Button {
+                renamingThreadID = thread.id
+                renameTitle = thread.title
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                pendingDeleteThread = thread
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    private func threadStatusBadge(for thread: ChatThread) -> some View {
+        Text(threadStatusText(for: thread))
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(threadStatusColor(for: thread).opacity(0.14))
+            .foregroundStyle(threadStatusColor(for: thread))
+            .clipShape(Capsule())
     }
 
     private func threadPreview(for thread: ChatThread) -> String {
@@ -1356,6 +1437,67 @@ struct ThreadsView: View {
         return "\(thread.draftAttachments.count) attachments"
     }
 
+    private func threadMatches(_ thread: ChatThread, query: String) -> Bool {
+        let values = [
+            thread.title,
+            thread.summaryText,
+            thread.transcriptText,
+            thread.statusText,
+            thread.resolvedWorkingDirectory,
+            thread.activeRunExecutor,
+            draftPreview(for: thread) ?? ""
+        ]
+        return values.contains { $0.lowercased().contains(query) }
+    }
+
+    private func dateSection(
+        for date: Date,
+        today: Date,
+        calendar: Calendar
+    ) -> (id: String, title: String) {
+        if calendar.isDate(date, inSameDayAs: today) {
+            return ("today", "Today")
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return ("yesterday", "Yesterday")
+        }
+        if let weekAgo = calendar.date(byAdding: .day, value: -7, to: today),
+           date >= weekAgo {
+            return ("previous-week", "Previous 7 Days")
+        }
+        return ("older", "Older")
+    }
+
+    private func primaryAction(for thread: ChatThread) -> ThreadRowAction? {
+        switch thread.presentationStatus {
+        case .needsInput:
+            return .respond
+        case .running:
+            guard !thread.runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return .openLogs
+        case .failed, .cancelled:
+            if canRetry(thread.id) {
+                return .retry
+            }
+            guard !thread.runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return .openLogs
+        default:
+            return nil
+        }
+    }
+
+    private func perform(_ action: ThreadRowAction, for thread: ChatThread) {
+        switch action {
+        case .openLogs:
+            onOpenLogs(thread.id)
+        case .retry:
+            onRetry(thread.id)
+        case .respond:
+            onRespondToUnblock(thread.id)
+        }
+    }
+
     @ViewBuilder
     private func threadIcon(for thread: ChatThread) -> some View {
         let tint = threadStatusColor(for: thread)
@@ -1388,5 +1530,61 @@ struct ThreadsView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(tint.opacity(0.12), lineWidth: 1)
             )
+    }
+}
+
+private struct ThreadDateSection: Identifiable {
+    let id: String
+    let title: String
+    let threads: [ChatThread]
+}
+
+private enum ThreadRowAction {
+    case openLogs
+    case retry
+    case respond
+
+    var title: String {
+        switch self {
+        case .openLogs:
+            return "Logs"
+        case .retry:
+            return "Retry"
+        case .respond:
+            return "Reply"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .openLogs:
+            return "doc.text.magnifyingglass"
+        case .retry:
+            return "arrow.clockwise"
+        case .respond:
+            return "arrowshape.turn.up.left.fill"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .openLogs:
+            return "Open logs"
+        case .retry:
+            return "Retry last prompt"
+        case .respond:
+            return "Reply to unblock request"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .openLogs:
+            return .blue
+        case .retry:
+            return .orange
+        case .respond:
+            return .orange
+        }
     }
 }

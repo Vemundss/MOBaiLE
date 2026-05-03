@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showLogs = false
     @State private var showThreads = false
     @State private var threadSheetDetent = PresentationDetent.large
+    @State private var openLogsAfterThreadsDismiss = false
     @State private var showAttachmentOptions = false
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
@@ -98,6 +99,10 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showThreads, onDismiss: {
                 threadSheetDetent = .large
+                if openLogsAfterThreadsDismiss {
+                    openLogsAfterThreadsDismiss = false
+                    showLogs = true
+                }
             }) {
                 ThreadsView(
                     threads: vm.sortedThreads,
@@ -114,6 +119,27 @@ struct ContentView: View {
                     },
                     onNewChat: {
                         vm.startNewChat()
+                        showThreads = false
+                    },
+                    canRetry: { threadID in
+                        vm.canRetryThread(threadID)
+                    },
+                    onOpenLogs: { threadID in
+                        vm.switchToThread(threadID)
+                        openLogsAfterThreadsDismiss = true
+                        showThreads = false
+                    },
+                    onRetry: { threadID in
+                        vm.switchToThread(threadID)
+                        showThreads = false
+                        Task {
+                            await vm.retryLastPrompt()
+                        }
+                    },
+                    onRespondToUnblock: { threadID in
+                        vm.switchToThread(threadID)
+                        vm.prepareHumanUnblockReply()
+                        composerFocused = true
                         showThreads = false
                     }
                 )

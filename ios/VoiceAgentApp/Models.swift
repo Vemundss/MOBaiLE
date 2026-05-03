@@ -227,15 +227,6 @@ extension ChatThread {
     var presentationStatus: ChatThreadPresentationStatus {
         let lower = statusText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        if lower.contains("running")
-            || lower.contains("starting")
-            || lower.contains("planning")
-            || lower.contains("execut")
-            || lower.contains("summar")
-            || lower.contains("recording") {
-            return .running
-        }
-
         if pendingHumanUnblock != nil || lower.contains("input") || lower.contains("blocked") {
             return .needsInput
         }
@@ -250,6 +241,15 @@ extension ChatThread {
 
         if lower.contains("cancel") {
             return .cancelled
+        }
+
+        if lower.contains("running")
+            || lower.contains("starting")
+            || lower.contains("planning")
+            || lower.contains("execut")
+            || lower.contains("summar")
+            || lower.contains("recording") {
+            return .running
         }
 
         if lower.contains("ready") {

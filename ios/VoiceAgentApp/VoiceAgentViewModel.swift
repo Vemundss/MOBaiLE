@@ -1488,6 +1488,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             !lastSubmittedUserMessage.attachments.isEmpty
     }
 
+    func canRetryThread(_ threadID: UUID) -> Bool {
+        guard let message = lastSubmittedUserMessage(for: threadID) else { return false }
+        return !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !message.attachments.isEmpty
+    }
+
     var activeThreadTitle: String {
         guard let activeThreadID,
               let thread = threads.first(where: { $0.id == activeThreadID }) else {
@@ -2237,8 +2243,15 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         fetchedRunDiagnostics = nil
         let thread = threads[idx]
         let restoredAttachments = availableDraftAttachments(from: thread.draftAttachments)
-        let restoredConversation = threadStore.loadMessages(threadID: threadID)
+        var restoredConversation = threadStore.loadMessages(threadID: threadID)
         let restoredRunID = thread.runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isTerminalStatusText(thread.statusText) {
+            let visibleConversation = restoredConversation.filter { $0.presentation != .liveActivity }
+            if visibleConversation.count != restoredConversation.count {
+                restoredConversation = visibleConversation
+                threadStore.replaceMessages(threadID: threadID, messages: restoredConversation)
+            }
+        }
         if !restoredRunID.isEmpty,
            !isTerminalStatusText(thread.statusText),
            restoredConversation.contains(where: {
