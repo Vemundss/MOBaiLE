@@ -34,6 +34,19 @@ final class VoiceAgentAppUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Send prompt"].exists)
     }
 
+    func testMediaPreviewShowsExpandedComposerForDraftText() {
+        let app = launchApp(previewScenario: "media")
+        let composer = app.textViews["composer.textEditor"]
+        let addContextButton = app.buttons["Add context"]
+        let sendButton = app.buttons["Send prompt"]
+
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        XCTAssertTrue(String(describing: composer.value).contains("Compare these files"))
+        XCTAssertGreaterThan(composer.frame.height, 64)
+        XCTAssertTrue(addContextButton.exists)
+        XCTAssertTrue(sendButton.exists)
+    }
+
     func testConversationPreviewShowsThreadSwitcherMetadata() {
         let app = launchApp(previewScenario: "conversation")
 
