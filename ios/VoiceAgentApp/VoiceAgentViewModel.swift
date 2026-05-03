@@ -735,6 +735,14 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             statusText = "Failed"
             runPhaseText = "Failed"
             runEndedAt = Date()
+            if let originThreadID {
+                updateThreadMetadata(
+                    threadID: originThreadID,
+                    statusText: "Failed",
+                    runStatus: "failed",
+                    persist: false
+                )
+            }
             return
         }
 
@@ -804,6 +812,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     updateThreadMetadata(
                         threadID: originThreadID,
                         statusText: "Starting run...",
+                        runStatus: "starting",
                         activeRunExecutor: effectiveExecutor,
                         lastSubmittedInputOrigin: .voice,
                         persist: false
@@ -834,6 +843,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         threadID: originThreadID,
                         runID: response.runId,
                         statusText: "Voice run started (\(response.runId))",
+                        runStatus: "running",
                         activeRunExecutor: effectiveExecutor,
                         persist: true
                     )
@@ -859,6 +869,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     updateThreadMetadata(
                         threadID: originThreadID,
                         statusText: "Uploading audio to backend...",
+                        runStatus: "starting",
                         activeRunExecutor: effectiveExecutor,
                         lastSubmittedInputOrigin: .voice,
                         persist: false
@@ -911,6 +922,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         runID: response.runId,
                         transcriptText: response.transcriptText,
                         statusText: "Audio run started (\(response.runId))",
+                        runStatus: "running",
                         activeRunExecutor: effectiveExecutor,
                         lastSubmittedInputOrigin: .voice,
                         persist: false
@@ -953,8 +965,16 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     isLoading = false
                     runPhaseText = "Cancelled"
                     runEndedAt = Date()
+                    if let originThreadID {
+                        updateThreadMetadata(
+                            threadID: originThreadID,
+                            statusText: "Cancelled",
+                            runStatus: "cancelled",
+                            persist: false
+                        )
+                    }
                 } else if let originThreadID {
-                    updateThreadMetadata(threadID: originThreadID, statusText: "Cancelled")
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Cancelled", runStatus: "cancelled")
                 }
                 if let originThreadID {
                     persistThreadSnapshot(threadID: originThreadID)
@@ -971,8 +991,16 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     isLoading = false
                     runPhaseText = "Reconnect"
                     runEndedAt = Date()
+                    if let originThreadID {
+                        updateThreadMetadata(
+                            threadID: originThreadID,
+                            statusText: "Connection needs repair",
+                            runStatus: "",
+                            persist: false
+                        )
+                    }
                 } else if let originThreadID {
-                    updateThreadMetadata(threadID: originThreadID, statusText: "Connection needs repair")
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Connection needs repair", runStatus: "")
                 }
                 emitFailureFeedback()
                 if let originThreadID {
@@ -990,10 +1018,19 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 isLoading = false
                 runPhaseText = "Failed"
                 runEndedAt = Date()
+                if let originThreadID {
+                    updateThreadMetadata(
+                        threadID: originThreadID,
+                        statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed",
+                        runStatus: "failed",
+                        persist: false
+                    )
+                }
             } else if let originThreadID {
                 updateThreadMetadata(
                     threadID: originThreadID,
-                    statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed"
+                    statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed",
+                    runStatus: "failed"
                 )
             }
             emitFailureFeedback()
@@ -1295,7 +1332,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         ensureObservedRunContext(runID: runID, threadID: threadID)
         resetRunLogPagination(for: runID)
         setThreadPendingHumanUnblock(threadID: threadID, request: nil, persist: false)
-        updateThreadMetadata(threadID: threadID, runID: runID, statusText: "Running...", persist: true)
+        updateThreadMetadata(threadID: threadID, runID: runID, statusText: "Running...", runStatus: "running", persist: true)
         if activeThreadID == threadID {
             isLoading = true
             if runPhaseText == "Idle" {
@@ -1320,7 +1357,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             if let deadline, Date() >= deadline {
                 break
             }
-            if isTerminalStatusText(statusText(for: threadID)) {
+            if isTerminalThreadState(threadID: threadID) {
                 return
             }
             do {
@@ -1334,6 +1371,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     threadID: threadID,
                     summaryText: run.summary,
                     statusText: "Run status: \(run.status)",
+                    runStatus: run.status,
                     resolvedWorkingDirectory: run.workingDirectory,
                     persist: false
                 )
@@ -1357,12 +1395,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                         runPhaseText = "Reconnect"
                         runEndedAt = Date()
                     }
-                    updateThreadMetadata(threadID: threadID, statusText: "Connection needs repair")
+                    updateThreadMetadata(threadID: threadID, statusText: "Connection needs repair", runStatus: "")
                     removeObservedRunContext(runID: runID)
                     persistThreadSnapshot(threadID: threadID)
                     return
                 }
-                if isTerminalStatusText(statusText(for: threadID)) {
+                if isTerminalThreadState(threadID: threadID) {
                     return
                 }
                 let currentSeq = observedRunContexts[runID]?.lastEventSeq ?? -1
@@ -1377,12 +1415,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     return
                 }
             }
-            if isTerminalStatusText(statusText(for: threadID)) {
+            if isTerminalThreadState(threadID: threadID) {
                 return
             }
             try await Task.sleep(nanoseconds: 500_000_000)
         }
-        if isTerminalStatusText(statusText(for: threadID)) {
+        if isTerminalThreadState(threadID: threadID) {
             return
         }
         if activeThreadID == threadID {
@@ -1391,7 +1429,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             runPhaseText = "Timed out"
             runEndedAt = Date()
         }
-        updateThreadMetadata(threadID: threadID, statusText: "Timed out")
+        updateThreadMetadata(threadID: threadID, statusText: "Timed out", runStatus: "timed_out")
         appendConversation(role: "assistant", text: "Timed out waiting for run completion.", to: threadID)
         removeObservedRunContext(runID: runID)
     }
@@ -1404,7 +1442,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             runPhaseText = "Reconnect"
             runEndedAt = Date()
         }
-        updateThreadMetadata(threadID: threadID, statusText: "Run state unavailable")
+        updateThreadMetadata(threadID: threadID, statusText: "Run state unavailable", runStatus: "")
         removeObservedRunContext(runID: runID, preserveVisibleEvents: true)
         persistThreadSnapshot(threadID: threadID)
     }
@@ -1438,7 +1476,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     userInfo: [NSLocalizedDescriptionKey: "Run timed out while streaming events."]
                 )
             }
-            if isTerminalStatusText(statusText(for: threadID)) {
+            if isTerminalThreadState(threadID: threadID) {
                 return
             }
 
@@ -1470,7 +1508,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 }
             }
 
-            if isTerminalStatusText(statusText(for: threadID)) {
+            if isTerminalThreadState(threadID: threadID) {
                 return
             }
 
@@ -1680,6 +1718,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 updateThreadMetadata(
                     threadID: originThreadID,
                     statusText: "Starting run...",
+                    runStatus: "starting",
                     activeRunExecutor: effectiveExecutor,
                     lastSubmittedInputOrigin: .text,
                     persist: false
@@ -1710,6 +1749,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     threadID: originThreadID,
                     runID: response.runId,
                     statusText: "Run started (\(response.runId))",
+                    runStatus: "running",
                     activeRunExecutor: effectiveExecutor
                 )
                 primeLiveActivityIfNeeded(
@@ -1735,8 +1775,16 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     isLoading = false
                     runPhaseText = "Cancelled"
                     runEndedAt = Date()
+                    if let originThreadID {
+                        updateThreadMetadata(
+                            threadID: originThreadID,
+                            statusText: "Cancelled",
+                            runStatus: "cancelled",
+                            persist: false
+                        )
+                    }
                 } else if let originThreadID {
-                    updateThreadMetadata(threadID: originThreadID, statusText: "Cancelled")
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Cancelled", runStatus: "cancelled")
                 }
                 if let originThreadID {
                     persistThreadSnapshot(threadID: originThreadID)
@@ -1752,8 +1800,16 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     isLoading = false
                     runPhaseText = "Reconnect"
                     runEndedAt = Date()
+                    if let originThreadID {
+                        updateThreadMetadata(
+                            threadID: originThreadID,
+                            statusText: "Connection needs repair",
+                            runStatus: "",
+                            persist: false
+                        )
+                    }
                 } else if let originThreadID {
-                    updateThreadMetadata(threadID: originThreadID, statusText: "Connection needs repair")
+                    updateThreadMetadata(threadID: originThreadID, statusText: "Connection needs repair", runStatus: "")
                 }
                 emitFailureFeedback()
                 if let originThreadID {
@@ -1770,10 +1826,19 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 isLoading = false
                 runPhaseText = "Failed"
                 runEndedAt = Date()
+                if let originThreadID {
+                    updateThreadMetadata(
+                        threadID: originThreadID,
+                        statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed",
+                        runStatus: "failed",
+                        persist: false
+                    )
+                }
             } else if let originThreadID {
                 updateThreadMetadata(
                     threadID: originThreadID,
-                    statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed"
+                    statusText: hasFailedDraftAttachments ? "Upload failed" : "Failed",
+                    runStatus: "failed"
                 )
             }
             emitFailureFeedback()
@@ -2127,6 +2192,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 threadID: targetThreadID,
                 runID: latest.runId,
                 statusText: "Run status: \(latest.status)",
+                runStatus: latest.status,
                 activeRunExecutor: latest.executor ?? executor,
                 persist: false
             )
@@ -2158,18 +2224,26 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         threads.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private func shouldRecoverRunState(runID: String, statusText: String) -> Bool {
+    private func shouldRecoverRunState(runID: String, statusText: String, runStatus: String = "") -> Bool {
         let trimmedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedRunID.isEmpty else { return false }
+        guard !isTerminalRunStatus(runStatus) else { return false }
         guard !isTerminalStatusText(statusText) else { return false }
         guard hasConfiguredConnection else { return false }
         guard PreviewScenario.current == nil else { return false }
         return true
     }
 
-    private func scheduleRunStateRecoveryIfNeeded(runID: String, threadID: UUID, statusText: String) {
+    private func scheduleRunStateRecoveryIfNeeded(
+        runID: String,
+        threadID: UUID,
+        statusText: String,
+        runStatus: String = ""
+    ) {
         let trimmedRunID = runID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard shouldRecoverRunState(runID: trimmedRunID, statusText: statusText) else { return }
+        guard shouldRecoverRunState(runID: trimmedRunID, statusText: statusText, runStatus: runStatus) else {
+            return
+        }
         guard runRecoveryTasks[trimmedRunID] == nil else { return }
 
         runRecoveryTasks[trimmedRunID] = Task { [weak self] in
@@ -2202,6 +2276,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                 threadID: threadID,
                 summaryText: run.summary,
                 statusText: "Run status: \(run.status)",
+                runStatus: run.status,
                 resolvedWorkingDirectory: run.workingDirectory,
                 persist: true
             )
@@ -2220,7 +2295,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
                     runPhaseText = "Reconnect"
                     runEndedAt = Date()
                 }
-                updateThreadMetadata(threadID: threadID, statusText: "Connection needs repair")
+                updateThreadMetadata(threadID: threadID, statusText: "Connection needs repair", runStatus: "")
                 removeObservedRunContext(runID: runID, preserveVisibleEvents: true)
                 persistThreadSnapshot(threadID: threadID)
                 return
@@ -2245,7 +2320,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         let restoredAttachments = availableDraftAttachments(from: thread.draftAttachments)
         var restoredConversation = threadStore.loadMessages(threadID: threadID)
         let restoredRunID = thread.runID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if isTerminalStatusText(thread.statusText) {
+        if isTerminalThreadState(thread) {
             let visibleConversation = restoredConversation.filter { $0.presentation != .liveActivity }
             if visibleConversation.count != restoredConversation.count {
                 restoredConversation = visibleConversation
@@ -2253,7 +2328,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             }
         }
         if !restoredRunID.isEmpty,
-           !isTerminalStatusText(thread.statusText),
+           !isTerminalThreadState(thread),
            restoredConversation.contains(where: {
                $0.presentation == .liveActivity && $0.sourceRunID == restoredRunID
            }) {
@@ -2261,7 +2336,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
         let restoredEvents = observedRunContext(for: threadID, runID: thread.runID)?.events ?? []
         let hasObservedRun = observedRunContext(for: threadID, runID: thread.runID) != nil &&
-            !isTerminalStatusText(thread.statusText)
+            !isTerminalThreadState(thread)
         performThreadStateRestore {
             activeThreadID = threadID
             threads[idx].conversation = restoredConversation
@@ -2274,25 +2349,30 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             summaryText = thread.summaryText
             transcriptText = thread.transcriptText
             statusText = thread.statusText
-            runPhaseText = phaseText(forStatusText: thread.statusText)
+            let restoredRunStatus = thread.runStatus.trimmingCharacters(in: .whitespacesAndNewlines)
+            runPhaseText = restoredRunStatus.isEmpty
+                ? phaseText(forStatusText: thread.statusText)
+                : phaseText(forRunStatus: restoredRunStatus)
             runStartedAt = nil
             runEndedAt = nil
             let shouldRecoverRun = shouldRecoverRunState(
                 runID: restoredRunID,
-                statusText: thread.statusText
+                statusText: thread.statusText,
+                runStatus: thread.runStatus
             )
             isLoading = hasObservedRun || shouldRecoverRun
             resolvedWorkingDirectory = thread.resolvedWorkingDirectory
             activeRunExecutor = thread.activeRunExecutor
             errorText = ""
             events = restoredEvents
-            didCompleteRun = isTerminalStatusText(thread.statusText)
+            didCompleteRun = isTerminalThreadState(thread)
         }
         defaults.set(threadID.uuidString, forKey: DefaultsKey.activeThreadID)
         scheduleRunStateRecoveryIfNeeded(
             runID: restoredRunID,
             threadID: threadID,
-            statusText: thread.statusText
+            statusText: thread.statusText,
+            runStatus: thread.runStatus
         )
     }
 
@@ -2724,6 +2804,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             threadID: threadID,
             summaryText: run.summary,
             statusText: "Run status: \(run.status)",
+            runStatus: run.status,
             resolvedWorkingDirectory: run.workingDirectory,
             persist: false
         )
@@ -2913,14 +2994,12 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         )
         guard !normalized.text.isEmpty || !normalized.attachments.isEmpty else { return }
         var threadConversation = cachedConversation(for: targetThreadID)
-        let threadStatus = statusText(for: targetThreadID)
-
         if normalized.role == "assistant",
            shouldCoalesceAssistantProgress(with: normalized.text),
            let last = threadConversation.last,
            last.role == "assistant",
            isProgressAssistantMessage(last.text),
-           !isTerminalStatusText(threadStatus) {
+           !isTerminalThreadState(threadID: targetThreadID) {
             threadConversation[threadConversation.count - 1] = normalized
             storeConversation(threadConversation, for: targetThreadID)
             persistConversationMessage(normalized, at: threadConversation.count - 1, threadID: targetThreadID)
@@ -3800,6 +3879,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         summaryText: String? = nil,
         transcriptText: String? = nil,
         statusText: String? = nil,
+        runStatus: String? = nil,
         resolvedWorkingDirectory: String? = nil,
         activeRunExecutor: String? = nil,
         lastSubmittedInputOrigin: ConversationInputOrigin? = nil,
@@ -3817,6 +3897,9 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         }
         if let statusText {
             threads[idx].statusText = statusText
+        }
+        if let runStatus {
+            threads[idx].runStatus = runStatus
         }
         if let resolvedWorkingDirectory {
             threads[idx].resolvedWorkingDirectory = resolvedWorkingDirectory
@@ -4106,6 +4189,21 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             || lower.contains("timed out")
     }
 
+    private func isTerminalRunStatus(_ value: String) -> Bool {
+        isTerminalStatus(value)
+    }
+
+    private func isTerminalThreadState(_ thread: ChatThread) -> Bool {
+        isTerminalRunStatus(thread.runStatus) || isTerminalStatusText(thread.statusText)
+    }
+
+    private func isTerminalThreadState(threadID: UUID) -> Bool {
+        if let thread = thread(for: threadID) {
+            return isTerminalThreadState(thread)
+        }
+        return isTerminalStatusText(statusText(for: threadID))
+    }
+
     private func phaseText(forStatusText value: String) -> String {
         let lower = value.lowercased()
         if lower.contains("cancel") { return "Cancelled" }
@@ -4216,6 +4314,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         threadID: UUID,
         runID: String? = nil,
         statusText: String? = nil,
+        runStatus: String? = nil,
         activeRunExecutor: String? = nil,
         lastSubmittedInputOrigin: ConversationInputOrigin? = nil
     ) {
@@ -4223,6 +4322,7 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
             threadID: threadID,
             runID: runID,
             statusText: statusText,
+            runStatus: runStatus,
             activeRunExecutor: activeRunExecutor,
             lastSubmittedInputOrigin: lastSubmittedInputOrigin
         )
@@ -4316,8 +4416,8 @@ final class VoiceAgentViewModel: NSObject, ObservableObject, AVSpeechSynthesizer
         isRunActivelyObserved(runID)
     }
 
-    func _test_shouldRecoverRunState(runID: String, statusText: String) -> Bool {
-        shouldRecoverRunState(runID: runID, statusText: statusText)
+    func _test_shouldRecoverRunState(runID: String, statusText: String, runStatus: String = "") -> Bool {
+        shouldRecoverRunState(runID: runID, statusText: statusText, runStatus: runStatus)
     }
 
     func _test_markRunObservationUnavailable(runID: String, threadID: UUID) {

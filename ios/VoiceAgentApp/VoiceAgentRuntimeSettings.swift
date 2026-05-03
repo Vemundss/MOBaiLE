@@ -239,6 +239,7 @@ extension VoiceAgentViewModel {
             runID: latestRunID,
             summaryText: latestSummary.isEmpty ? nil : latestSummary,
             statusText: "Run status: \(latestStatus)",
+            runStatus: latestStatus,
             persist: false
         )
         setThreadPendingHumanUnblock(

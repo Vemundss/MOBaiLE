@@ -1279,6 +1279,7 @@ final class VoiceAgentModelTests: XCTestCase {
         let data = Data(json.utf8)
         let decoded = try JSONDecoder().decode(ChatThread.self, from: data)
         XCTAssertEqual(decoded.title, "Chat")
+        XCTAssertEqual(decoded.runStatus, "")
         XCTAssertEqual(decoded.draftText, "")
         XCTAssertTrue(decoded.draftAttachments.isEmpty)
         XCTAssertNil(decoded.pendingHumanUnblock)
@@ -1385,6 +1386,56 @@ final class VoiceAgentModelTests: XCTestCase {
         XCTAssertEqual(failedThread.presentationStatus, .failed)
     }
 
+    func testChatThreadPresentationStatusPrefersExplicitRunStatus() {
+        let completedThread = ChatThread(
+            id: UUID(),
+            title: "Completed",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "run-completed",
+            summaryText: "",
+            transcriptText: "",
+            statusText: "Summarizing output...",
+            runStatus: "completed",
+            pendingHumanUnblock: HumanUnblockRequest(instructions: "Stale unblock"),
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex"
+        )
+        let runningThread = ChatThread(
+            id: UUID(),
+            title: "Running",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "run-running",
+            summaryText: "",
+            transcriptText: "",
+            statusText: "Run status: completed",
+            runStatus: "running",
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex"
+        )
+
+        XCTAssertEqual(completedThread.presentationStatus, .completed)
+        XCTAssertEqual(runningThread.presentationStatus, .running)
+    }
+
+    func testChatThreadPresentationStatusMarksConnectionStateAsFailed() {
+        let thread = ChatThread(
+            id: UUID(),
+            title: "Reconnect",
+            updatedAt: Date(),
+            conversation: [],
+            runID: "run-123",
+            summaryText: "",
+            transcriptText: "",
+            statusText: "Connection needs repair",
+            resolvedWorkingDirectory: "",
+            activeRunExecutor: "codex"
+        )
+
+        XCTAssertEqual(thread.presentationStatus, .failed)
+    }
+
     func testRunDiagnosticsDerivedCapturesActivityAndErrorSignals() {
         let diagnostics = RunDiagnostics.derived(
             runId: "run-123",
@@ -1475,6 +1526,34 @@ final class VoiceAgentModelTests: XCTestCase {
         let loaded = store.loadThreads()
         XCTAssertEqual(loaded.count, 1)
         XCTAssertEqual(loaded.first?.pendingHumanUnblock?.instructions, "Complete the CAPTCHA, then reply from the phone.")
+    }
+
+    func testChatThreadStorePersistsRunStatus() {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let dbURL = baseURL.appendingPathComponent("threads.sqlite3")
+        let store = ChatThreadStore(dbURL: dbURL)
+        let threadID = UUID()
+        store.upsertThread(
+            ChatThread(
+                id: threadID,
+                title: "Blocked Run",
+                updatedAt: Date(timeIntervalSince1970: 1_742_000_000),
+                conversation: [],
+                runID: "run-123",
+                summaryText: "",
+                transcriptText: "",
+                statusText: "Summarizing output...",
+                runStatus: "blocked",
+                resolvedWorkingDirectory: "/Users/test/project",
+                activeRunExecutor: "codex"
+            )
+        )
+
+        let loaded = store.loadThreads()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.runStatus, "blocked")
+        XCTAssertEqual(loaded.first?.presentationStatus, .needsInput)
     }
 
     func testChatThreadStorePersistsLiveActivityMessageMetadata() {
@@ -1744,6 +1823,7 @@ final class VoiceAgentModelTests: XCTestCase {
 
         XCTAssertTrue(vm._test_shouldRecoverRunState(runID: "run-1", statusText: "Running..."))
         XCTAssertFalse(vm._test_shouldRecoverRunState(runID: "run-1", statusText: "Run status: completed"))
+        XCTAssertFalse(vm._test_shouldRecoverRunState(runID: "run-1", statusText: "Running...", runStatus: "completed"))
         XCTAssertFalse(vm._test_shouldRecoverRunState(runID: "", statusText: "Running..."))
     }
 

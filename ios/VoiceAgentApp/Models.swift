@@ -91,6 +91,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
     var summaryText: String
     var transcriptText: String
     var statusText: String
+    var runStatus: String
     var pendingHumanUnblock: HumanUnblockRequest?
     var resolvedWorkingDirectory: String
     var activeRunExecutor: String
@@ -107,6 +108,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         case summaryText
         case transcriptText
         case statusText
+        case runStatus
         case pendingHumanUnblock
         case resolvedWorkingDirectory
         case activeRunExecutor
@@ -124,6 +126,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         summaryText: String,
         transcriptText: String,
         statusText: String,
+        runStatus: String = "",
         pendingHumanUnblock: HumanUnblockRequest? = nil,
         resolvedWorkingDirectory: String,
         activeRunExecutor: String,
@@ -139,6 +142,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         self.summaryText = summaryText
         self.transcriptText = transcriptText
         self.statusText = statusText
+        self.runStatus = runStatus
         self.pendingHumanUnblock = pendingHumanUnblock
         self.resolvedWorkingDirectory = resolvedWorkingDirectory
         self.activeRunExecutor = activeRunExecutor
@@ -157,6 +161,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         summaryText = try container.decodeIfPresent(String.self, forKey: .summaryText) ?? ""
         transcriptText = try container.decodeIfPresent(String.self, forKey: .transcriptText) ?? ""
         statusText = try container.decodeIfPresent(String.self, forKey: .statusText) ?? "Idle"
+        runStatus = try container.decodeIfPresent(String.self, forKey: .runStatus) ?? ""
         pendingHumanUnblock = try container.decodeIfPresent(HumanUnblockRequest.self, forKey: .pendingHumanUnblock)
         resolvedWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .resolvedWorkingDirectory) ?? ""
         activeRunExecutor = try container.decodeIfPresent(String.self, forKey: .activeRunExecutor) ?? "codex"
@@ -178,6 +183,7 @@ struct ChatThread: Identifiable, Equatable, Codable {
         try container.encode(summaryText, forKey: .summaryText)
         try container.encode(transcriptText, forKey: .transcriptText)
         try container.encode(statusText, forKey: .statusText)
+        try container.encode(runStatus, forKey: .runStatus)
         try container.encodeIfPresent(pendingHumanUnblock, forKey: .pendingHumanUnblock)
         try container.encode(resolvedWorkingDirectory, forKey: .resolvedWorkingDirectory)
         try container.encode(activeRunExecutor, forKey: .activeRunExecutor)
@@ -225,6 +231,21 @@ extension ChatThread {
     }
 
     var presentationStatus: ChatThreadPresentationStatus {
+        switch normalizedDiagnosticsStatus(runStatus) {
+        case "blocked":
+            return .needsInput
+        case "completed":
+            return .completed
+        case "failed", "rejected", "timed_out", "timed out":
+            return .failed
+        case "cancelled", "canceled":
+            return .cancelled
+        case "running", "starting", "queued", "pending":
+            return .running
+        default:
+            break
+        }
+
         let lower = statusText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if pendingHumanUnblock != nil || lower.contains("input") || lower.contains("blocked") {
@@ -235,7 +256,12 @@ extension ChatThread {
             return .completed
         }
 
-        if lower.contains("fail") || lower.contains("reject") || lower.contains("timed out") {
+        if lower.contains("fail")
+            || lower.contains("reject")
+            || lower.contains("timed out")
+            || lower.contains("connection")
+            || lower.contains("repair")
+            || lower.contains("unavailable") {
             return .failed
         }
 
