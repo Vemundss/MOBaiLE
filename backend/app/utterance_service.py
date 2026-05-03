@@ -32,6 +32,8 @@ from app.runtime_settings_catalog import (
 
 
 class ExecutionRunner(Protocol):
+    def terminate_active_process(self, run_id: str) -> None: ...
+
     def run_calendar_adapter(self, run_id: str, prompt: str) -> None: ...
 
     def run_agent(
@@ -188,6 +190,7 @@ class UtteranceService:
         )
 
         if self.calendar_request_detector(prepared.effective_text):
+            self._cancel_superseded_latest_run(prepared)
             self._record_running_run(prepared, precreated=precreated)
             if not self._launch_background_run(
                 prepared.run_id,
@@ -209,6 +212,7 @@ class UtteranceService:
             )
             return self._rejected_response(prepared.run_id, guardrail_message)
 
+        self._cancel_superseded_latest_run(prepared)
         self._record_running_run(prepared, precreated=precreated)
         if not self._launch_background_run(
             prepared.run_id,
@@ -271,6 +275,7 @@ class UtteranceService:
             )
             return self._rejected_response(prepared.run_id, message)
 
+        self._cancel_superseded_latest_run(prepared)
         self._record_running_run(prepared, plan=plan, precreated=precreated)
         if not self._launch_background_run(
             prepared.run_id,
@@ -280,6 +285,19 @@ class UtteranceService:
         ):
             return self._rejected_response(prepared.run_id, "Local run failed to start")
         return self._accepted_response(prepared.run_id)
+
+    def _cancel_superseded_latest_run(self, prepared: PreparedUtterance) -> None:
+        previous_run_id = (prepared.session_context.latest_run_id or "").strip()
+        previous_status = (prepared.session_context.latest_run_status or "").strip().lower()
+        if not previous_run_id or previous_run_id == prepared.run_id:
+            return
+        if previous_status != "running":
+            return
+        try:
+            self.run_state.request_cancel(previous_run_id)
+        except (KeyError, ValueError):
+            return
+        self.execution_service.terminate_active_process(previous_run_id)
 
     def _launch_background_run(
         self,

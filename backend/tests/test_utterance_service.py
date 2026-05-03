@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.models.schemas import (
     Action,
     ActionPlan,
+    RunRecord,
     SessionContextResponse,
     SessionRuntimeSettingValue,
     UtteranceRequest,
@@ -24,6 +25,10 @@ from .api_test_support import write_executable
 class FakeExecutionService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.terminated_run_ids: list[str] = []
+
+    def terminate_active_process(self, run_id: str) -> None:
+        self.terminated_run_ids.append(run_id)
 
     def run_calendar_adapter(self, run_id: str, prompt: str) -> None:
         self.calls.append(("calendar", (run_id, prompt)))
@@ -106,6 +111,8 @@ def _session_context(
     codex_model: str | None = None,
     codex_reasoning_effort: str | None = None,
     claude_model: str | None = None,
+    latest_run_id: str | None = None,
+    latest_run_status: str | None = None,
 ) -> SessionContextResponse:
     return SessionContextResponse(
         session_id=session_id,
@@ -116,6 +123,8 @@ def _session_context(
         codex_reasoning_effort=codex_reasoning_effort,  # type: ignore[arg-type]
         claude_model=claude_model,
         resolved_working_directory=resolved_working_directory,
+        latest_run_id=latest_run_id,
+        latest_run_status=latest_run_status,  # type: ignore[arg-type]
     )
 
 
@@ -193,6 +202,55 @@ def test_utterance_service_rejects_guardrailed_agent_requests(monkeypatch, tmp_p
     assert run.status == "rejected"
     assert run.events[0].type == "run.failed"
     assert launched == []
+
+
+def test_utterance_service_keeps_previous_run_when_new_request_is_rejected(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(
+        monkeypatch,
+        tmp_path,
+        VOICE_AGENT_CODEX_GUARDRAILS="enforce",
+        **_agent_binary_env(tmp_path, "codex"),
+    )
+    run_state = _run_state(tmp_path)
+    run_state.store_run(
+        RunRecord(
+            run_id="run-old",
+            session_id="sess-guardrail",
+            executor="codex",
+            utterance_text="old prompt",
+            working_directory=str(env.default_workdir),
+            status="running",
+            summary="Run started",
+        )
+    )
+    execution = FakeExecutionService()
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="codex",
+            resolved_working_directory=str(env.default_workdir),
+            latest_run_id="run-old",
+            latest_run_status="running",
+        ),
+        background_launcher=lambda target, args: None,
+        run_id_factory=lambda: "run-rejected",
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-guardrail",
+            executor="codex",
+            utterance_text="please run rm -rf /tmp/test",
+        )
+    )
+
+    assert result.status == "rejected"
+    assert run_state.is_cancelled("run-old") is False
+    assert execution.terminated_run_ids == []
 
 
 def test_utterance_service_uses_session_defaults_for_local_runs(monkeypatch, tmp_path: Path) -> None:
@@ -276,6 +334,52 @@ def test_utterance_service_marks_run_failed_when_background_launch_fails(monkeyp
     assert run.summary == "Local run failed to start"
     assert [event.type for event in run.events] == ["activity.completed", "action.stderr", "run.failed"]
     assert "cannot start worker thread" in run.events[1].message
+
+
+def test_utterance_service_cancels_superseded_running_latest_run(monkeypatch, tmp_path: Path) -> None:
+    env = _environment(monkeypatch, tmp_path, **_agent_binary_env(tmp_path, "codex"))
+    run_state = _run_state(tmp_path)
+    run_state.store_run(
+        RunRecord(
+            run_id="run-old",
+            session_id="sess-supersede",
+            executor="codex",
+            utterance_text="old prompt",
+            working_directory=str(env.default_workdir),
+            status="running",
+            summary="Run started",
+        )
+    )
+    execution = FakeExecutionService()
+    launched: list[tuple[str, tuple[object, ...]]] = []
+
+    service = UtteranceService(
+        environment=env,
+        run_state=run_state,
+        execution_service=execution,
+        session_context_loader=lambda session_id: _session_context(
+            session_id=session_id,
+            executor="codex",
+            resolved_working_directory=str(env.default_workdir),
+            latest_run_id="run-old",
+            latest_run_status="running",
+        ),
+        background_launcher=lambda target, args: launched.append((target.__name__, args)),
+        run_id_factory=lambda: "run-new",
+    )
+
+    result = service.submit(
+        UtteranceRequest(
+            session_id="sess-supersede",
+            executor="codex",
+            utterance_text="new prompt",
+        )
+    )
+
+    assert result.status == "accepted"
+    assert run_state.is_cancelled("run-old") is True
+    assert execution.terminated_run_ids == ["run-old"]
+    assert launched[0][0] == "run_agent"
 
 
 def test_utterance_service_passes_profile_context_toggles_to_agent_runs(monkeypatch, tmp_path: Path) -> None:
