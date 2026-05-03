@@ -274,7 +274,7 @@ struct ConversationComposerBar: View {
     }
 
     private var shouldUseExpandedComposerLayout: Bool {
-        composerFocused.wrappedValue || vm.hasDraftContent
+        vm.hasDraftContent
     }
 
     private var composerTextEditorSurface: some View {
