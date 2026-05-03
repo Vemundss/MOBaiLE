@@ -220,7 +220,7 @@ def load_agent_runtime_environment_settings(backend_root: Path) -> AgentRuntimeE
         base_dir=backend_root,
     )
     codex_enable_web_search = _read_enabled_env("VOICE_AGENT_CODEX_ENABLE_WEB_SEARCH", default=True)
-    codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 900)
+    codex_timeout_sec = _read_non_negative_int_env("VOICE_AGENT_CODEX_TIMEOUT_SEC", 0)
     codex_cli_version = _codex_cli_version(codex_binary)
     discovered_codex_model_options = discover_codex_model_options(
         codex_binary=codex_binary,

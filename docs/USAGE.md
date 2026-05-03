@@ -234,12 +234,12 @@ Agent executor config (`backend/.env`):
 - `VOICE_AGENT_CODEX_DANGEROUS_CONFIRM_TOKEN=[allow-dangerous]` explicit token to bypass guardrail warnings.
 - `VOICE_AGENT_CODEX_MODEL=auto` resolves the default Codex model for backend-launched runs from Codex's local model cache when the installed CLI can safely use that cache; known newer models such as `gpt-5.5` are advertised only when the installed Codex CLI is new enough, and explicit model ids still pin the backend to that model.
 - `VOICE_AGENT_CODEX_MODEL_DISCOVERY=off` disables Codex model-cache discovery and uses the stable built-in fallback list.
-- `VOICE_AGENT_CODEX_TIMEOUT_SEC=900` sets max runtime per codex run before backend fails it.
+- `VOICE_AGENT_CODEX_TIMEOUT_SEC=<seconds>` optionally sets max runtime per Codex run before backend fails it; the default `0` disables the backend executor timeout.
 - `VOICE_AGENT_USE_RUNTIME_CONTEXT=true` prepends MOBaiLE runtime context to backend-launched agent prompts.
 - `VOICE_AGENT_RUNTIME_CONTEXT_FILE=../.mobaile/runtime/RUNTIME_CONTEXT.md` points to the repo-local runtime context file.
 - `VOICE_AGENT_CLAUDE_BINARY=claude` selects the Claude Code CLI binary.
 - `VOICE_AGENT_CLAUDE_MODEL=<model-id>` optionally forces a Claude model.
-- `VOICE_AGENT_CLAUDE_TIMEOUT_SEC=900` sets max runtime per Claude run before backend fails it.
+- `VOICE_AGENT_CLAUDE_TIMEOUT_SEC=<seconds>` optionally sets max runtime per Claude run before backend fails it; the default inherits the Codex timeout, so `0` disables the backend executor timeout.
 - `VOICE_AGENT_CLAUDE_PERMISSION_MODE=acceptEdits` controls Claude headless permission mode in safe mode.
 - `VOICE_AGENT_CLAUDE_SKIP_PERMISSIONS=true` bypasses Claude permission prompts (recommended only for trusted private hosts).
 - `VOICE_AGENT_DEFAULT_WORKDIR=~` sets default working directory for `local`, `codex`, and `claude` runs.

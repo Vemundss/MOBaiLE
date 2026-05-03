@@ -109,6 +109,7 @@ def test_agent_run_finalizer_marks_timed_out_runs(tmp_path: Path) -> None:
     assert [event.type for event in run.events] == ["action.completed", "chat.message", "run.failed"]
     recovery = json.loads(run.events[1].message)
     assert recovery["warnings"][0]["message"] == "Run timed out after 7s"
+    assert "adjust the executor timeout" in recovery["sections"][0]["body"]
     assert any(item["kind"] == "open_logs" for item in recovery["next_actions"])
     assert profile_store.synced_paths == [workdir_memory_path]
 

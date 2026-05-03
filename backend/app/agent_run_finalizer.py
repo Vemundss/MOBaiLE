@@ -131,7 +131,7 @@ class AgentRunFinalizer:
                         title="Recovery",
                         body=(
                             "The agent was still running when MOBaiLE stopped waiting. "
-                            "Review the logs, then retry with a narrower request or increase the executor timeout."
+                            "Review the logs, then retry with a narrower request or adjust the executor timeout."
                         ),
                     )
                 ],
