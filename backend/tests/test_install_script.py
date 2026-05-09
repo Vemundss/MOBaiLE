@@ -259,7 +259,7 @@ def test_install_script_defaults_to_managed_install_when_run_inside_checkout(tmp
 
     assert result.returncode == 0
     assert "Dry run." in result.stdout
-    assert f"git clone https://github.com/vemundss/mobaile-backend.git {home / 'MOBaiLE'}" in result.stdout
+    assert f"git clone https://github.com/vemundss/mobaile.git {home / 'MOBaiLE'}" in result.stdout
     assert f"bash {home / 'MOBaiLE' / 'scripts' / 'install.sh'}" in result.stdout
     assert f"--checkout {home / 'MOBaiLE'}" in result.stdout
 
@@ -380,7 +380,7 @@ def test_install_script_raw_dry_run_preserves_args_in_reexec_command(tmp_path: P
 
     assert result.returncode == 0
     assert "No interactive terminal detected. Using recommended defaults." in result.stdout
-    assert f"git clone https://github.com/vemundss/mobaile-backend.git {target_checkout}" in result.stdout
+    assert f"git clone https://github.com/vemundss/mobaile.git {target_checkout}" in result.stdout
     assert f"bash {target_checkout}/scripts/install.sh" in result.stdout
     assert f"--checkout {target_checkout}" in result.stdout
     assert "--mode full-access" in result.stdout

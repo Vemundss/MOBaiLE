@@ -8,7 +8,7 @@ pairing, and end-to-end usage, prefer [`docs/USAGE.md`](../docs/USAGE.md).
 Most people should start with the installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes
 ```
 
 If you are already in a checkout, run:
@@ -32,9 +32,9 @@ later, run `mobaile update`.
 Other useful one-liners:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --phone-access wifi
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --dry-run
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --phone-access wifi
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --dry-run
 ```
 
 ## Install and Bootstrap

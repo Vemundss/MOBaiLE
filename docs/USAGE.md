@@ -12,7 +12,7 @@ If you want the iPhone app working with the least friction, do this first.
 ### Step 1. Run the installer on the computer you want MOBaiLE to use
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes
 ```
 
 The pasted one-liner cannot reliably prompt, so `--yes` uses the recommended defaults:
@@ -40,19 +40,19 @@ Useful one-liner variants:
 
 ```bash
 # Recommended private-host setup
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes
 
 # Same Wi-Fi only
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --phone-access wifi
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --phone-access wifi
 
 # Local simulator/dev only
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no
 
 # Public HTTPS endpoint you already control
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --public-url https://your-host.example
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --public-url https://your-host.example
 
 # Preview the install choices without changing anything
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --dry-run
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --dry-run
 ```
 
 Choose the Wi-Fi one-liner if you want to try MOBaiLE before setting up Tailscale. You can re-run the installer later with the default Tailscale mode for off-Wi-Fi use.

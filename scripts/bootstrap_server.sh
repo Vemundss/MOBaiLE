@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL_DEFAULT="https://github.com/vemundss/mobaile-backend.git"
+REPO_URL_DEFAULT="https://github.com/vemundss/mobaile.git"
 INSTALL_DIR_DEFAULT="${HOME}/MOBaiLE"
 BRANCH_DEFAULT=""
 MODE_DEFAULT="safe"

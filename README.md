@@ -26,7 +26,7 @@
 ## Get a run back in minutes
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes
 ```
 
 If you want the shortest path, do this:
@@ -93,10 +93,10 @@ Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USA
 Use these only if the main install command is not what you want.
 
 - Already in a checkout and want to run the installer there: `bash ./scripts/install.sh --checkout "$PWD"`
-- Same recommended setup with explicit flags: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --mode full-access --phone-access tailscale --background-service yes`
-- Same Wi-Fi only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --phone-access wifi`
-- Local simulator/dev only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no`
-- Preview before changing anything: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --dry-run`
+- Same recommended setup with explicit flags: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --mode full-access --phone-access tailscale --background-service yes`
+- Same Wi-Fi only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --phone-access wifi`
+- Local simulator/dev only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no`
+- Preview before changing anything: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --dry-run`
 - Backend-only/manual path from a checkout: `bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale`
 - Local simulator-only testing: `bash ./scripts/install_backend.sh --mode safe --phone-access local`
 
@@ -137,7 +137,7 @@ tailscale ip -4
 Recommended path:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes
 ```
 
 If you are already in a checkout:
