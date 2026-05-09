@@ -12,7 +12,7 @@ Apple requires a public privacy-policy URL for App Store submissions.
 
 ## Deploy Workflow
 
-- `.github/workflows/deploy-privacy-policy.yml`
+- `.github/workflows/deploy-public-pages.yml`
 
 ## Expected Public URLs
 
