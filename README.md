@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/brand/mobaile-logo.svg" alt="MOBaiLE logo" width="112" />
+</p>
+
 # MOBaiLE
 
 <p align="center"><strong>Run your own computer from iPhone.</strong></p>
