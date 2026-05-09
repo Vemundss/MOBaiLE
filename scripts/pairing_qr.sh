@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BACKEND_DIR="${MOBAILE_BACKEND_DIR:-${REPO_ROOT}/backend}"
+PAIRING_FILE="${MOBAILE_PAIRING_FILE:-${BACKEND_DIR}/pairing.json}"
+OUT_FILE="${MOBAILE_PAIRING_QR_OUT:-${BACKEND_DIR}/pairing-qr.png}"
+PYTHON_ENV_DIR="${MOBAILE_QR_PYTHON_ENV_DIR:-${BACKEND_DIR}}"
+FORMAT="url"
+QR_SCALE="12"
+QUIET="false"
+SHOW_PREVIEW="true"
+PAIR_CODE_TTL_MIN="${VOICE_AGENT_PAIR_CODE_TTL_MIN:-30}"
+PAIR_CODE_FORCE_REFRESH="${MOBAILE_PAIR_FORCE_REFRESH:-false}"
+
+ensure_uv_available() {
+  if command -v uv > /dev/null 2>&1; then
+    return 0
+  fi
+
+  export PATH="${HOME}/.local/bin:${PATH}"
+  command -v uv > /dev/null 2>&1
+}
+
+usage() {
+  cat << EOF
+Usage: bash ./scripts/pairing_qr.sh [--out <path>] [--format url|json] [--scale <int>] [--quiet] [--no-preview]
+
+Reads backend/pairing.json and generates a local QR code image.
+  --format url   QR encodes mobaile://pair deep link (default)
+  --format json  QR encodes raw {"server_url","server_urls","pair_code","session_id"} JSON
+  --scale <int>  QR pixel scale (default: 12)
+  --quiet        Suppress success output
+  --no-preview   Skip terminal QR preview
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --out)
+      OUT_FILE="$2"
+      shift 2
+      ;;
+    --format)
+      FORMAT="$2"
+      shift 2
+      ;;
+    --scale)
+      QR_SCALE="$2"
+      shift 2
+      ;;
+    --quiet)
+      QUIET="true"
+      shift
+      ;;
+    --no-preview)
+      SHOW_PREVIEW="false"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+if [[ ! -f "${PAIRING_FILE}" ]]; then
+  echo "Missing pairing file: ${PAIRING_FILE}" >&2
+  echo "Run: bash ./scripts/install_backend.sh" >&2
+  exit 1
+fi
+
+PAIRING_REFRESHED="$(
+  PAIRING_PATH="${PAIRING_FILE}" PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" PAIR_FORCE_REFRESH="${PAIR_CODE_FORCE_REFRESH}" python3 - << 'PY'
+import json
+import os
+import secrets
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+p = Path(os.environ["PAIRING_PATH"])
+data = json.loads(p.read_text(encoding="utf-8"))
+pair_code = str(data.get("pair_code", "")).strip()
+expires_at = str(data.get("pair_code_expires_at", "")).strip()
+force_refresh = os.environ.get("PAIR_FORCE_REFRESH", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+needs_refresh = force_refresh or not pair_code
+
+if expires_at:
+    try:
+        parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+        needs_refresh = True
+    if parsed is not None and parsed <= datetime.now(timezone.utc):
+        needs_refresh = True
+else:
+    needs_refresh = True
+
+if needs_refresh:
+    ttl = int(os.environ.get("PAIR_TTL_MIN", "30"))
+    data["pair_code"] = secrets.token_urlsafe(10)
+    data["pair_code_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(minutes=ttl)
+    ).isoformat().replace("+00:00", "Z")
+    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print("true")
+else:
+    print("false")
+PY
+)"
+
+if [[ "${PAIRING_REFRESHED}" == "true" ]] && [[ "${QUIET}" != "true" ]]; then
+  echo "Refreshed pairing code in: ${PAIRING_FILE}"
+fi
+
+PAYLOAD_JSON="$(
+  PAIRING_PATH="${PAIRING_FILE}" python3 - << 'PY'
+import json
+import os
+from pathlib import Path
+
+p = Path(os.environ["PAIRING_PATH"])
+data = json.loads(p.read_text(encoding="utf-8"))
+print(
+    json.dumps(
+        {
+            "server_url": data["server_url"],
+            "server_urls": data.get("server_urls", [data["server_url"]]),
+            "pair_code": data["pair_code"],
+            "session_id": data.get("session_id", "iphone-app"),
+        },
+        separators=(",", ":"),
+    )
+)
+PY
+)"
+
+if [[ "${FORMAT}" == "json" ]]; then
+  PAYLOAD="${PAYLOAD_JSON}"
+elif [[ "${FORMAT}" == "url" ]]; then
+  PAYLOAD="$(
+    PAIRING_PATH="${PAIRING_FILE}" python3 - << 'PY'
+import json
+import os
+import urllib.parse
+from pathlib import Path
+
+p = Path(os.environ["PAIRING_PATH"])
+data = json.loads(p.read_text(encoding="utf-8"))
+if "pair_code" not in data or not str(data["pair_code"]).strip():
+    raise SystemExit("pair_code missing in pairing.json; run scripts/install_backend.sh again")
+pair_code = urllib.parse.quote(data["pair_code"], safe="")
+session = urllib.parse.quote(data.get("session_id", "iphone-app"), safe="")
+server_urls = data.get("server_urls", [data["server_url"]])
+parts = []
+for raw in server_urls:
+    if not str(raw).strip():
+        continue
+    parts.append(f"server_url={urllib.parse.quote(str(raw), safe='')}")
+if not parts:
+    parts.append(f"server_url={urllib.parse.quote(data['server_url'], safe='')}")
+parts.append(f"pair_code={pair_code}")
+parts.append(f"session_id={session}")
+print("mobaile://pair?" + "&".join(parts))
+PY
+  )"
+else
+  echo "Invalid --format: ${FORMAT} (expected: url or json)" >&2
+  exit 1
+fi
+
+if command -v qrencode > /dev/null 2>&1; then
+  if ! [[ "${QR_SCALE}" =~ ^[0-9]+$ ]] || [[ "${QR_SCALE}" -lt 1 ]]; then
+    echo "Invalid --scale: ${QR_SCALE} (expected positive integer)" >&2
+    exit 1
+  fi
+
+  qrencode -s "${QR_SCALE}" -o "${OUT_FILE}" "${PAYLOAD}"
+  if [[ "${QUIET}" != "true" ]]; then
+    echo "QR image written to: ${OUT_FILE}"
+    echo "Format: ${FORMAT}"
+    echo "Scale: ${QR_SCALE}"
+    if [[ "${SHOW_PREVIEW}" == "true" ]]; then
+      echo
+      echo "Terminal preview:"
+      qrencode -t ansiutf8 "${PAYLOAD}" || true
+    fi
+  fi
+  exit 0
+fi
+
+if ensure_uv_available; then
+  (
+    cd "${PYTHON_ENV_DIR}"
+    uv run python - "${OUT_FILE}" "${PAYLOAD}" "${QR_SCALE}" << 'PY'
+import sys
+from pathlib import Path
+
+import qrcode
+
+out_path = Path(sys.argv[1])
+payload = sys.argv[2]
+scale = int(sys.argv[3])
+out_path.parent.mkdir(parents=True, exist_ok=True)
+img = qrcode.make(payload, box_size=scale, border=4)
+img.save(out_path)
+PY
+  )
+  if [[ "${QUIET}" != "true" ]]; then
+    echo "QR image written to: ${OUT_FILE}"
+    echo "Format: ${FORMAT}"
+    echo "Scale: ${QR_SCALE}"
+  fi
+  exit 0
+fi
+
+echo "Could not generate a QR image automatically." >&2
+echo "Install qrencode, or make sure uv is available in ~/.local/bin or PATH." >&2
+echo >&2
+echo "Fallback payload (copy into your phone manually):" >&2
+echo "${PAYLOAD}" >&2
+exit 1

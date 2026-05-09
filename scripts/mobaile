@@ -1,0 +1,2131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+resolve_repo_root() {
+  if [[ -n "${MOBAILE_REPO_ROOT:-}" ]]; then
+    printf "%s\n" "${MOBAILE_REPO_ROOT}"
+    return
+  fi
+
+  python3 - "${BASH_SOURCE[0]}" << 'PY'
+from pathlib import Path
+import sys
+
+print(Path(sys.argv[1]).resolve().parent.parent)
+PY
+}
+
+usage() {
+  cat << 'EOF'
+Usage: mobaile [command]
+
+Commands:
+  status   Show backend status and pairing readiness
+  setup    Open the computer-local setup page with QR and readiness checks
+  check    Preflight install, dependency, service, and pairing readiness
+           Use `mobaile check --json` for machine-readable output
+  autonomy Provision browser/desktop automation for more unattended work
+  doctor   Check service, pairing, QR, phone URLs, and executor readiness
+  first-run
+           Run a tiny starter task in ~/MOBaiLE-playground
+  repair   Refresh pairing, restart the service when installed, then run doctor
+  pair     Generate or surface the pairing QR image
+  update   Check for or install newer MOBaiLE updates
+  logs     Show backend service logs
+  restart  Restart the backend service
+  start    Start the backend service
+  stop     Stop the backend service
+  awake    Keep this Mac reachable while logged in (macOS)
+  awake-status
+           Show keep-awake launch agent state (macOS)
+  sleep    Remove MOBaiLE's keep-awake launch agent (macOS)
+  config   Print important config paths and current values
+  help     Show this help
+EOF
+}
+
+format_command() {
+  local formatted=""
+  local arg
+  for arg in "$@"; do
+    if [[ -n "${formatted}" ]]; then
+      formatted+=" "
+    fi
+    printf -v arg "%q" "${arg}"
+    formatted+="${arg}"
+  done
+  printf "%s\n" "${formatted}"
+}
+
+read_env_value() {
+  local env_file="$1"
+  local key="$2"
+  local default_value="${3:-}"
+
+  python3 - "${env_file}" "${key}" "${default_value}" << 'PY'
+from pathlib import Path
+import sys
+
+env_path = Path(sys.argv[1])
+target_key = sys.argv[2]
+default_value = sys.argv[3]
+
+if not env_path.exists():
+    print(default_value)
+    raise SystemExit(0)
+
+value = default_value
+for line in env_path.read_text(encoding="utf-8").splitlines():
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in line:
+        continue
+    key, raw_value = line.split("=", 1)
+    if key.strip() != target_key:
+        continue
+    value = raw_value.strip().strip("\"'")
+
+print(value)
+PY
+}
+
+read_pairing_value() {
+  local pairing_file="$1"
+  local field_name="$2"
+  local default_value="${3:-}"
+
+  python3 - "${pairing_file}" "${field_name}" "${default_value}" << 'PY'
+import json
+from pathlib import Path
+import sys
+
+pairing_path = Path(sys.argv[1])
+field_name = sys.argv[2]
+default_value = sys.argv[3]
+
+if not pairing_path.exists():
+    print(default_value)
+    raise SystemExit(0)
+
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except json.JSONDecodeError:
+    print(default_value)
+    raise SystemExit(0)
+
+value = payload.get(field_name, default_value)
+if value is None:
+    value = default_value
+
+print(str(value))
+PY
+}
+
+friendly_security_label() {
+  case "$1" in
+    full-access) printf "Full Access\n" ;;
+    *) printf "Safe\n" ;;
+  esac
+}
+
+is_public_https_url() {
+  case "$1" in
+    https://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+friendly_phone_access_label() {
+  local phone_access_mode="$1"
+  local public_server_url="${2:-}"
+  local pairing_server_url="${3:-}"
+
+  case "${phone_access_mode}" in
+    wifi) printf "On this Wi-Fi\n" ;;
+    local) printf "This computer only\n" ;;
+    *)
+      if is_public_https_url "${public_server_url}" || is_public_https_url "${pairing_server_url}"; then
+        printf "Public URL\n"
+      else
+        printf "Anywhere with Tailscale\n"
+      fi
+      ;;
+  esac
+}
+
+service_script_path() {
+  local repo_root="$1"
+
+  case "$(uname -s)" in
+    Darwin) printf "%s\n" "${repo_root}/scripts/service_macos.sh" ;;
+    Linux) printf "%s\n" "${repo_root}/scripts/service_linux.sh" ;;
+    *)
+      echo "Unsupported platform: $(uname -s)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+service_install_preference() {
+  case "$(uname -s)" in
+    Darwin)
+      [[ -f "${HOME}/Library/LaunchAgents/com.mobile.voiceagent.backend.plist" ]] && printf "yes\n" || printf "no\n"
+      ;;
+    Linux)
+      [[ -f "${HOME}/.config/systemd/user/mobaile-backend.service" ]] && printf "yes\n" || printf "no\n"
+      ;;
+    *)
+      printf "no\n"
+      ;;
+  esac
+}
+
+runtime_backend_dir() {
+  if [[ -n "${MOBAILE_TEST_RUNTIME_BACKEND_DIR:-}" ]]; then
+    printf "%s\n" "${MOBAILE_TEST_RUNTIME_BACKEND_DIR}"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin) printf "%s\n" "${HOME}/Library/Application Support/MOBaiLE/backend-runtime" ;;
+    Linux) printf "%s\n" "${HOME}/.local/share/MOBaiLE/backend-runtime" ;;
+    *) printf "\n" ;;
+  esac
+}
+
+active_backend_dir() {
+  local repo_root="$1"
+  local runtime_dir
+
+  if [[ -n "${MOBAILE_TEST_ACTIVE_BACKEND_DIR:-}" ]]; then
+    printf "%s\n" "${MOBAILE_TEST_ACTIVE_BACKEND_DIR}"
+    return
+  fi
+
+  runtime_dir="$(runtime_backend_dir)"
+  if [[ -n "${runtime_dir}" ]] && [[ -d "${runtime_dir}" ]] && [[ "$(service_install_preference)" == "yes" ]]; then
+    printf "%s\n" "${runtime_dir}"
+    return
+  fi
+
+  printf "%s\n" "${repo_root}/backend"
+}
+
+git_checkout_or_fail() {
+  local repo_root="$1"
+  if ! command -v git > /dev/null 2>&1; then
+    echo "git is required for mobaile update." >&2
+    exit 1
+  fi
+  if [[ ! -d "${repo_root}/.git" ]]; then
+    echo "mobaile update only works from a git checkout." >&2
+    exit 1
+  fi
+}
+
+git_current_branch() {
+  local repo_root="$1"
+  git -C "${repo_root}" branch --show-current 2> /dev/null
+}
+
+git_origin_url() {
+  local repo_root="$1"
+  git -C "${repo_root}" remote get-url origin 2> /dev/null || true
+}
+
+remote_is_update_source() {
+  local remote_url="$1"
+
+  if [[ "${MOBAILE_TEST_ALLOW_ANY_UPDATE_REMOTE:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  case "${remote_url}" in
+    https://github.com/Vemundss/mobaile-backend.git | https://github.com/vemundss/mobaile-backend.git | git@github.com:Vemundss/mobaile-backend.git | git@github.com:vemundss/mobaile-backend.git | ssh://git@github.com/Vemundss/mobaile-backend.git | ssh://git@github.com/vemundss/mobaile-backend.git | https://github.com/Vemundss/mobaile.git | https://github.com/vemundss/mobaile.git | git@github.com:Vemundss/mobaile.git | git@github.com:vemundss/mobaile.git | ssh://git@github.com/Vemundss/mobaile.git | ssh://git@github.com/vemundss/mobaile.git | https://github.com/Vemundss/MOBaiLE.git | https://github.com/vemundss/MOBaiLE.git | git@github.com:Vemundss/MOBaiLE.git | git@github.com:vemundss/MOBaiLE.git | ssh://git@github.com/Vemundss/MOBaiLE.git | ssh://git@github.com/vemundss/MOBaiLE.git)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+git_short_ref() {
+  local repo_root="$1"
+  local ref="$2"
+  git -C "${repo_root}" rev-parse --short "${ref}" 2> /dev/null
+}
+
+git_worktree_dirty() {
+  local repo_root="$1"
+  if [[ -n "$(git -C "${repo_root}" status --short 2> /dev/null)" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+fetch_update_refs() {
+  local repo_root="$1"
+  git -C "${repo_root}" fetch --all --prune > /dev/null 2>&1
+}
+
+print_update_status() {
+  local repo_root="$1"
+  local branch="$2"
+  local local_ref="$3"
+  local remote_ref="$4"
+
+  echo "Current branch: ${branch}"
+  echo "Current version: ${local_ref}"
+  echo "Latest main: ${remote_ref}"
+
+  if [[ "${local_ref}" == "${remote_ref}" ]]; then
+    echo "MOBaiLE is up to date."
+  else
+    echo "Update available."
+  fi
+}
+
+service_state_label() {
+  local repo_root="$1"
+  local override="${MOBAILE_TEST_SERVICE_STATE:-}"
+
+  if [[ -n "${override}" ]]; then
+    case "${override}" in
+      running | started | active) printf "Running\n" ;;
+      *) printf "Stopped\n" ;;
+    esac
+    return
+  fi
+
+  local service_script
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ ! -f "${service_script}" ]]; then
+    printf "Stopped\n"
+    return
+  fi
+
+  local status_output lowered
+  status_output="$(bash "${service_script}" status 2>&1 || true)"
+  lowered="$(printf "%s" "${status_output}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ "${lowered}" == *"running"* ]] || [[ "${lowered}" == *"active"* ]] || [[ "${lowered}" == *"pid ="* ]] || [[ "${lowered}" == *"state = running"* ]]; then
+    printf "Running\n"
+    return
+  fi
+
+  if [[ "${lowered}" == *" is not loaded"* ]] || [[ "${lowered}" == *"could not find service"* ]] || [[ "${lowered}" == *"could not be found"* ]] || [[ "${lowered}" == *"state = exited"* ]] || [[ "${lowered}" == *"state = suspended"* ]] || [[ "${lowered}" == *"failed"* ]] || [[ "${lowered}" == *"dead"* ]]; then
+    printf "Stopped\n"
+    return
+  fi
+
+  printf "Stopped\n"
+}
+
+keep_awake_state_label() {
+  local repo_root="$1"
+  local override="${MOBAILE_TEST_KEEP_AWAKE_STATE:-}"
+
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    printf "Unsupported\n"
+    return
+  fi
+
+  if [[ -n "${override}" ]]; then
+    case "${override}" in
+      running | started | active) printf "Running\n" ;;
+      *) printf "Stopped\n" ;;
+    esac
+    return
+  fi
+
+  local service_script
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ ! -f "${service_script}" ]]; then
+    printf "Stopped\n"
+    return
+  fi
+
+  local status_output lowered
+  status_output="$(bash "${service_script}" keep-awake-status 2>&1 || true)"
+  lowered="$(printf "%s" "${status_output}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ "${lowered}" == *"running"* ]] || [[ "${lowered}" == *"active"* ]] || [[ "${lowered}" == *"pid ="* ]] || [[ "${lowered}" == *"state = running"* ]]; then
+    printf "Running\n"
+    return
+  fi
+
+  printf "Stopped\n"
+}
+
+resolve_executable_path() {
+  local binary="$1"
+
+  if [[ "${binary}" == */* ]]; then
+    if [[ -x "${binary}" ]]; then
+      printf "%s\n" "${binary}"
+      return 0
+    fi
+    return 1
+  fi
+
+  command -v "${binary}" 2> /dev/null
+}
+
+doctor_codex_binary_check() {
+  local env_file="$1"
+  local configured_executor binary executable version lowered_executor
+
+  configured_executor="$(read_env_value "${env_file}" "VOICE_AGENT_DEFAULT_EXECUTOR" "codex")"
+  lowered_executor="$(printf "%s" "${configured_executor}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${lowered_executor}" == "local" ]]; then
+    lowered_executor="shell"
+  fi
+  case "${lowered_executor}" in
+    shell | codex | claude) ;;
+    *) lowered_executor="codex" ;;
+  esac
+
+  binary="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_BINARY" "codex")"
+
+  if executable="$(resolve_executable_path "${binary}")"; then
+    version="$("${executable}" --version 2>&1 | head -n 1 || true)"
+    if [[ -n "${version}" ]]; then
+      echo "[ok] Codex binary is available: ${version}"
+    else
+      echo "[ok] Codex binary is available: ${executable}"
+    fi
+    if [[ "${lowered_executor}" != "codex" ]]; then
+      echo "[warn] Default executor is ${lowered_executor}, not Codex"
+    fi
+    return 0
+  fi
+
+  if [[ "${lowered_executor}" == "codex" ]]; then
+    echo "[fail] Default executor is Codex, but the Codex binary is unavailable: ${binary}"
+    return 1
+  fi
+
+  echo "[warn] Codex binary is unavailable: ${binary}"
+  echo "[warn] Default executor is ${lowered_executor}, not Codex"
+  return 0
+}
+
+pairing_state_code() {
+  local pairing_file="$1"
+
+  python3 - "${pairing_file}" << 'PY'
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+
+pairing_path = Path(sys.argv[1])
+if not pairing_path.exists():
+    print("missing")
+    raise SystemExit(0)
+
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except json.JSONDecodeError:
+    print("missing")
+    raise SystemExit(0)
+
+server_url = str(payload.get("server_url", "")).strip()
+pair_code = str(payload.get("pair_code", "")).strip()
+expires_at = str(payload.get("pair_code_expires_at", "")).strip()
+
+if not server_url or not pair_code:
+    print("missing")
+    raise SystemExit(0)
+
+if expires_at:
+    try:
+        parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        print("missing")
+        raise SystemExit(0)
+    if parsed <= datetime.now(timezone.utc):
+        print("expired")
+        raise SystemExit(0)
+
+print("ready")
+PY
+}
+
+pairing_qr_path() {
+  local backend_dir="$1"
+  printf "%s\n" "${MOBAILE_TEST_PAIRING_QR:-${backend_dir}/pairing-qr.png}"
+}
+
+pairing_status_label() {
+  local pairing_file="$1"
+  local pairing_state
+  pairing_state="$(pairing_state_code "${pairing_file}")"
+
+  case "${pairing_state}" in
+    ready) printf "Ready\n" ;;
+    expired) printf "Expired; run mobaile pair\n" ;;
+    *) printf "Not ready\n" ;;
+  esac
+}
+
+pairing_qr_label() {
+  local backend_dir="$1"
+  local pairing_file="${backend_dir}/pairing.json"
+  local qr_path
+  local pairing_state
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+  pairing_state="$(pairing_state_code "${pairing_file}")"
+
+  case "${pairing_state}" in
+    ready)
+      if [[ -f "${qr_path}" ]]; then
+        printf "Ready (%s)\n" "${qr_path}"
+      else
+        printf "Available via mobaile pair\n"
+      fi
+      ;;
+    expired) printf "Expired; run mobaile pair\n" ;;
+    *) printf "Not ready\n" ;;
+  esac
+}
+
+open_file_if_possible() {
+  local path="$1"
+
+  if [[ "${MOBAILE_SKIP_OPEN:-0}" == "1" ]]; then
+    return
+  fi
+
+  if command -v open > /dev/null 2>&1; then
+    open "${path}" > /dev/null 2>&1 || true
+    return
+  fi
+
+  if command -v xdg-open > /dev/null 2>&1; then
+    xdg-open "${path}" > /dev/null 2>&1 || true
+  fi
+}
+
+status_command() {
+  local repo_root="$1"
+  local backend_dir
+  local env_file
+  local pairing_file
+  local security_mode phone_access_mode public_server_url server_url
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
+
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
+  server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
+
+  cat << EOF
+MOBaiLE: $(service_state_label "${repo_root}")
+Security: $(friendly_security_label "${security_mode}")
+Phone access: $(friendly_phone_access_label "${phone_access_mode}" "${public_server_url}" "${server_url}")
+Phone pairing: $(pairing_status_label "${pairing_file}")
+URL: ${server_url}
+Pairing QR: $(pairing_qr_label "${backend_dir}")
+
+Quick actions:
+  mobaile check
+  mobaile pair
+  mobaile first-run
+  mobaile autonomy
+  mobaile doctor
+  mobaile repair
+  mobaile update
+  mobaile restart
+  mobaile logs
+  mobaile config
+EOF
+}
+
+setup_page_url() {
+  local repo_root="$1"
+  local backend_dir env_file port
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  port="$(read_env_value "${env_file}" "VOICE_AGENT_PORT" "8000")"
+  case "${port}" in
+    '' | *[!0-9]*) port="8000" ;;
+  esac
+  printf "http://127.0.0.1:%s/setup\n" "${port}"
+}
+
+setup_command() {
+  local repo_root="$1"
+  shift || true
+  local print_only="false"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --url)
+        print_only="true"
+        shift
+        ;;
+      -h | --help)
+        echo "Usage: mobaile setup [--url]"
+        return 0
+        ;;
+      *)
+        echo "Unknown setup argument: $1" >&2
+        echo "Usage: mobaile setup [--url]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  local url service_state
+  url="$(setup_page_url "${repo_root}")"
+  if [[ "${print_only}" == "true" ]]; then
+    printf "%s\n" "${url}"
+    return 0
+  fi
+
+  echo "MOBaiLE setup page on this computer: ${url}"
+  echo "This URL uses 127.0.0.1, so open it on the backend computer, not on the iPhone."
+  service_state="$(service_state_label "${repo_root}")"
+  if [[ "${service_state}" != "Running" ]]; then
+    echo "Backend service is not running yet. Run mobaile restart if the page does not load."
+  fi
+  open_file_if_possible "${url}"
+}
+
+resolve_backend_path() {
+  local backend_dir="$1"
+  local raw_value="$2"
+  local fallback="$3"
+
+  python3 - "${backend_dir}" "${raw_value}" "${fallback}" << 'PY'
+from pathlib import Path
+import sys
+
+backend_dir = Path(sys.argv[1]).expanduser().resolve()
+raw_value = sys.argv[2].strip() or sys.argv[3].strip()
+path = Path(raw_value).expanduser()
+if not path.is_absolute():
+    path = backend_dir / path
+print(path.resolve())
+PY
+}
+
+open_macos_privacy_panes() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return
+  fi
+  if [[ "${MOBAILE_SKIP_OPEN:-0}" == "1" ]]; then
+    return
+  fi
+  if ! command -v open > /dev/null 2>&1; then
+    return
+  fi
+
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" > /dev/null 2>&1 || true
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture" > /dev/null 2>&1 || true
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation" > /dev/null 2>&1 || true
+}
+
+autonomy_usage() {
+  cat << 'EOF'
+Usage: mobaile autonomy [options]
+
+Options:
+  --deep                 Run backend capability warmup after provisioning
+  --open-permissions     Open macOS privacy panes for manual approval
+  --no-open-permissions  Do not open System Settings
+  --skip-browser-warmup  Skip Playwright browser runtime install warmup
+  --force-mcp            Replace existing Codex MCP entries with MOBaiLE defaults
+  --dry-run              Print the provisioning command without running it
+EOF
+}
+
+autonomy_command() {
+  local repo_root="$1"
+  shift || true
+  local deep="false"
+  local open_permissions="false"
+  local skip_browser_warmup="false"
+  local force_mcp="false"
+  local dry_run="false"
+  local backend_dir env_file security_mode codex_home_raw playwright_output_raw playwright_profile_raw
+  local codex_home playwright_output playwright_profile
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --deep)
+        deep="true"
+        shift
+        ;;
+      --open-permissions)
+        open_permissions="true"
+        shift
+        ;;
+      --no-open-permissions)
+        open_permissions="false"
+        shift
+        ;;
+      --skip-browser-warmup)
+        skip_browser_warmup="true"
+        shift
+        ;;
+      --force-mcp)
+        force_mcp="true"
+        shift
+        ;;
+      --dry-run)
+        dry_run="true"
+        shift
+        ;;
+      -h | --help)
+        autonomy_usage
+        return 0
+        ;;
+      *)
+        autonomy_usage >&2
+        echo "Unknown autonomy argument: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "full-access")"
+  case "${security_mode}" in
+    full-access | safe) ;;
+    *) security_mode="safe" ;;
+  esac
+
+  codex_home_raw="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_HOME" "${HOME}/.codex")"
+  playwright_output_raw="$(read_env_value "${env_file}" "VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR" "data/playwright")"
+  playwright_profile_raw="$(read_env_value "${env_file}" "VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR" "data/playwright-profile")"
+  codex_home="$(resolve_backend_path "${backend_dir}" "${codex_home_raw}" "${HOME}/.codex")"
+  playwright_output="$(resolve_backend_path "${backend_dir}" "${playwright_output_raw}" "data/playwright")"
+  playwright_profile="$(resolve_backend_path "${backend_dir}" "${playwright_profile_raw}" "data/playwright-profile")"
+
+  local provision_cmd=(
+    python3 "${repo_root}/scripts/provision_codex_autonomy.py"
+    --mode "${security_mode}"
+    --codex-home "${codex_home}"
+    --playwright-output-dir "${playwright_output}"
+    --playwright-user-data-dir "${playwright_profile}"
+  )
+  if [[ "${skip_browser_warmup}" == "true" ]]; then
+    provision_cmd+=(--skip-browser-warmup)
+  fi
+  if [[ "${force_mcp}" == "true" ]]; then
+    provision_cmd+=(--force-mcp)
+  fi
+
+  echo "MOBaiLE autonomy setup"
+  echo "Active backend: ${backend_dir}"
+  echo "Security mode: ${security_mode}"
+  echo "Browser profile: ${playwright_profile}"
+  echo
+
+  if [[ "${dry_run}" == "true" ]]; then
+    echo "Provision command:"
+    echo "  $(format_command "${provision_cmd[@]}")"
+  else
+    "${provision_cmd[@]}"
+  fi
+
+  if [[ "${open_permissions}" == "true" ]]; then
+    if [[ "${dry_run}" == "true" ]]; then
+      echo "Would open macOS Accessibility, Screen Recording, and Automation privacy panes."
+    else
+      open_macos_privacy_panes
+    fi
+  elif [[ "$(uname -s)" == "Darwin" ]]; then
+    echo
+    echo "macOS privacy approvals are still manual when needed:"
+    echo "  mobaile autonomy --deep --open-permissions"
+  fi
+
+  if [[ "${deep}" != "true" ]]; then
+    echo
+    echo "Deep readiness: skipped. Run with --deep to verify backend browser/desktop permissions."
+    return 0
+  fi
+
+  if [[ "${dry_run}" == "true" ]]; then
+    echo "Would run backend capability warmup."
+    return 0
+  fi
+
+  if [[ "$(service_state_label "${repo_root}")" != "Running" ]]; then
+    echo "Deep readiness needs the backend running. Run mobaile restart, then mobaile autonomy --deep."
+    return 1
+  fi
+
+  local service_script
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ ! -f "${service_script}" ]]; then
+    echo "Missing service helper: ${service_script}" >&2
+    return 1
+  fi
+  bash "${service_script}" warmup
+}
+
+CHECK_FAILURES=0
+
+check_ok() {
+  echo "[ok] $1"
+}
+
+check_info() {
+  echo "[info] $1"
+}
+
+check_todo() {
+  echo "[todo] $1"
+  CHECK_FAILURES=$((CHECK_FAILURES + 1))
+}
+
+check_cmd_available() {
+  local cmd="$1"
+  local detail="$2"
+  if command -v "${cmd}" > /dev/null 2>&1; then
+    check_ok "${cmd} is available"
+    return 0
+  fi
+  check_todo "${detail}"
+  return 1
+}
+
+check_python_version() {
+  if ! command -v python3 > /dev/null 2>&1; then
+    check_todo "Install Python 3.11 or newer"
+    return
+  fi
+
+  if python3 - << 'PY'; then
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
+PY
+    check_ok "Python $(python3 --version 2>&1 | awk '{print $2}') is ready"
+  else
+    check_todo "Python 3.11 or newer is required; current python3 is $(python3 --version 2>&1)"
+  fi
+}
+
+check_agent_cli() {
+  local env_file="$1"
+  local codex_binary claude_binary codex_path claude_path any_agent="false"
+
+  codex_binary="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_BINARY" "codex")"
+  claude_binary="$(read_env_value "${env_file}" "VOICE_AGENT_CLAUDE_BINARY" "claude")"
+
+  if codex_path="$(resolve_executable_path "${codex_binary}")"; then
+    check_ok "Codex CLI is available: $("${codex_path}" --version 2>&1 | head -n 1 || printf "%s" "${codex_path}")"
+    any_agent="true"
+  fi
+  if claude_path="$(resolve_executable_path "${claude_binary}")"; then
+    check_ok "Claude CLI is available: ${claude_path}"
+    any_agent="true"
+  fi
+
+  if [[ "${any_agent}" != "true" ]]; then
+    check_todo "Install and sign in to Codex CLI or Claude CLI for real agent runs"
+    echo "       Codex CLI: https://developers.openai.com/codex/cli"
+  fi
+}
+
+check_phone_path() {
+  local phone_access_mode="$1"
+  local public_server_url="$2"
+
+  if [[ "${phone_access_mode}" == "tailscale" && -z "${public_server_url}" ]]; then
+    if ! command -v tailscale > /dev/null 2>&1; then
+      check_todo "Install Tailscale on this computer and the iPhone for Anywhere mode"
+      echo "       Download: https://tailscale.com/download"
+      return
+    fi
+    if tailscale status > /dev/null 2>&1; then
+      check_ok "Tailscale is installed and reachable from the CLI"
+    else
+      check_todo "Tailscale is installed, but it does not look signed in/connected"
+      echo "       Open Tailscale and sign in on this computer and the iPhone."
+    fi
+  elif [[ "${phone_access_mode}" == "wifi" ]]; then
+    check_info "Wi-Fi mode does not require Tailscale; cellular use needs Tailscale or public HTTPS"
+  elif [[ "${phone_access_mode}" == "local" ]]; then
+    check_info "Local mode is for this computer/simulator only"
+  elif [[ -n "${public_server_url}" ]]; then
+    check_ok "Public HTTPS URL is configured for phone access"
+  fi
+}
+
+check_pairing_state() {
+  local backend_dir="$1"
+  local pairing_file="${backend_dir}/pairing.json"
+  local qr_path
+  local state
+
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+  state="$(pairing_state_code "${pairing_file}")"
+  case "${state}" in
+    ready)
+      check_ok "Pairing file has a fresh pair code"
+      if [[ -f "${qr_path}" ]]; then
+        check_ok "Pairing QR exists: ${qr_path}"
+      else
+        check_info "Pairing QR can be generated with mobaile pair"
+      fi
+      ;;
+    expired)
+      check_todo "Pair code is expired; run mobaile pair"
+      ;;
+    *)
+      check_todo "Pairing is not ready; run mobaile pair after install"
+      ;;
+  esac
+}
+
+check_json_command() {
+  local repo_root="$1"
+  local backend_dir="$2"
+  local env_file="$3"
+  local pairing_file="$4"
+  local phone_access_mode="$5"
+  local public_server_url="$6"
+  local server_url="$7"
+  local phone_access_label="$8"
+  local service_state="$9"
+  local pairing_state="${10}"
+  local qr_path="${11}"
+
+  CHECK_REPO_ROOT="${repo_root}" \
+    CHECK_BACKEND_DIR="${backend_dir}" \
+    CHECK_ENV_FILE="${env_file}" \
+    CHECK_PAIRING_FILE="${pairing_file}" \
+    CHECK_PHONE_ACCESS_MODE="${phone_access_mode}" \
+    CHECK_PUBLIC_SERVER_URL="${public_server_url}" \
+    CHECK_SERVER_URL="${server_url}" \
+    CHECK_PHONE_ACCESS_LABEL="${phone_access_label}" \
+    CHECK_SERVICE_STATE="${service_state}" \
+    CHECK_PAIRING_STATE="${pairing_state}" \
+    CHECK_QR_PATH="${qr_path}" \
+    python3 - << 'PY'
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def read_env(path: Path, key: str, default: str = "") -> str:
+    if not path.exists():
+        return default
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        raw_key, raw_value = line.split("=", 1)
+        if raw_key.strip() == key:
+            return raw_value.strip().strip("\"'")
+    return default
+
+
+def resolve_executable(binary: str) -> str:
+    if "/" in binary:
+        return binary if os.access(binary, os.X_OK) else ""
+    return shutil.which(binary) or ""
+
+
+def command_status(command: str) -> bool:
+    return shutil.which(command) is not None
+
+
+def add(checks: list[dict[str, str]], check_id: str, status: str, message: str) -> None:
+    checks.append({"id": check_id, "status": status, "message": message})
+
+
+repo_root = os.environ["CHECK_REPO_ROOT"]
+backend_dir = os.environ["CHECK_BACKEND_DIR"]
+env_file = Path(os.environ["CHECK_ENV_FILE"])
+pairing_file = os.environ["CHECK_PAIRING_FILE"]
+phone_access_mode = os.environ["CHECK_PHONE_ACCESS_MODE"]
+public_server_url = os.environ["CHECK_PUBLIC_SERVER_URL"]
+server_url = os.environ["CHECK_SERVER_URL"]
+phone_access_label = os.environ["CHECK_PHONE_ACCESS_LABEL"]
+service_state = os.environ["CHECK_SERVICE_STATE"]
+pairing_state = os.environ["CHECK_PAIRING_STATE"]
+qr_path = os.environ["CHECK_QR_PATH"]
+checks: list[dict[str, str]] = []
+
+add(checks, "git", "ok" if command_status("git") else "todo", "Git is available" if command_status("git") else "Install Git, then rerun the installer")
+add(checks, "curl", "ok" if command_status("curl") else "todo", "curl is available" if command_status("curl") else "Install curl, then rerun the installer")
+if sys.version_info >= (3, 11):
+    add(checks, "python", "ok", f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} is ready")
+else:
+    add(checks, "python", "todo", "Python 3.11 or newer is required")
+add(checks, "uv", "ok" if command_status("uv") else "info", "uv is available" if command_status("uv") else "The MOBaiLE installer can add uv automatically")
+
+codex_binary = read_env(env_file, "VOICE_AGENT_CODEX_BINARY", "codex")
+claude_binary = read_env(env_file, "VOICE_AGENT_CLAUDE_BINARY", "claude")
+codex_path = resolve_executable(codex_binary)
+claude_path = resolve_executable(claude_binary)
+if codex_path or claude_path:
+    agents = []
+    if codex_path:
+        agents.append("Codex")
+    if claude_path:
+        agents.append("Claude")
+    add(checks, "agent_cli", "ok", "Agent CLI available: " + ", ".join(agents))
+else:
+    add(checks, "agent_cli", "todo", "Install and sign in to Codex CLI or Claude CLI for real agent runs")
+
+if phone_access_mode == "tailscale" and not public_server_url:
+    if not command_status("tailscale"):
+        add(checks, "phone_path", "todo", "Install Tailscale on this computer and the iPhone for Anywhere mode")
+    else:
+        status = subprocess.run(["tailscale", "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        add(
+            checks,
+            "phone_path",
+            "ok" if status.returncode == 0 else "todo",
+            "Tailscale is installed and reachable from the CLI" if status.returncode == 0 else "Tailscale is installed, but it does not look signed in/connected",
+        )
+elif phone_access_mode == "wifi":
+    add(checks, "phone_path", "info", "Wi-Fi mode does not require Tailscale; cellular use needs Tailscale or public HTTPS")
+elif phone_access_mode == "local":
+    add(checks, "phone_path", "info", "Local mode is for this computer/simulator only")
+else:
+    add(checks, "phone_path", "ok", "Public HTTPS URL is configured for phone access")
+
+if service_state == "Running":
+    add(checks, "service", "ok", "Backend service is running")
+else:
+    add(checks, "service", "todo", "Backend service is not running")
+
+if pairing_state == "ready":
+    add(checks, "pairing", "ok", "Pairing file has a fresh pair code")
+    if Path(qr_path).exists():
+        add(checks, "pairing_qr", "ok", f"Pairing QR exists: {qr_path}")
+    else:
+        add(checks, "pairing_qr", "info", "Pairing QR can be generated with mobaile pair")
+elif pairing_state == "expired":
+    add(checks, "pairing", "todo", "Pair code is expired; run mobaile pair")
+else:
+    add(checks, "pairing", "todo", "Pairing is not ready; run mobaile pair after install")
+
+next_actions = [item["message"] for item in checks if item["status"] == "todo"]
+payload = {
+    "status": "needs_action" if next_actions else "ready",
+    "active_backend": backend_dir,
+    "repo_root": repo_root,
+    "phone_access": {
+        "mode": phone_access_mode,
+        "label": phone_access_label,
+        "server_url": server_url,
+    },
+    "service_state": service_state,
+    "pairing_state": pairing_state,
+    "checks": checks,
+    "next_actions": next_actions,
+}
+print(json.dumps(payload, indent=2))
+raise SystemExit(1 if next_actions else 0)
+PY
+}
+
+check_command() {
+  local repo_root="$1"
+  shift || true
+  local output_json="false"
+  local backend_dir env_file pairing_file phone_access_mode public_server_url server_url service_state qr_path pairing_state phone_access_label
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        output_json="true"
+        shift
+        ;;
+      -h | --help)
+        echo "Usage: mobaile check [--json]"
+        return 0
+        ;;
+      *)
+        echo "Unknown check argument: $1" >&2
+        echo "Usage: mobaile check [--json]" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  CHECK_FAILURES=0
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
+  server_url="$(read_pairing_value "${pairing_file}" "server_url" "")"
+  service_state="$(service_state_label "${repo_root}")"
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+  pairing_state="$(pairing_state_code "${pairing_file}")"
+  phone_access_label="$(friendly_phone_access_label "${phone_access_mode}" "${public_server_url}" "${server_url}")"
+
+  if [[ "${output_json}" == "true" ]]; then
+    check_json_command \
+      "${repo_root}" \
+      "${backend_dir}" \
+      "${env_file}" \
+      "${pairing_file}" \
+      "${phone_access_mode}" \
+      "${public_server_url}" \
+      "${server_url}" \
+      "${phone_access_label}" \
+      "${service_state}" \
+      "${pairing_state}" \
+      "${qr_path}"
+    return
+  fi
+
+  echo "MOBaiLE setup check"
+  echo "Active backend: ${backend_dir}"
+  echo "Phone access: ${phone_access_label} (${phone_access_mode})"
+  echo
+
+  check_cmd_available git "Install Git, then rerun the installer" || true
+  check_cmd_available curl "Install curl, then rerun the installer" || true
+  check_python_version
+  if command -v uv > /dev/null 2>&1; then
+    check_ok "uv is available"
+  else
+    check_info "uv is not installed yet; the MOBaiLE installer can add it automatically"
+  fi
+  check_agent_cli "${env_file}"
+  check_phone_path "${phone_access_mode}" "${public_server_url}"
+
+  if [[ "${service_state}" == "Running" ]]; then
+    check_ok "Backend service is running"
+  elif [[ "$(service_install_preference)" == "yes" ]]; then
+    check_todo "Backend service is installed but not running; run mobaile restart"
+  else
+    check_info "Background service is not installed; the recommended installer can add it"
+  fi
+
+  check_pairing_state "${backend_dir}"
+  if [[ "${service_state}" == "Running" && -f "${pairing_file}" ]] && command -v curl > /dev/null 2>&1; then
+    if ! doctor_health_check "${pairing_file}"; then
+      CHECK_FAILURES=$((CHECK_FAILURES + 1))
+    fi
+  fi
+
+  echo
+  if [[ "${CHECK_FAILURES}" -eq 0 ]]; then
+    echo "Check result: ready"
+    return 0
+  fi
+  echo "Check result: needs action"
+  return 1
+}
+
+doctor_pairing_report() {
+  local pairing_file="$1"
+  local phone_access_mode="$2"
+  local qr_path="$3"
+
+  python3 - "${pairing_file}" "${phone_access_mode}" "${qr_path}" << 'PY'
+import ipaddress
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+from urllib.parse import urlparse
+
+pairing_path = Path(sys.argv[1])
+phone_access_mode = sys.argv[2].strip().lower() or "tailscale"
+qr_path = Path(sys.argv[3])
+failures = 0
+
+
+def line(status: str, message: str) -> None:
+    print(f"[{status}] {message}")
+
+
+def fail(message: str) -> None:
+    global failures
+    failures += 1
+    line("fail", message)
+
+
+def warn(message: str) -> None:
+    line("warn", message)
+
+
+def ok(message: str) -> None:
+    line("ok", message)
+
+
+def normalize_url(raw: object) -> str:
+    candidate = str(raw or "").strip().rstrip("/")
+    if not candidate:
+        return ""
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return ""
+    netloc = parsed.hostname.lower()
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return f"{parsed.scheme.lower()}://{netloc}"
+
+
+def dedupe(urls: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in urls:
+        normalized = normalize_url(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def host_for(url: str) -> str:
+    return (urlparse(url).hostname or "").lower()
+
+
+def ip_address(host: str):
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+def is_loopback(host: str) -> bool:
+    addr = ip_address(host)
+    return host in {"localhost", "::1"} or bool(addr and addr.is_loopback)
+
+
+def is_lan(host: str) -> bool:
+    addr = ip_address(host)
+    return host.endswith(".local") or bool(addr and addr.is_private and not addr.is_loopback)
+
+
+def is_tailscale(host: str) -> bool:
+    addr = ip_address(host)
+    return host.endswith(".ts.net") or bool(
+        addr
+        and addr.version == 4
+        and addr in ipaddress.ip_network("100.64.0.0/10")
+    )
+
+
+def is_public_https(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    addr = ip_address(host)
+    return (
+        parsed.scheme == "https"
+        and not host.endswith(".local")
+        and not host.endswith(".ts.net")
+        and not is_loopback(host)
+        and not is_tailscale(host)
+        and not (addr and addr.is_private)
+    )
+
+
+def is_ios_permitted_tailscale_pairing_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return is_public_https(url) or host.endswith(".ts.net") or parsed.scheme == "https"
+
+
+if not pairing_path.exists():
+    fail(f"Pairing file is missing: {pairing_path}")
+    raise SystemExit(1)
+
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    fail(f"Pairing file is not readable JSON: {exc}")
+    raise SystemExit(1)
+
+server_url = normalize_url(payload.get("server_url"))
+raw_urls = payload.get("server_urls")
+server_urls = dedupe(raw_urls if isinstance(raw_urls, list) else [server_url])
+if server_url and server_url not in server_urls:
+    server_urls.insert(0, server_url)
+
+if server_url:
+    ok(f"Primary URL: {server_url}")
+else:
+    fail("Pairing file has no valid server_url")
+
+if server_urls:
+    ok(f"Advertised URLs: {', '.join(server_urls)}")
+else:
+    fail("Pairing file has no valid advertised URLs")
+
+pair_code = str(payload.get("pair_code", "")).strip()
+expires_at = str(payload.get("pair_code_expires_at", "")).strip()
+if not pair_code:
+    fail("Pair code is missing; run mobaile pair")
+elif not expires_at:
+    fail("Pair code expiry is missing; run mobaile pair")
+else:
+    try:
+        expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        fail(f"Pair code expiry is invalid: {expires_at}")
+    else:
+        if expires <= datetime.now(timezone.utc):
+            fail("Pair code is expired; run mobaile pair")
+        else:
+            ok(f"Pair code is valid until {expires_at}")
+
+if qr_path.exists():
+    ok(f"Pairing QR image exists: {qr_path}")
+else:
+    fail(f"Pairing QR image is missing: {qr_path}")
+
+hosts = [host_for(url) for url in server_urls]
+if phone_access_mode == "tailscale":
+    bad_urls = [
+        url for url in server_urls
+        if not (is_tailscale(host_for(url)) or is_public_https(url))
+    ]
+    ios_pairing_urls = [
+        url for url in server_urls
+        if is_ios_permitted_tailscale_pairing_url(url)
+    ]
+    if bad_urls:
+        fail("Tailscale mode advertises Wi-Fi/local-only URL(s): " + ", ".join(bad_urls))
+    elif not ios_pairing_urls:
+        fail("Tailscale mode has no iOS-permitted pairing URL; use MagicDNS *.ts.net or public HTTPS")
+    elif not is_ios_permitted_tailscale_pairing_url(server_urls[0]):
+        fail("Primary Tailscale pairing URL may be blocked by iOS ATS: " + server_urls[0])
+    elif any(is_tailscale(host) for host in hosts):
+        ok("Tailscale mode advertises a Tailscale phone path")
+    elif any(is_public_https(url) for url in server_urls):
+        ok("Tailscale mode advertises a public HTTPS phone path")
+    else:
+        fail("Tailscale mode has no Tailscale or public HTTPS URL")
+elif phone_access_mode == "wifi":
+    if any(is_lan(host) and not is_tailscale(host) for host in hosts):
+        ok("Wi-Fi mode advertises a LAN phone path")
+    else:
+        fail("Wi-Fi mode has no LAN URL")
+elif phone_access_mode == "local":
+    if all(is_loopback(host) for host in hosts):
+        ok("Local mode is loopback-only")
+    else:
+        fail("Local mode advertises non-loopback URL(s): " + ", ".join(server_urls))
+else:
+    warn(f"Unknown phone access mode: {phone_access_mode}")
+
+raise SystemExit(1 if failures else 0)
+PY
+}
+
+doctor_urls() {
+  local pairing_file="$1"
+
+  python3 - "${pairing_file}" << 'PY'
+import json
+from pathlib import Path
+import sys
+from urllib.parse import urlparse
+
+pairing_path = Path(sys.argv[1])
+if not pairing_path.exists():
+    raise SystemExit(0)
+try:
+    payload = json.loads(pairing_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+urls = payload.get("server_urls")
+if not isinstance(urls, list):
+    urls = [payload.get("server_url", "")]
+seen = set()
+for raw in urls:
+    value = str(raw or "").strip().rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or value in seen:
+        continue
+    seen.add(value)
+    print(value)
+PY
+}
+
+doctor_health_check() {
+  local pairing_file="$1"
+  local failures=0
+  local successes=0
+  local urls=()
+  local url code
+
+  if [[ "${MOBAILE_DOCTOR_SKIP_NETWORK:-0}" == "1" ]]; then
+    echo "[warn] Network health checks skipped by MOBAILE_DOCTOR_SKIP_NETWORK=1"
+    return 0
+  fi
+  if ! command -v curl > /dev/null 2>&1; then
+    echo "[fail] curl is required for network health checks"
+    return 1
+  fi
+
+  while IFS= read -r url; do
+    [[ -n "${url}" ]] && urls+=("${url}")
+  done < <(doctor_urls "${pairing_file}")
+
+  if [[ "${#urls[@]}" -eq 0 ]]; then
+    echo "[fail] No advertised URLs available for health checks"
+    return 1
+  fi
+
+  for url in "${urls[@]}"; do
+    code="$(curl -sS --connect-timeout 3 --max-time 5 -o /dev/null -w "%{http_code}" "${url}/health" 2> /dev/null || true)"
+    if [[ "${code}" == "200" ]]; then
+      echo "[ok] ${url}/health returned 200"
+      successes=$((successes + 1))
+    else
+      echo "[warn] ${url}/health returned ${code:-no response}"
+      failures=$((failures + 1))
+    fi
+  done
+
+  if [[ "${successes}" -eq 0 ]]; then
+    echo "[fail] None of the advertised URLs answered /health"
+    return 1
+  fi
+  return 0
+}
+
+doctor_backend_config_check() {
+  local pairing_file="$1"
+  local env_file="$2"
+  local api_token urls=() url code body_file successes=0 failures=0
+
+  if [[ "${MOBAILE_DOCTOR_SKIP_NETWORK:-0}" == "1" ]]; then
+    echo "[warn] Backend executor config check skipped by MOBAILE_DOCTOR_SKIP_NETWORK=1"
+    return 0
+  fi
+  if ! command -v curl > /dev/null 2>&1; then
+    echo "[warn] Backend executor config check skipped because curl is unavailable"
+    return 0
+  fi
+
+  api_token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
+  if [[ -z "${api_token}" ]]; then
+    echo "[warn] Backend executor config check skipped because VOICE_AGENT_API_TOKEN is missing"
+    return 0
+  fi
+
+  while IFS= read -r url; do
+    [[ -n "${url}" ]] && urls+=("${url}")
+  done < <(doctor_urls "${pairing_file}")
+
+  if [[ "${#urls[@]}" -eq 0 ]]; then
+    echo "[warn] Backend executor config check skipped because no advertised URLs are available"
+    return 0
+  fi
+
+  body_file="$(mktemp)"
+  trap 'rm -f "${body_file}"' RETURN
+
+  for url in "${urls[@]}"; do
+    code="$(curl -sS --connect-timeout 3 --max-time 5 -H "Authorization: Bearer ${api_token}" -o "${body_file}" -w "%{http_code}" "${url}/v1/config" 2> /dev/null || true)"
+    if [[ "${code}" != "200" ]]; then
+      continue
+    fi
+
+    if python3 - "${url}" "${body_file}" << 'PY'; then
+import json
+from pathlib import Path
+import sys
+
+url = sys.argv[1]
+body_path = Path(sys.argv[2])
+
+try:
+    payload = json.loads(body_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    print(f"[warn] {url}/v1/config returned unreadable JSON: {exc}")
+    raise SystemExit(2)
+
+default_executor = str(payload.get("default_executor", "")).strip().lower()
+available = {
+    str(value).strip().lower()
+    for value in payload.get("available_executors", [])
+    if str(value).strip()
+}
+codex_descriptor_available = False
+for descriptor in payload.get("executors", []):
+    if not isinstance(descriptor, dict):
+        continue
+    if str(descriptor.get("id", "")).strip().lower() == "codex":
+        codex_descriptor_available = bool(descriptor.get("available", False))
+        break
+
+codex_ready = "codex" in available or codex_descriptor_available
+if codex_ready and default_executor == "codex":
+    print(f"[ok] Backend reports Codex executor ready: {url}/v1/config")
+    raise SystemExit(0)
+if codex_ready:
+    print(f"[warn] Backend reports Codex available, but default executor is {default_executor or 'unknown'}")
+    raise SystemExit(0)
+
+print(f"[fail] Backend does not report Codex as available: {url}/v1/config")
+raise SystemExit(1)
+PY
+      successes=$((successes + 1))
+      break
+    else
+      failures=$((failures + 1))
+    fi
+  done
+
+  if [[ "${successes}" -gt 0 ]]; then
+    return 0
+  fi
+  if [[ "${failures}" -gt 0 ]]; then
+    return 1
+  fi
+
+  echo "[warn] Backend executor config check could not reach /v1/config"
+  return 0
+}
+
+doctor_keep_awake_check() {
+  local repo_root="$1"
+  local state
+
+  state="$(keep_awake_state_label "${repo_root}")"
+  case "${state}" in
+    Running)
+      echo "[ok] Keep-awake service is running"
+      ;;
+    Unsupported)
+      echo "[warn] Keep-awake service is macOS-only"
+      ;;
+    *)
+      echo "[warn] Keep-awake service is not running; run mobaile awake"
+      ;;
+  esac
+  return 0
+}
+
+doctor_command() {
+  local repo_root="$1"
+  local backend_dir env_file pairing_file qr_path phone_access_mode state failures=0
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  state="$(service_state_label "${repo_root}")"
+
+  echo "MOBaiLE doctor"
+  echo "Active backend: ${backend_dir}"
+  echo "Phone access mode: $(friendly_phone_access_label "${phone_access_mode}" "$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")" "$(read_pairing_value "${pairing_file}" "server_url" "")") (${phone_access_mode})"
+
+  if [[ "${state}" == "Running" ]]; then
+    echo "[ok] Backend service is running"
+  else
+    echo "[fail] Backend service is not running"
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_pairing_report "${pairing_file}" "${phone_access_mode}" "${qr_path}"; then
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_health_check "${pairing_file}"; then
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_codex_binary_check "${env_file}"; then
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_backend_config_check "${pairing_file}" "${env_file}"; then
+    failures=$((failures + 1))
+  fi
+
+  doctor_keep_awake_check "${repo_root}"
+
+  if [[ "${failures}" -eq 0 ]]; then
+    echo "Doctor result: ready"
+    return 0
+  fi
+  echo "Doctor result: attention needed"
+  return 1
+}
+
+json_file_field() {
+  local json_file="$1"
+  local field_name="$2"
+  local default_value="${3:-}"
+
+  python3 - "${json_file}" "${field_name}" "${default_value}" << 'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+field = sys.argv[2]
+default = sys.argv[3]
+
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    print(default)
+    raise SystemExit(0)
+
+value = payload.get(field, default)
+if value is None:
+    value = default
+print(str(value))
+PY
+}
+
+first_run_usage() {
+  cat << 'EOF'
+Usage: mobaile first-run [options]
+
+Options:
+  --executor <shell|codex|claude>  Force the starter run executor
+  --workdir <path>                 Use a custom playground directory
+  --timeout <seconds>              Wait time before giving up (default: 120)
+EOF
+}
+
+first_run_normalize_executor() {
+  local executor="$1"
+  executor="$(printf "%s" "${executor}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${executor}" == "local" ]]; then
+    executor="shell"
+  fi
+  printf "%s\n" "${executor}"
+}
+
+first_run_choose_executor() {
+  local env_file="$1"
+  local requested="$2"
+  local default_executor codex_binary claude_binary
+
+  if [[ -n "${requested}" ]]; then
+    first_run_normalize_executor "${requested}"
+    return
+  fi
+
+  default_executor="$(first_run_normalize_executor "$(read_env_value "${env_file}" "VOICE_AGENT_DEFAULT_EXECUTOR" "codex")")"
+  codex_binary="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_BINARY" "codex")"
+  claude_binary="$(read_env_value "${env_file}" "VOICE_AGENT_CLAUDE_BINARY" "claude")"
+
+  case "${default_executor}" in
+    shell)
+      printf "shell\n"
+      return
+      ;;
+    codex)
+      if resolve_executable_path "${codex_binary}" > /dev/null 2>&1; then
+        printf "codex\n"
+        return
+      fi
+      ;;
+    claude)
+      if resolve_executable_path "${claude_binary}" > /dev/null 2>&1; then
+        printf "claude\n"
+        return
+      fi
+      ;;
+  esac
+
+  if resolve_executable_path "${codex_binary}" > /dev/null 2>&1; then
+    printf "codex\n"
+    return
+  fi
+  if resolve_executable_path "${claude_binary}" > /dev/null 2>&1; then
+    printf "claude\n"
+    return
+  fi
+  printf "shell\n"
+}
+
+first_run_validate_executor() {
+  local env_file="$1"
+  local executor="$2"
+  local binary
+  executor="$(first_run_normalize_executor "${executor}")"
+
+  case "${executor}" in
+    shell)
+      return 0
+      ;;
+    codex)
+      binary="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_BINARY" "codex")"
+      if resolve_executable_path "${binary}" > /dev/null 2>&1; then
+        return 0
+      fi
+      echo "Codex CLI is not available to this shell: ${binary}" >&2
+      return 1
+      ;;
+    claude)
+      binary="$(read_env_value "${env_file}" "VOICE_AGENT_CLAUDE_BINARY" "claude")"
+      if resolve_executable_path "${binary}" > /dev/null 2>&1; then
+        return 0
+      fi
+      echo "Claude CLI is not available to this shell: ${binary}" >&2
+      return 1
+      ;;
+    *)
+      echo "Invalid executor: ${executor}. Expected shell, codex, or claude." >&2
+      return 1
+      ;;
+  esac
+}
+
+first_run_default_prompt() {
+  local executor="$1"
+  case "${executor}" in
+    shell)
+      printf "%s\n" "printf \"print('hello from voice agent')\\n\" > hello.py && python3 hello.py"
+      ;;
+    *)
+      printf "%s\n" "create a hello python script and run it"
+      ;;
+  esac
+}
+
+cleanup_first_run_response_file() {
+  if [[ -n "${MOBAILE_FIRST_RUN_RESPONSE_FILE:-}" ]]; then
+    rm -f "${MOBAILE_FIRST_RUN_RESPONSE_FILE}"
+  fi
+}
+
+first_run_request_body() {
+  local executor="$1"
+  local workdir="$2"
+  local prompt="$3"
+
+  FIRST_RUN_EXECUTOR="${executor}" \
+    FIRST_RUN_WORKDIR="${workdir}" \
+    FIRST_RUN_PROMPT="${prompt}" \
+    python3 - << 'PY'
+import json
+import os
+
+print(json.dumps({
+    "session_id": "mobaile-first-run",
+    "thread_id": "mobaile-first-run",
+    "utterance_text": os.environ["FIRST_RUN_PROMPT"],
+    "executor": os.environ["FIRST_RUN_EXECUTOR"],
+    "working_directory": os.environ["FIRST_RUN_WORKDIR"],
+    "response_mode": "concise",
+    "response_profile": "guided",
+}))
+PY
+}
+
+first_run_command() {
+  local repo_root="$1"
+  shift || true
+  local requested_executor="" timeout_sec="${MOBAILE_FIRST_RUN_TIMEOUT:-120}"
+  local workdir="${MOBAILE_FIRST_RUN_WORKDIR:-${HOME}/MOBaiLE-playground}"
+  local backend_dir env_file pairing_file server_url token executor prompt response_file code run_id status summary deadline request_body
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --executor)
+        if [[ $# -lt 2 ]]; then
+          echo "--executor requires a value." >&2
+          return 1
+        fi
+        requested_executor="$2"
+        shift 2
+        ;;
+      --workdir)
+        if [[ $# -lt 2 ]]; then
+          echo "--workdir requires a value." >&2
+          return 1
+        fi
+        workdir="$2"
+        shift 2
+        ;;
+      --timeout)
+        if [[ $# -lt 2 ]]; then
+          echo "--timeout requires a value." >&2
+          return 1
+        fi
+        timeout_sec="$2"
+        shift 2
+        ;;
+      -h | --help)
+        first_run_usage
+        return 0
+        ;;
+      *)
+        first_run_usage >&2
+        echo "Unknown first-run argument: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  case "${timeout_sec}" in
+    '' | *[!0-9]*)
+      echo "--timeout must be a positive integer." >&2
+      return 1
+      ;;
+    0)
+      echo "--timeout must be greater than zero." >&2
+      return 1
+      ;;
+  esac
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
+  server_url="$(read_pairing_value "${pairing_file}" "server_url" "")"
+  token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
+  executor="$(first_run_choose_executor "${env_file}" "${requested_executor}")"
+  prompt="${MOBAILE_FIRST_RUN_PROMPT:-$(first_run_default_prompt "${executor}")}"
+
+  if ! command -v curl > /dev/null 2>&1; then
+    echo "curl is required for mobaile first-run." >&2
+    return 1
+  fi
+  if [[ -z "${server_url}" || -z "${token}" ]]; then
+    echo "First run needs a configured backend URL and API token." >&2
+    echo "Run mobaile status, then mobaile pair if pairing is not ready." >&2
+    return 1
+  fi
+  if ! first_run_validate_executor "${env_file}" "${executor}"; then
+    echo "Retry with --executor shell for the safe starter fallback." >&2
+    return 1
+  fi
+
+  mkdir -p "${workdir}"
+  request_body="$(first_run_request_body "${executor}" "${workdir}" "${prompt}")"
+  response_file="$(mktemp)"
+  MOBAILE_FIRST_RUN_RESPONSE_FILE="${response_file}"
+  trap cleanup_first_run_response_file EXIT
+
+  echo "MOBaiLE first run"
+  echo "Server: ${server_url}"
+  echo "Executor: ${executor}"
+  echo "Playground: ${workdir}"
+
+  code="$(
+    curl -sS -o "${response_file}" -w "%{http_code}" \
+      -X POST "${server_url}/v1/utterances" \
+      -H "Authorization: Bearer ${token}" \
+      -H 'Content-Type: application/json' \
+      -d "${request_body}" || true
+  )"
+  if [[ "${code}" != "200" ]]; then
+    echo "Could not start first run; /v1/utterances returned ${code:-no response}." >&2
+    echo "Run mobaile check or mobaile repair to diagnose setup." >&2
+    return 1
+  fi
+
+  run_id="$(json_file_field "${response_file}" "run_id" "")"
+  if [[ -z "${run_id}" ]]; then
+    echo "Could not read run_id from backend response." >&2
+    return 1
+  fi
+  echo "Run: ${run_id}"
+
+  deadline=$((SECONDS + timeout_sec))
+  status="running"
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    code="$(curl -sS -o "${response_file}" -w "%{http_code}" -H "Authorization: Bearer ${token}" "${server_url}/v1/runs/${run_id}" || true)"
+    if [[ "${code}" != "200" ]]; then
+      echo "Waiting for run status returned ${code:-no response}." >&2
+      sleep 1
+      continue
+    fi
+    status="$(json_file_field "${response_file}" "status" "running")"
+    case "${status}" in
+      completed | failed | cancelled | blocked)
+        break
+        ;;
+    esac
+    sleep 1
+  done
+
+  summary="$(json_file_field "${response_file}" "summary" "")"
+  echo "Status: ${status}"
+  if [[ -n "${summary}" ]]; then
+    echo "Summary: ${summary}"
+  fi
+
+  if [[ "${status}" == "completed" ]]; then
+    echo "First run complete. MOBaiLE can start work from your phone."
+    return 0
+  fi
+  echo "First run did not complete. Run mobaile doctor for details." >&2
+  return 1
+}
+
+pair_command() {
+  local repo_root="$1"
+  local backend_dir
+  local pairing_file
+  local qr_path
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  pairing_file="${backend_dir}/pairing.json"
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+
+  if [[ -n "${MOBAILE_TEST_PAIRING_QR:-}" ]]; then
+    mkdir -p "$(dirname "${qr_path}")"
+    : > "${qr_path}"
+  else
+    if [[ ! -f "${pairing_file}" ]]; then
+      echo "Pairing is not ready. Missing ${pairing_file}." >&2
+      echo "Run mobaile status after the backend is configured." >&2
+      return 1
+    fi
+
+    if [[ ! -f "${repo_root}/scripts/pairing_qr.sh" ]]; then
+      echo "Missing pairing QR helper: ${repo_root}/scripts/pairing_qr.sh" >&2
+      return 1
+    fi
+
+    MOBAILE_BACKEND_DIR="${backend_dir}" \
+      MOBAILE_PAIRING_FILE="${pairing_file}" \
+      MOBAILE_PAIRING_QR_OUT="${qr_path}" \
+      MOBAILE_QR_PYTHON_ENV_DIR="${backend_dir}" \
+      MOBAILE_PAIR_FORCE_REFRESH=1 \
+      bash "${repo_root}/scripts/pairing_qr.sh" --out "${qr_path}" --quiet --no-preview
+  fi
+
+  cat << EOF
+Pairing QR: ${qr_path}
+URL: $(read_pairing_value "${pairing_file}" "server_url" "Not ready")
+Phone pairing: $(pairing_status_label "${pairing_file}")
+EOF
+
+  if [[ -f "${qr_path}" ]]; then
+    open_file_if_possible "${qr_path}"
+  else
+    echo "QR image is not available yet at ${qr_path}."
+  fi
+}
+
+repair_command() {
+  local repo_root="$1"
+  local service_script
+  local failures=0
+
+  echo "MOBaiLE repair"
+
+  if [[ "$(service_install_preference)" == "yes" ]]; then
+    service_script="$(service_script_path "${repo_root}")"
+    if [[ -f "${service_script}" ]]; then
+      echo "Restarting backend service..."
+      if ! bash "${service_script}" restart; then
+        echo "Backend restart reported a problem." >&2
+        failures=$((failures + 1))
+      fi
+    else
+      echo "Service helper is missing: ${service_script}" >&2
+      failures=$((failures + 1))
+    fi
+  else
+    echo "Background service is not installed; skipping restart."
+  fi
+
+  echo
+  echo "Refreshing pairing QR..."
+  if ! pair_command "${repo_root}"; then
+    failures=$((failures + 1))
+  fi
+
+  echo
+  if ! doctor_command "${repo_root}"; then
+    failures=$((failures + 1))
+  fi
+
+  if [[ "${failures}" -eq 0 ]]; then
+    echo "Repair result: ready"
+    return 0
+  fi
+  echo "Repair result: attention needed"
+  return 1
+}
+
+delegate_service_command() {
+  local repo_root="$1"
+  local command_name="$2"
+  local service_script
+
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ ! -f "${service_script}" ]]; then
+    echo "Missing service helper: ${service_script}" >&2
+    exit 1
+  fi
+
+  exec bash "${service_script}" "${command_name}"
+}
+
+config_command() {
+  local repo_root="$1"
+  local checkout_backend_dir="${repo_root}/backend"
+  local backend_dir
+  local env_file
+  local pairing_file
+  local qr_path service_script security_mode phone_access_mode public_server_url api_token server_url
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  pairing_file="${backend_dir}/pairing.json"
+  qr_path="$(pairing_qr_path "${backend_dir}")"
+  service_script="$(service_script_path "${repo_root}")"
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
+  api_token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
+  server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
+
+  cat << EOF
+MOBaiLE configuration
+
+Repo root: ${repo_root}
+Checkout backend dir: ${checkout_backend_dir}
+Active backend dir: ${backend_dir}
+Env file: ${env_file} $([[ -f "${env_file}" ]] && printf "(present)" || printf "(missing)")
+Pairing file: ${pairing_file} $([[ -f "${pairing_file}" ]] && printf "(present)" || printf "(missing)")
+Pairing QR image: ${qr_path} $([[ -f "${qr_path}" ]] && printf "(present)" || printf "(missing)")
+Service helper: ${service_script}
+
+Security mode: $(friendly_security_label "${security_mode}") (${security_mode})
+Phone access mode: $(friendly_phone_access_label "${phone_access_mode}" "${public_server_url}" "${server_url}") (${phone_access_mode})
+API token: $([[ -n "${api_token}" ]] && printf "Configured" || printf "Missing")
+Server URL: ${server_url}
+Phone pairing: $(pairing_status_label "${pairing_file}")
+EOF
+}
+
+update_command() {
+  local repo_root="$1"
+  local update_mode="${2:-apply}"
+  local env_file="${repo_root}/backend/.env"
+  local branch remote_url local_ref remote_ref security_mode phone_access_mode public_server_url background_service
+
+  git_checkout_or_fail "${repo_root}"
+  branch="$(git_current_branch "${repo_root}")"
+  remote_url="$(git_origin_url "${repo_root}")"
+
+  if [[ -z "${remote_url}" ]]; then
+    echo "Could not find an origin remote for this checkout." >&2
+    exit 1
+  fi
+  if ! remote_is_update_source "${remote_url}"; then
+    echo "Refusing to auto-update from an unrecognized remote: ${remote_url}" >&2
+    exit 1
+  fi
+
+  fetch_update_refs "${repo_root}"
+  local_ref="$(git_short_ref "${repo_root}" "HEAD")"
+  remote_ref="$(git_short_ref "${repo_root}" "origin/main")"
+  if [[ -z "${remote_ref}" ]]; then
+    echo "Could not resolve origin/main for this checkout." >&2
+    exit 1
+  fi
+
+  if [[ "${update_mode}" == "check" ]]; then
+    print_update_status "${repo_root}" "${branch:-detached}" "${local_ref}" "${remote_ref}"
+    return
+  fi
+
+  if [[ "${branch}" != "main" ]]; then
+    echo "mobaile update only supports the main branch. Current branch: ${branch:-detached}." >&2
+    exit 1
+  fi
+  if git_worktree_dirty "${repo_root}"; then
+    echo "mobaile update requires a clean checkout. Commit or stash local changes first." >&2
+    exit 1
+  fi
+
+  if [[ "${local_ref}" == "${remote_ref}" ]]; then
+    echo "MOBaiLE is already up to date (${local_ref})."
+    return
+  fi
+
+  echo "Updating MOBaiLE from ${local_ref} to ${remote_ref}..."
+  git -C "${repo_root}" pull --ff-only > /dev/null
+
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+  phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
+  public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
+  background_service="$(service_install_preference)"
+
+  local install_args=(
+    bash "${repo_root}/scripts/install.sh"
+    --checkout "${repo_root}"
+    --non-interactive
+    --mode "${security_mode}"
+    --phone-access "${phone_access_mode}"
+    --background-service "${background_service}"
+  )
+  if [[ -n "${public_server_url}" ]]; then
+    install_args+=(--public-url "${public_server_url}")
+  fi
+
+  "${install_args[@]}"
+  echo "Updated MOBaiLE to $(git_short_ref "${repo_root}" "HEAD")."
+}
+
+main() {
+  local repo_root command_name
+  repo_root="$(resolve_repo_root)"
+  command_name="${1:-status}"
+
+  case "${command_name}" in
+    status) status_command "${repo_root}" ;;
+    setup)
+      shift || true
+      setup_command "${repo_root}" "$@"
+      ;;
+    autonomy)
+      shift || true
+      autonomy_command "${repo_root}" "$@"
+      ;;
+    check)
+      shift || true
+      check_command "${repo_root}" "$@"
+      ;;
+    pair) pair_command "${repo_root}" ;;
+    first-run)
+      shift || true
+      first_run_command "${repo_root}" "$@"
+      ;;
+    repair) repair_command "${repo_root}" ;;
+    update)
+      shift || true
+      case "${1:-}" in
+        "") update_command "${repo_root}" "apply" ;;
+        --check | check) update_command "${repo_root}" "check" ;;
+        *)
+          echo "Usage: mobaile update [--check]" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+    logs | restart | start | stop) delegate_service_command "${repo_root}" "${command_name}" ;;
+    awake) delegate_service_command "${repo_root}" "keep-awake-install" ;;
+    awake-status) delegate_service_command "${repo_root}" "keep-awake-status" ;;
+    sleep) delegate_service_command "${repo_root}" "keep-awake-uninstall" ;;
+    config) config_command "${repo_root}" ;;
+    doctor) doctor_command "${repo_root}" ;;
+    -h | --help | help) usage ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

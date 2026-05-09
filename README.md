@@ -1,0 +1,322 @@
+# MOBaiLE
+
+<p align="center"><strong>Run your own computer from iPhone.</strong></p>
+
+<p align="center">
+  Pair MOBaiLE with a Mac or Linux machine you control, send a prompt by text or voice, and follow the run in one live thread.
+</p>
+
+<p align="center">
+  The phone is the control surface. Your computer keeps the repo, shell, credentials, files, and network access.
+  This repo contains the public backend, runtime, and setup scripts for installing or self-hosting MOBaiLE.
+</p>
+
+<p align="center">
+  <a href="docs/USAGE.md"><strong>Install Guide</strong></a>
+  ·
+  <a href="backend/README.md"><strong>Backend</strong></a>
+  ·
+  <a href="ARCHITECTURE.md"><strong>Architecture</strong></a>
+  ·
+  <a href="scripts/README.md"><strong>Scripts</strong></a>
+</p>
+
+> Your phone starts and follows the run. Your Mac or Linux machine does the work.
+
+## Get a run back in minutes
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes
+```
+
+If you want the shortest path, do this:
+
+1. Run the installer on the Mac or Linux machine you want MOBaiLE to use.
+2. The one-liner uses the recommended defaults: `Full Access`, `Anywhere with Tailscale`, and `Yes` for the background service.
+3. When the installer shows the pairing QR, open MOBaiLE on your iPhone and tap `Scan Pairing QR`.
+4. Point the phone at the screen, confirm the pairing, and send a small prompt.
+5. Run `mobaile first-run` to try a safe starter task in `~/MOBaiLE-playground`.
+6. Run `mobaile autonomy --deep --open-permissions` on the Mac if browser or desktop control needs final permission approval.
+7. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
+
+Run `mobaile setup` on the backend computer to open the computer-local setup page with the pairing QR, backend readiness checks, first-run status, and autonomy readiness. It uses `127.0.0.1`, so it is not a phone-openable link; scan the QR with the iPhone instead. On macOS, run `mobaile awake` if this computer should stay reachable while you are logged in. If setup feels off, run `mobaile check` for a quick preflight or `mobaile repair` to refresh pairing, restart the service, and run diagnostics. When you want the latest installed CLI/backend later, run `mobaile update`.
+
+`install.sh` installs or updates MOBaiLE in `~/MOBaiLE`, configures the backend, creates the pairing QR, keeps the service running in the background when supported, and installs the `mobaile` command for status, pairing, and logs.
+
+What the installer handles: `uv`, backend Python dependencies, backend config, service setup, computer-local setup page, QR pairing, and Full Access autonomy provisioning.
+What you still need: `git`, `curl`, Python 3.11+, and a signed-in agent CLI for agent runs. Codex CLI or Claude CLI works; without one, MOBaiLE can pair and run direct shell commands, but not agent coding runs. The default `Anywhere with Tailscale` path also needs Tailscale on both the computer and iPhone. You can skip Tailscale only for same-Wi-Fi pairing, local simulator testing, or a public HTTPS URL.
+
+Want to inspect first? Append `--dry-run` to any one-liner to print the choices and commands without changing your computer.
+
+Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USAGE.md).
+
+<p align="center">
+  <img src="docs/readme-hero.png" alt="MOBaiLE hero showing a ready chat, a live run thread, and voice mode on iPhone" width="1200" />
+</p>
+
+## Why people use it
+
+- **Use the environment that already has the work.** Run against your actual repo, shell, credentials, files, and network instead of copying context into a hosted IDE.
+- **Follow the work, not just the final answer.** Prompt, live progress, result, artifacts, and follow-up stay in one readable thread.
+- **Start the next step when the laptop is awkward.** Voice mode, silence-based send, widgets, haptics, audio cues, and Shortcuts make quick work practical away from the desk.
+- **Keep context attached to the workspace.** Pair once, stay in the same workspace thread, and make the next run inherit what just happened.
+
+## Keep trust boundaries explicit
+
+- **The phone does not run the code.** It sends prompts, audio, attachments, and session metadata to the backend you control.
+- **Access mode stays visible.** Use `safe` on a cautious host, or `full-access` on a trusted private machine.
+- **Pairing is deliberate.** MOBaiLE uses a QR and one-time `pair_code`; the long-lived API token stays on the host.
+- **The network path is inspectable.** Pairing prefers Tailscale or a configured public URL, and the backend remains yours to operate.
+
+## Three moments that matter
+
+<p align="center">
+  <img src="docs/readme-screens/configured-empty.png" alt="Ready chat showing runtime, working directory, and the composer" width="250" />
+  <img src="docs/readme-screens/conversation.png" alt="Live run thread showing the result and the next recommended step" width="250" />
+  <img src="docs/readme-screens/recording.png" alt="Voice capture controls that stay attached to the current thread" width="250" />
+</p>
+
+- **Start in the right workspace.** See the paired runtime, working directory, and chat switcher before sending the first prompt.
+- **Follow the run live.** Progress, result, summary, artifacts, and next recommended action stay together in the same thread.
+- **Keep talking without losing context.** Voice mode reopens the mic after each reply while attachments and typed follow-ups stay in the same conversation.
+
+## Good First Prompts
+
+- `create a hello python script and run it`
+- `inspect this repo and tell me where onboarding feels rough`
+- `run the backend smoke test and summarize what passed`
+- `fix the failing test and explain the patch`
+
+<details>
+  <summary><strong>Other setup paths</strong></summary>
+
+Use these only if the main install command is not what you want.
+
+- Already in a checkout and want to run the installer there: `bash ./scripts/install.sh --checkout "$PWD"`
+- Same recommended setup with explicit flags: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --mode full-access --phone-access tailscale --background-service yes`
+- Same Wi-Fi only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --phone-access wifi`
+- Local simulator/dev only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no`
+- Preview before changing anything: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes --dry-run`
+- Backend-only/manual path from a checkout: `bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale`
+- Local simulator-only testing: `bash ./scripts/install_backend.sh --mode safe --phone-access local`
+
+If you skip QR pairing, the app can also be connected manually with a reachable server address and API token.
+
+</details>
+
+<details>
+  <summary><strong>Full setup details</strong></summary>
+
+### Install the essentials
+
+On your computer:
+
+- `git`, `curl`, and Python 3.11+
+- [`uv`](https://docs.astral.sh/uv/) only if you are not letting the installer add it for you
+- [Codex CLI](https://developers.openai.com/codex/cli) or Claude CLI, installed and signed in, for real agent runs
+- [Tailscale](https://tailscale.com/download) for the default `Anywhere with Tailscale` path
+
+On your iPhone:
+
+- **Tailscale**, unless you are pairing only on the same Wi-Fi or through a public HTTPS URL
+- **MOBaiLE**, from TestFlight or the App Store, or built locally from `ios/`
+
+MOBaiLE never runs code on the phone. It only sends prompts, audio, attachments, and session metadata to the backend you pair with.
+
+### Sign in to Tailscale on both devices
+
+Use the same tailnet on both devices. On the computer:
+
+```bash
+tailscale status
+tailscale ip -4
+```
+
+### Install on the computer
+
+Recommended path:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile-backend/main/scripts/install.sh | bash -s -- --yes
+```
+
+If you are already in a checkout:
+
+```bash
+bash ./scripts/install.sh --checkout "$PWD"
+```
+
+The pasted one-liner uses recommended defaults because piped shell scripts cannot reliably prompt. If you run the installer from a checkout without `--yes`, it asks three questions:
+
+1. How much access should MOBaiLE have on this computer?
+   Keep `Full Access` unless you specifically want the safer mode.
+2. Where should your phone work?
+   Keep `Anywhere with Tailscale` for the normal remote setup.
+3. Should MOBaiLE stay running in the background?
+   Keep `Yes` if this computer should stay ready for the phone.
+
+Manual host-only path from a checkout:
+
+```bash
+bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale
+bash ./scripts/service_macos.sh install   # macOS
+# or on Linux:
+bash ./scripts/service_linux.sh install
+bash ./scripts/pairing_qr.sh
+```
+
+What the installer does:
+
+- installs backend dependencies and creates `backend/.env`
+- creates `backend/pairing.json` using a Tailscale URL when available
+- installs and starts a background service on macOS or Linux when supported
+- generates a pairing QR; run `mobaile pair` later to refresh it
+
+If you want a stable hostname for the iPhone, set `VOICE_AGENT_PUBLIC_SERVER_URL` before pairing. Otherwise MOBaiLE uses the URLs for the selected phone access mode: Tailscale mode advertises Tailscale/public URLs only, while Wi-Fi mode advertises the LAN URL.
+
+### Check that the computer is ready
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Expected result: JSON with status `ok`.
+
+### Pair the phone
+
+On the computer:
+
+1. Run `mobaile pair`. If your shell does not find it yet, run `~/.local/bin/mobaile pair`.
+2. Open the `Pairing QR` path it prints.
+
+The path may be under the checkout or under the installed service runtime, depending on how the backend is running.
+
+On the iPhone:
+
+1. Tap `Scan Pairing QR` inside MOBaiLE.
+2. Point the phone at the QR on your computer.
+3. Confirm pairing inside MOBaiLE.
+
+Manual fallback in app settings:
+
+- `Server URL`: preferred URL from the active pairing file
+- `API Token`: `VOICE_AGENT_API_TOKEN` from the active backend `.env`
+- `Session ID`: keep `iphone-app` unless you want a custom one
+
+If the app works on Wi-Fi but not on cellular, verify the chosen Tailscale or public URL is reachable from the phone.
+
+### Validate remote use
+
+1. Turn off Wi-Fi on the iPhone.
+2. Keep Tailscale connected.
+3. Send a small prompt such as `create and run a hello script`.
+4. Confirm live events and the final result both come back in the thread.
+
+</details>
+
+## Designed For On-The-Go Use
+
+- **Widget:** add `Start Voice Task` to jump straight into recording from the Home Screen.
+- **Haptic and audio cues:** useful when you do not want to stare at the screen for confirmation.
+- **Live voice drafts:** speech appears in the composer while recording, so you can stop, edit, continue dictating, and send when it is right.
+- **Voice mode:** keeps the mic reopening after each reply so the conversation can continue hands-free.
+- **Auto-send after silence:** ideal for shorter one-shot voice captures.
+- **Siri and Shortcuts:** available intents include `Start Voice Mode` and `Send Last Prompt`.
+
+## Developer Commands
+
+Common maintenance commands:
+
+```bash
+bash ./scripts/doctor.sh
+bash ./scripts/pairing_qr.sh
+cd backend && bash ./run_backend.sh
+cd backend && uv run pytest -q
+cd backend && uv run python ../scripts/sync_contracts.py --check
+```
+
+Service control:
+
+```bash
+# macOS
+bash ./scripts/service_macos.sh status
+bash ./scripts/service_macos.sh restart
+bash ./scripts/service_macos.sh logs
+
+# Linux
+bash ./scripts/service_linux.sh status
+bash ./scripts/service_linux.sh restart
+bash ./scripts/service_linux.sh logs
+```
+
+Optional npm wrappers:
+
+```bash
+npm run setup:server
+npm run backend:start
+npm run doctor
+npm run pair:qr
+npm run ios:open
+```
+
+Optional commit-time secret scanning:
+
+```bash
+uv tool install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+## Troubleshooting
+
+<details>
+  <summary><strong>Common fixes</strong></summary>
+
+- Pairing QR contains `127.0.0.1` instead of a Tailscale or LAN URL:
+
+```bash
+bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale
+bash ./scripts/pairing_qr.sh
+```
+
+- iPhone can pair on Wi-Fi but not on cellular:
+  - run `mobaile doctor` and fix any reported pairing or advertised-URL issues first
+  - run `mobaile pair` and scan the fresh QR; pair codes expire
+  - confirm the pairing URL prefers a `*.ts.net` Tailscale MagicDNS host; raw `100.x` Tailscale IPs are fallback-only and can be blocked by iOS transport policy in release builds
+  - confirm Tailscale is connected on both devices
+  - in iOS Settings, confirm Cellular Data is enabled for Tailscale and MOBaiLE
+  - confirm the backend is still running with `mobaile status`
+
+- Voice works for text but not the mic:
+  - enable `Speech Recognition` for MOBaiLE in iOS Settings
+  - on a real iPhone, MOBaiLE transcribes locally first, and `OPENAI_API_KEY` is only needed for backend audio-upload fallback
+
+- Backend audio uploads fail:
+  - set `OPENAI_API_KEY` in `backend/.env`
+  - text prompts still work without it, but `/v1/audio` depends on backend transcription
+
+</details>
+
+## More Docs
+
+- Usage guide: [`docs/USAGE.md`](docs/USAGE.md)
+- Backend details and endpoints: [`backend/README.md`](backend/README.md)
+- Scripts reference: [`scripts/README.md`](scripts/README.md)
+- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Documentation policy: [`docs/POLICY.md`](docs/POLICY.md)
+- Public pages and App Store URLs: [`docs/PUBLIC_PAGES.md`](docs/PUBLIC_PAGES.md)
+- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Code of conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+
+## License
+
+This project is source-available under the Functional Source License,
+Version 1.1, ALv2 Future License (`FSL-1.1-ALv2`). You may use, modify, and
+redistribute MOBaiLE for permitted purposes, but you may not make it available
+to others as a competing commercial product or service. Each released version
+becomes available under the Apache License, Version 2.0 on the second
+anniversary of the date that version was made available.
+
+See [`LICENSE`](LICENSE) for the full text. The MOBaiLE name, logo, app icon,
+and brand assets are reserved separately under [`TRADEMARKS.md`](TRADEMARKS.md).

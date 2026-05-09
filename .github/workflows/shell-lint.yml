@@ -1,0 +1,30 @@
+name: Shell Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "package.json"
+      - ".github/workflows/shell-lint.yml"
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "package.json"
+      - ".github/workflows/shell-lint.yml"
+
+jobs:
+  shell-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shell tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck shfmt
+
+      - name: Lint shell scripts
+        run: bash ./scripts/shell_checks.sh lint

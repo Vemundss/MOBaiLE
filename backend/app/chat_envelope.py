@@ -1,0 +1,1219 @@
+from __future__ import annotations
+
+import mimetypes
+import re
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from app import chat_envelope_manifest as _manifest
+from app.models.schemas import (
+    ChatArtifact,
+    ChatCommandRun,
+    ChatEnvelope,
+    ChatFileChange,
+    ChatNextAction,
+    ChatSection,
+    ChatShellResult,
+    ChatTestRun,
+    ChatWarning,
+    HumanUnblockRequest,
+)
+
+ExtractedResultManifest = _manifest.ExtractedResultManifest
+extract_result_manifest = _manifest.extract_result_manifest
+parse_chat_envelope_payload = _manifest.parse_chat_envelope_payload
+
+TRUNCATION_SUFFIX = "\n...[truncated]"
+_GENERIC_SUMMARIES = {
+    "completed",
+    "done",
+    "run completed successfully",
+    "run failed",
+}
+_PROGRESS_MARKERS = (
+    "checking ",
+    "querying ",
+    "pulling ",
+    "reading ",
+    "fetching ",
+    "reformatting ",
+    "processing ",
+    "running ",
+    "trying ",
+    "retrying ",
+    "i'll ",
+    "i will ",
+    "i'm ",
+    "working on",
+)
+_FILE_SECTION_TITLES = {
+    "artifacts",
+    "changed files",
+    "file changes",
+    "files",
+    "files changed",
+    "output",
+    "what i did",
+}
+_VERIFICATION_SECTION_TITLES = {
+    "checks",
+    "commands",
+    "tests",
+    "tests run",
+    "verification",
+}
+_NEXT_ACTION_SECTION_TITLES = {"human unblock", "next action", "next actions", "next step", "next steps"}
+_WARNING_SECTION_TITLES = {"blocked", "caveat", "caveats", "failure", "failed", "warnings"}
+_SECTION_LABEL_TITLES = {
+    "artifacts": "Artifacts",
+    "blocked": "Blocked",
+    "changed files": "Changed Files",
+    "checks": "Verification",
+    "commit": "Notes",
+    "commands": "Verification",
+    "file changes": "Changed Files",
+    "files": "Changed Files",
+    "files changed": "Changed Files",
+    "human unblock": "Human Unblock",
+    "next action": "Next Actions",
+    "next actions": "Next Actions",
+    "next step": "Next Actions",
+    "next steps": "Next Actions",
+    "note": "Notes",
+    "notes": "Notes",
+    "output": "Output",
+    "result": "Result",
+    "tests": "Verification",
+    "tests run": "Verification",
+    "verification": "Verification",
+    "warning": "Warnings",
+    "warnings": "Warnings",
+    "what i did": "What I Did",
+}
+_SECTION_LABEL_PATTERN = "|".join(re.escape(label) for label in sorted(_SECTION_LABEL_TITLES, key=len, reverse=True))
+_COMMAND_MARKERS = (
+    "bash ",
+    "cd ",
+    "git ",
+    "npm ",
+    "pnpm ",
+    "python ",
+    "python3 ",
+    "pytest",
+    "ruff ",
+    "swift ",
+    "uv ",
+    "uvx ",
+    "xcodebuild",
+    "yarn ",
+)
+_TEST_COMMAND_MARKERS = ("pytest", "xcodebuild", "swift test", "npm test", "pnpm test", "yarn test")
+_ABSOLUTE_FILE_REFERENCE_PATTERN = r"(/(?:[^`\n'\"<>)]|\\\)){1,240}?\.[A-Za-z0-9]{1,8})(?=$|[\s),.;:!?])"
+_RELATIVE_FILE_REFERENCE_PATTERN = (
+    r"(?<![\w/.~-])([A-Za-z0-9_.@~ -]+(?:/[A-Za-z0-9_.@~ -]+)+\.[A-Za-z0-9]{1,8})"
+    r"(?=$|[\s),.;:!?])"
+)
+
+
+def merge_assistant_lines(lines: list[str]) -> str:
+    merged_parts: list[str] = []
+    for line in lines:
+        text = line.strip()
+        if not text:
+            continue
+        if not merged_parts:
+            merged_parts.append(text)
+            continue
+
+        prev = merged_parts[-1]
+        if _canonical_section_label(prev.strip()) is not None:
+            merged_parts.append("\n" + text)
+            continue
+        section_title = _canonical_section_label(text)
+        if section_title is not None:
+            merged_parts.append("\n\n## " + section_title)
+            continue
+        if prev.endswith((":", ";")):
+            merged_parts.append("\n" + text)
+            continue
+        if text.startswith(("-", "*", "##", "###", "```")):
+            merged_parts.append("\n" + text)
+            continue
+        if text.startswith(("1.", "2.", "3.", "4.", "5.")):
+            merged_parts.append("\n" + text)
+            continue
+        if prev.endswith((".", "!", "?", "`")):
+            merged_parts.append("\n\n" + text)
+            continue
+        merged_parts.append("\n" + text)
+    return "".join(merged_parts)
+
+
+def split_sections_from_text(text: str) -> list[ChatSection]:
+    cleaned = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not cleaned:
+        return []
+    cleaned = _promote_inline_section_labels(cleaned)
+    if re.search(r"(?m)^##\s+", cleaned):
+        sections = _markdown_sections_from_text(cleaned)
+        if sections:
+            return sections
+    return _plain_sections_from_text(cleaned)
+
+
+def _plain_sections_from_text(text: str, *, prefer_result: bool = False) -> list[ChatSection]:
+    cleaned = text.strip()
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", cleaned) if p.strip()]
+    if prefer_result:
+        return [ChatSection(title="Result", body="\n\n".join(paragraphs))]
+    if len(paragraphs) <= 1:
+        return [ChatSection(title="Result", body=cleaned)]
+    sections = [ChatSection(title="What I Did", body=paragraphs[0])]
+    sections.append(ChatSection(title="Result", body="\n\n".join(paragraphs[1:])))
+    return sections
+
+
+def _markdown_sections_from_text(text: str) -> list[ChatSection]:
+    sections: list[ChatSection] = []
+    matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*:?\s*$", text))
+    if not matches:
+        return []
+
+    leading = text[: matches[0].start()].strip()
+    if leading:
+        sections.extend(_plain_sections_from_text(leading, prefer_result=True))
+
+    for index, match in enumerate(matches):
+        body_start = match.end()
+        body_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        title = match.group(1).strip().rstrip(":")
+        body = text[body_start:body_end].strip()
+        if not body:
+            continue
+        sections.append(ChatSection(title=title[:64], body=body))
+    return sections
+
+
+def extract_artifacts_from_text(text: str) -> list[ChatArtifact]:
+    artifacts: list[ChatArtifact] = []
+    seen: set[str] = set()
+
+    def append_reference(raw_reference: str, *, title: str | None = None, force_image: bool = False) -> None:
+        path = _clean_artifact_reference(raw_reference)
+        if not path or path in seen:
+            return
+        seen.add(path)
+        mime, _ = mimetypes.guess_type(path)
+        artifact_type = "image" if force_image or (mime or "").startswith("image/") else "file"
+        artifacts.append(
+            ChatArtifact(
+                type=artifact_type,
+                title=(title or Path(path).name or path).strip(),
+                path=path,
+                mime=mime or ("image/png" if artifact_type == "image" else None),
+            )
+        )
+
+    image_pattern = r"!\[[^\]]*\]\(([^)]+)\)"
+    for match in re.finditer(image_pattern, text):
+        append_reference(match.group(1), force_image=True)
+
+    link_pattern = r"(?<!!)\[([^\]]+)\]\(([^)]+)\)"
+    for match in re.finditer(link_pattern, text):
+        title = match.group(1).strip() or None
+        append_reference(match.group(2), title=title)
+
+    for match in re.finditer(_ABSOLUTE_FILE_REFERENCE_PATTERN, text):
+        append_reference(match.group(1))
+    return artifacts
+
+
+def chat_envelope_transport_json(envelope: ChatEnvelope, max_chars: int) -> str:
+    """Serialize an envelope without letting generic event truncation corrupt JSON."""
+    rendered = envelope.model_dump_json()
+    if max_chars <= 0 or len(rendered) <= max_chars:
+        return rendered
+
+    fitted = fit_chat_envelope_for_transport(envelope, max_chars=max_chars)
+    rendered = fitted.model_dump_json()
+    if len(rendered) <= max_chars:
+        return rendered
+
+    minimal = ChatEnvelope(
+        message_id=envelope.message_id,
+        created_at=envelope.created_at,
+        summary="Response was too long to send completely.",
+        sections=[
+            ChatSection(
+                title="Result",
+                body=(
+                    "The assistant response exceeded the phone transport limit. "
+                    "Open Run Logs on the phone for the raw output."
+                ),
+            )
+        ],
+        warnings=[
+            ChatWarning(
+                message="The full assistant response exceeded the phone transport limit.",
+                level="warning",
+            )
+        ],
+        next_actions=[
+            ChatNextAction(
+                title="Open Run Logs",
+                detail="The raw output is still available in the diagnostic event stream.",
+                kind="open_logs",
+            )
+        ],
+    )
+    return minimal.model_dump_json()
+
+
+def fit_chat_envelope_for_transport(envelope: ChatEnvelope, *, max_chars: int) -> ChatEnvelope:
+    if max_chars <= 0:
+        return envelope
+    if len(envelope.model_dump_json()) <= max_chars:
+        return envelope
+
+    section_counts = [8, 5, 3, 1, 0]
+    body_budgets = [
+        max(240, max_chars // 2),
+        max(220, max_chars // 3),
+        1200,
+        700,
+        360,
+        180,
+    ]
+    item_counts = [24, 12, 6, 3, 0]
+    agenda_counts = [50, 20, 8, 0]
+
+    for max_sections in section_counts:
+        for max_items in item_counts:
+            for max_agenda in agenda_counts:
+                for body_budget in body_budgets:
+                    candidate = _compact_envelope(
+                        envelope,
+                        max_sections=max_sections,
+                        max_items=max_items,
+                        max_agenda=max_agenda,
+                        max_body_chars=body_budget,
+                    )
+                    if len(candidate.model_dump_json()) <= max_chars:
+                        return candidate
+
+    return _compact_envelope(
+        envelope,
+        max_sections=0,
+        max_items=0,
+        max_agenda=0,
+        max_body_chars=120,
+    )
+
+
+def concise_chat_summary(envelope: ChatEnvelope) -> str | None:
+    if envelope.message_kind == "progress":
+        return None
+
+    candidates: list[str] = []
+    result_sections = [
+        section.body
+        for section in envelope.sections
+        if section.title.strip().lower() in {"result", "output", "next step"}
+    ]
+    candidates.append(envelope.summary)
+    candidates.extend(result_sections)
+    candidates.extend(section.body for section in envelope.sections)
+
+    for candidate in candidates:
+        summary = _clean_summary(candidate)
+        if summary is not None:
+            return summary
+    return None
+
+
+def enhance_chat_envelope(envelope: ChatEnvelope, *, infer_message_kind: bool = False) -> ChatEnvelope:
+    sections = _normalize_chat_sections(envelope.sections)
+    summary = _normalize_envelope_summary(envelope.summary, sections)
+    normalized = envelope.model_copy(update={"summary": summary, "sections": sections})
+
+    text = _envelope_text(normalized)
+    artifacts = _dedupe_artifacts([*envelope.artifacts, *extract_artifacts_from_text(text)])
+    file_changes = envelope.file_changes or extract_file_changes_from_text(text, artifacts)
+    artifacts, file_changes = _with_actionable_file_change_artifacts(artifacts, file_changes)
+    commands_run = envelope.commands_run or extract_command_runs_from_text(text)
+    shell_results = envelope.shell_results
+    tests_run = envelope.tests_run or extract_test_runs_from_text(text, commands_run)
+    warnings = _dedupe_by_id([*envelope.warnings, *extract_warnings_from_text(sections, text)])
+    next_actions = _with_actionable_next_action_artifacts(envelope.next_actions or extract_next_actions_from_text(sections))
+
+    message_kind = envelope.message_kind
+    if infer_message_kind:
+        probe = normalized.model_copy(
+            update={
+                "artifacts": artifacts,
+                "file_changes": file_changes,
+                "commands_run": commands_run,
+                "shell_results": shell_results,
+                "tests_run": tests_run,
+                "warnings": warnings,
+                "next_actions": next_actions,
+            }
+        )
+        message_kind = infer_chat_message_kind(probe)
+
+    return normalized.model_copy(
+        update={
+            "message_kind": message_kind,
+            "artifacts": artifacts,
+            "file_changes": file_changes,
+            "commands_run": commands_run,
+            "shell_results": shell_results,
+            "tests_run": tests_run,
+            "warnings": warnings,
+            "next_actions": next_actions,
+        }
+    )
+
+
+def infer_chat_message_kind(envelope: ChatEnvelope) -> str:
+    if envelope.message_kind == "notice":
+        return "notice"
+    if envelope.agenda_items or envelope.artifacts or envelope.file_changes:
+        return "final"
+    if envelope.commands_run or envelope.shell_results or envelope.tests_run or envelope.warnings or envelope.next_actions:
+        return "final"
+    if len(envelope.sections) > 1:
+        return "final"
+    if envelope.sections:
+        section = envelope.sections[0]
+        title = section.title.strip().lower()
+        if title not in {"result", "status", "summary"}:
+            return "final"
+        return "progress" if _looks_like_progress_text(section.body) else "final"
+    return "progress" if _looks_like_progress_text(envelope.summary) else "final"
+
+
+def extract_file_changes_from_text(text: str, artifacts: list[ChatArtifact]) -> list[ChatFileChange]:
+    changes: list[ChatFileChange] = []
+    seen: set[str] = set()
+    artifacts_by_reference = _artifacts_by_reference(artifacts)
+    current_heading = ""
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        heading = _markdown_heading(stripped)
+        if heading is not None:
+            current_heading = heading
+            continue
+        if not stripped:
+            continue
+        status = _file_status_from_text(stripped)
+        in_file_section = current_heading in _FILE_SECTION_TITLES
+        if status == "unknown" and not in_file_section:
+            continue
+        for path in _extract_file_references_from_line(stripped):
+            if path in seen:
+                continue
+            seen.add(path)
+            artifact = artifacts_by_reference.get(path)
+            changes.append(
+                ChatFileChange(
+                    path=path,
+                    status=status,
+                    summary=_truncate_text(_clean_list_item(stripped), 180),
+                    artifact=artifact,
+                )
+            )
+
+    for artifact in artifacts:
+        reference = artifact.path or artifact.url
+        if not reference or reference in seen:
+            continue
+        seen.add(reference)
+        changes.append(
+            ChatFileChange(
+                path=reference,
+                status="generated" if artifact.type == "image" else "unknown",
+                summary=artifact.title,
+                artifact=artifact,
+            )
+        )
+
+    return changes[:30]
+
+
+def extract_command_runs_from_text(text: str) -> list[ChatCommandRun]:
+    commands: list[ChatCommandRun] = []
+    seen: set[str] = set()
+    current_heading = ""
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        heading = _markdown_heading(stripped)
+        if heading is not None:
+            current_heading = heading
+            continue
+        command = _command_from_line(stripped, in_verification_section=current_heading in _VERIFICATION_SECTION_TITLES)
+        if command is None or command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            ChatCommandRun(
+                command=command,
+                status=_run_status_from_text(stripped),
+                summary=_truncate_text(_clean_list_item(stripped), 180),
+            )
+        )
+    return commands[:12]
+
+
+def extract_test_runs_from_text(text: str, commands_run: list[ChatCommandRun]) -> list[ChatTestRun]:
+    tests: list[ChatTestRun] = []
+    seen: set[str] = set()
+
+    for command in commands_run:
+        if _looks_like_test_command(command.command):
+            seen.add(command.command)
+            tests.append(
+                ChatTestRun(
+                    name=command.command,
+                    status=command.status,
+                    summary=command.summary,
+                )
+            )
+
+    current_heading = ""
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        heading = _markdown_heading(stripped)
+        if heading is not None:
+            current_heading = heading
+            continue
+        if current_heading not in _VERIFICATION_SECTION_TITLES:
+            continue
+        status = _run_status_from_text(stripped)
+        if status == "unknown":
+            continue
+        name = _clean_list_item(stripped)
+        if not name or name in seen or _command_from_line(stripped, in_verification_section=True):
+            continue
+        seen.add(name)
+        tests.append(ChatTestRun(name=_truncate_text(name, 120), status=status, summary=_truncate_text(name, 180)))
+
+    return tests[:12]
+
+
+def extract_warnings_from_text(sections: list[ChatSection], text: str) -> list[ChatWarning]:
+    warnings: list[ChatWarning] = []
+    seen: set[str] = set()
+
+    def append_warning(message: str, level: str = "warning") -> None:
+        cleaned = _truncate_text(_clean_list_item(message), 240)
+        if not cleaned or cleaned.lower() in seen:
+            return
+        seen.add(cleaned.lower())
+        warnings.append(ChatWarning(message=cleaned, level=level if level in {"info", "warning", "error"} else "warning"))
+
+    for section in sections:
+        title = section.title.strip().lower()
+        if title not in _WARNING_SECTION_TITLES and title != "human unblock":
+            continue
+        level = "error" if title in {"blocked", "failure", "failed", "human unblock"} else "warning"
+        for line in _content_lines(section.body):
+            append_warning(line, level=level)
+
+    for line in text.splitlines():
+        lower = line.lower()
+        if "0 failures" in lower or "no failures" in lower:
+            continue
+        if "failed first" in lower or "red test failed" in lower:
+            continue
+        if any(marker in lower for marker in ("could not", "failed", "timed out", "unable to", "not run", "skipped")):
+            level = "error" if any(marker in lower for marker in ("failed", "timed out", "unable to")) else "warning"
+            append_warning(line, level=level)
+
+    return warnings[:8]
+
+
+def extract_next_actions_from_text(sections: list[ChatSection]) -> list[ChatNextAction]:
+    actions: list[ChatNextAction] = []
+    seen: set[str] = set()
+
+    for section in sections:
+        title = section.title.strip().lower()
+        if title not in _NEXT_ACTION_SECTION_TITLES:
+            continue
+        for line in _content_lines(section.body):
+            cleaned = _truncate_text(_clean_list_item(line), 220)
+            if not cleaned or cleaned.lower() in seen:
+                continue
+            seen.add(cleaned.lower())
+            actions.append(
+                ChatNextAction(
+                    title=_truncate_text(_first_sentence(cleaned), 96),
+                    detail=cleaned if len(cleaned) > 96 else None,
+                    kind=_next_action_kind(cleaned),
+                )
+            )
+    return actions[:6]
+
+
+def coerce_assistant_text_to_envelope(raw_text: str) -> ChatEnvelope:
+    text = raw_text.strip()
+    message_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if not text:
+        return ChatEnvelope(
+            message_id=message_id,
+            created_at=created_at,
+            summary="",
+            sections=[],
+            agenda_items=[],
+            artifacts=[],
+        )
+    manifest_result = extract_result_manifest(text)
+    text = manifest_result.text
+    manifest = manifest_result.manifest
+    sections = split_sections_from_text(text)
+    artifacts = _dedupe_artifacts([*(manifest.artifacts if manifest else []), *extract_artifacts_from_text(text)])
+    summary = manifest.summary if manifest and manifest.summary else sections[0].body if sections else text.split("\n", 1)[0]
+    summary = summary.strip()
+    if not summary:
+        summary = "Completed"
+    envelope = ChatEnvelope(
+        message_id=message_id,
+        created_at=created_at,
+        summary=summary[:280],
+        sections=sections,
+        artifacts=artifacts,
+        file_changes=manifest.file_changes if manifest else [],
+        commands_run=manifest.commands_run if manifest else [],
+        shell_results=manifest.shell_results if manifest else [],
+        tests_run=manifest.tests_run if manifest else [],
+        warnings=[*(manifest.warnings if manifest else []), *manifest_result.warnings],
+        next_actions=manifest.next_actions if manifest else [],
+    )
+    return enhance_chat_envelope(envelope, infer_message_kind=True)
+
+
+def find_human_unblock_section(envelope: ChatEnvelope) -> ChatSection | None:
+    for section in envelope.sections:
+        if section.title.strip().lower() == "human unblock":
+            return section
+    return None
+
+
+def human_unblock_request_from_envelope(envelope: ChatEnvelope) -> HumanUnblockRequest | None:
+    section = find_human_unblock_section(envelope)
+    if section is None:
+        return None
+    instructions = section.body.strip()
+    if not instructions:
+        return None
+    return HumanUnblockRequest(instructions=instructions)
+
+
+def _compact_envelope(
+    envelope: ChatEnvelope,
+    *,
+    max_sections: int,
+    max_items: int,
+    max_agenda: int,
+    max_body_chars: int,
+) -> ChatEnvelope:
+    sections = [
+        ChatSection(
+            title=_truncate_text(section.title.strip() or "Result", 64),
+            body=_truncate_text(section.body.strip(), max_body_chars),
+        )
+        for section in envelope.sections[:max_sections]
+        if section.body.strip()
+    ]
+    return ChatEnvelope(
+        message_id=envelope.message_id,
+        created_at=envelope.created_at,
+        message_kind=envelope.message_kind,
+        summary=_truncate_text(envelope.summary.strip(), min(280, max(80, max_body_chars // 2))),
+        sections=sections,
+        agenda_items=envelope.agenda_items[:max_agenda],
+        artifacts=envelope.artifacts[:max_items],
+        file_changes=[
+            ChatFileChange(
+                path=_truncate_text(change.path, 220),
+                status=change.status,
+                summary=_truncate_text(change.summary or "", 140) or None,
+                artifact=change.artifact,
+            )
+            for change in envelope.file_changes[:max_items]
+        ],
+        commands_run=[
+            ChatCommandRun(
+                command=_truncate_text(command.command, 180),
+                status=command.status,
+                exit_code=command.exit_code,
+                summary=_truncate_text(command.summary or "", 140) or None,
+            )
+            for command in envelope.commands_run[:max_items]
+        ],
+        shell_results=[
+            ChatShellResult(
+                command=_truncate_text(result.command, 180),
+                status=result.status,
+                exit_code=result.exit_code,
+                stdout=_truncate_text(result.stdout, max_body_chars),
+                stderr=_truncate_text(result.stderr, max_body_chars),
+                summary=_truncate_text(result.summary or "", 140) or None,
+            )
+            for result in envelope.shell_results[:max_items]
+        ],
+        tests_run=[
+            ChatTestRun(
+                name=_truncate_text(test.name, 180),
+                status=test.status,
+                summary=_truncate_text(test.summary or "", 140) or None,
+            )
+            for test in envelope.tests_run[:max_items]
+        ],
+        warnings=[
+            ChatWarning(message=_truncate_text(warning.message, 180), level=warning.level)
+            for warning in envelope.warnings[:max_items]
+        ],
+        next_actions=[
+            ChatNextAction(
+                title=_truncate_text(action.title, 96),
+                detail=_truncate_text(action.detail or "", 140) or None,
+                kind=action.kind,
+                path=_truncate_text(action.path or "", 220) or None,
+                artifact=action.artifact,
+            )
+            for action in envelope.next_actions[:max_items]
+        ],
+    )
+
+
+def _normalize_chat_sections(sections: list[ChatSection]) -> list[ChatSection]:
+    normalized: list[ChatSection] = []
+    for section in sections:
+        for expanded in _expand_embedded_section_labels(section):
+            title = _canonical_section_title(expanded.title)
+            body = expanded.body.strip()
+            if not body:
+                continue
+
+            if title == "Verification":
+                verification_body, note_body = _normalize_verification_body_and_notes(body)
+                _append_chat_section(normalized, "Verification", verification_body)
+                _append_chat_section(normalized, "Notes", note_body)
+                continue
+
+            body = _normalize_section_body(title, body)
+            _append_chat_section(normalized, title, body)
+    return normalized
+
+
+def _expand_embedded_section_labels(section: ChatSection) -> list[ChatSection]:
+    promoted = _promote_inline_section_labels(section.body)
+    matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*:?\s*$", promoted))
+    if not matches:
+        return [section.model_copy(update={"body": promoted})]
+
+    expanded: list[ChatSection] = []
+    leading = promoted[: matches[0].start()].strip()
+    if leading:
+        expanded.append(ChatSection(title=section.title, body=leading))
+
+    for index, match in enumerate(matches):
+        body_start = match.end()
+        body_end = matches[index + 1].start() if index + 1 < len(matches) else len(promoted)
+        body = promoted[body_start:body_end].strip()
+        if body:
+            expanded.append(ChatSection(title=match.group(1).strip().rstrip(":")[:64], body=body))
+    return expanded
+
+
+def _promote_inline_section_labels(text: str) -> str:
+    lines: list[str] = []
+    in_fence = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            lines.append(raw_line)
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            lines.append(raw_line)
+            continue
+
+        expanded_line = re.sub(
+            rf"(?<!^)(?:(?<=[.!?;])\s+|(?<=[A-Za-z0-9_`)]))(?=(?:{_SECTION_LABEL_PATTERN})\s*:)",
+            "\n",
+            raw_line,
+            flags=re.IGNORECASE,
+        )
+        for line in expanded_line.splitlines() or [""]:
+            match = re.match(
+                rf"^\s*(?P<label>{_SECTION_LABEL_PATTERN})\s*:\s*(?P<body>.*)$",
+                line,
+                flags=re.IGNORECASE,
+            )
+            if match is None:
+                lines.append(line)
+                continue
+
+            raw_label = " ".join(match.group("label").strip().lower().split())
+            title = _SECTION_LABEL_TITLES[raw_label]
+            body = match.group("body").strip()
+            lines.append(f"## {title}")
+            if body:
+                if raw_label == "commit":
+                    body = f"Commit: {body}"
+                lines.append(body)
+    return "\n".join(lines)
+
+
+def _canonical_section_label(raw_text: str) -> str | None:
+    normalized = " ".join(raw_text.strip().lstrip("#").strip().rstrip(":").lower().split())
+    return _SECTION_LABEL_TITLES.get(normalized)
+
+
+def _canonical_section_title(raw_text: str) -> str:
+    title = raw_text.strip().rstrip(":")
+    return _canonical_section_label(title) or title[:64] or "Result"
+
+
+def _append_chat_section(sections: list[ChatSection], title: str, body: str) -> None:
+    cleaned = body.strip()
+    if not cleaned:
+        return
+
+    for index, section in enumerate(sections):
+        if section.title != title:
+            continue
+        separator = "\n" if title in {"Changed Files", "Next Actions", "Notes", "Verification", "Warnings"} else "\n\n"
+        merged = _collapse_blank_lines(f"{section.body.rstrip()}{separator}{cleaned}")
+        sections[index] = section.model_copy(update={"body": merged})
+        return
+
+    sections.append(ChatSection(title=title[:64], body=cleaned))
+
+
+def _normalize_section_body(title: str, body: str) -> str:
+    if title in {"Changed Files", "Next Actions", "Notes", "Warnings"}:
+        return _normalize_bulleted_body(body)
+    return _normalize_result_body(body)
+
+
+def _normalize_result_body(body: str) -> str:
+    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n{2,}", body.strip()) if paragraph.strip()]
+    if not paragraphs:
+        return ""
+    paragraphs[0] = _polish_result_opening(paragraphs[0])
+    return _collapse_blank_lines("\n\n".join(paragraphs))
+
+
+def _normalize_verification_body_and_notes(body: str) -> tuple[str, str]:
+    verification_lines: list[str] = []
+    note_lines: list[str] = []
+    for line in _content_lines(body):
+        if _looks_like_note_line(line):
+            note_lines.append(_ensure_sentence(line))
+            continue
+        verification_lines.append(_normalize_verification_line(line))
+
+    return _bullets_from_lines(verification_lines), _bullets_from_lines(note_lines)
+
+
+def _normalize_bulleted_body(body: str) -> str:
+    return _bullets_from_lines([_ensure_sentence(line) for line in _content_lines(body)])
+
+
+def _bullets_from_lines(lines: list[str]) -> str:
+    return "\n".join(f"- {line}" for line in lines if line.strip())
+
+
+def _looks_like_note_line(line: str) -> bool:
+    lower = _clean_list_item(line).lower()
+    return lower.startswith(
+        (
+            "commit:",
+            "repo is clean",
+            "repo clean",
+            "restart deferred",
+            "runtime synced",
+            "runtime sync",
+            "service is running",
+        )
+    )
+
+
+def _normalize_verification_line(line: str) -> str:
+    cleaned = _clean_list_item(line)
+    command = _command_from_line(cleaned, in_verification_section=True)
+    status = _run_status_from_text(cleaned)
+    if command and status != "unknown":
+        label = {"failed": "Failed", "passed": "Passed", "skipped": "Skipped"}.get(status, "Ran")
+        if status == "passed" and "clean" in cleaned.lower() and command.startswith("git diff"):
+            label = "Clean"
+        return f"{label}: `{command}`{_run_detail_suffix(cleaned)}"
+    return _ensure_sentence(cleaned)
+
+
+def _run_detail_suffix(line: str) -> str:
+    match = re.search(
+        r"\b(?:clean|failed|failing|interrupted|ok|pass|passed|skipped|succeeded|success)(?::\s*(.+?))?\.?$",
+        line,
+        flags=re.IGNORECASE,
+    )
+    if match is None or not match.group(1):
+        return ""
+    return f" ({match.group(1).strip().rstrip('.')})"
+
+
+def _normalize_envelope_summary(summary: str, sections: list[ChatSection]) -> str:
+    candidates: list[str] = [summary]
+    candidates.extend(
+        section.body
+        for section in sections
+        if section.title.strip().lower() in {"output", "result", "what i did"}
+    )
+    candidates.extend(section.body for section in sections)
+
+    for candidate in candidates:
+        cleaned = _clean_summary(candidate)
+        if cleaned is None:
+            continue
+        polished = _polish_summary_sentence(cleaned)
+        if polished:
+            return _truncate_text(polished, 280)
+
+    polished = _polish_summary_sentence(summary)
+    return _truncate_text(polished or "Completed", 280)
+
+
+def _polish_summary_sentence(text: str) -> str:
+    sentence = _first_sentence(" ".join(text.strip().split()))
+    if not sentence:
+        return ""
+    if re.search(r"\bto:$", sentence, flags=re.IGNORECASE):
+        return re.sub(r"\s+to:$", ".", sentence, flags=re.IGNORECASE)
+    if sentence.endswith(":") and len(sentence.split()) > 2:
+        return sentence[:-1].rstrip() + "."
+    return sentence
+
+
+def _polish_result_opening(text: str) -> str:
+    paragraph = text.strip()
+    if re.search(r"\bto:$", paragraph, flags=re.IGNORECASE):
+        return re.sub(r"\s+to:$", ".", paragraph, flags=re.IGNORECASE)
+    if paragraph.endswith(":") and len(paragraph.split()) > 2:
+        return paragraph[:-1].rstrip() + "."
+    return paragraph
+
+
+def _ensure_sentence(text: str) -> str:
+    cleaned = " ".join(text.strip().split())
+    if not cleaned or cleaned.endswith((".", "!", "?", "`")):
+        return cleaned
+    return cleaned + "."
+
+
+def _truncate_text(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    if max_chars <= len(TRUNCATION_SUFFIX):
+        return TRUNCATION_SUFFIX[-max_chars:]
+    return value[: max_chars - len(TRUNCATION_SUFFIX)].rstrip() + TRUNCATION_SUFFIX
+
+
+def _collapse_blank_lines(text: str) -> str:
+    collapsed = re.sub(r"\n{3,}", "\n\n", text)
+    return re.sub(r"[ \t]+\n", "\n", collapsed)
+
+
+def _dedupe_by_id(items: list) -> list:
+    deduped = []
+    seen: set[str] = set()
+    for item in items:
+        key = item.model_dump_json() if hasattr(item, "model_dump_json") else repr(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _dedupe_artifacts(items: list[ChatArtifact]) -> list[ChatArtifact]:
+    deduped: list[ChatArtifact] = []
+    seen: set[str] = set()
+    for artifact in items:
+        key = artifact.path or artifact.url or f"{artifact.type}:{artifact.title}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(artifact)
+    return deduped
+
+
+def _with_actionable_file_change_artifacts(
+    artifacts: list[ChatArtifact],
+    file_changes: list[ChatFileChange],
+) -> tuple[list[ChatArtifact], list[ChatFileChange]]:
+    artifact_list = _dedupe_artifacts(artifacts)
+    artifacts_by_reference = _artifacts_by_reference(artifact_list)
+    normalized_changes: list[ChatFileChange] = []
+
+    for change in file_changes:
+        artifact = change.artifact or artifacts_by_reference.get(change.path) or _artifact_from_reference(change.path)
+        if artifact is None:
+            normalized_changes.append(change)
+            continue
+        artifact_list = _dedupe_artifacts([*artifact_list, artifact])
+        artifacts_by_reference = _artifacts_by_reference(artifact_list)
+        normalized_changes.append(change.model_copy(update={"artifact": artifact}))
+
+    return artifact_list, normalized_changes
+
+
+def _with_actionable_next_action_artifacts(next_actions: list[ChatNextAction]) -> list[ChatNextAction]:
+    normalized: list[ChatNextAction] = []
+    for action in next_actions:
+        artifact = action.artifact or _artifact_from_reference(action.path or "")
+        if artifact is None:
+            normalized.append(action)
+            continue
+        normalized.append(action.model_copy(update={"artifact": artifact, "path": action.path or artifact.path or artifact.url}))
+    return normalized
+
+
+def _artifact_from_reference(reference: str) -> ChatArtifact | None:
+    raw = reference.strip()
+    if not raw:
+        return None
+    cleaned = _clean_artifact_reference(raw) or raw
+    if "path/to/" in cleaned.lower() or "absolute/path" in cleaned.lower():
+        return None
+    if not cleaned.startswith(("http://", "https://")) and not _looks_like_file_reference(cleaned):
+        return None
+
+    mime, _ = mimetypes.guess_type(cleaned.split("?", 1)[0])
+    name = Path(cleaned.split("?", 1)[0]).name or "file"
+    artifact_type = _artifact_type_for_reference(cleaned, mime)
+    if cleaned.startswith(("http://", "https://")):
+        return ChatArtifact(type=artifact_type, title=name, mime=mime, url=cleaned)
+    return ChatArtifact(type=artifact_type, title=name, path=cleaned, mime=mime)
+
+
+def _artifact_type_for_reference(reference: str, mime: str | None) -> str:
+    lower_mime = (mime or "").lower()
+    if lower_mime.startswith("image/"):
+        return "image"
+    if lower_mime.startswith("text/"):
+        return "code"
+    suffix = Path(reference.split("?", 1)[0]).suffix.lower()
+    if suffix in {".c", ".cc", ".cpp", ".css", ".go", ".h", ".hpp", ".html", ".java", ".js", ".json"}:
+        return "code"
+    if suffix in {".kt", ".md", ".mjs", ".php", ".py", ".rb", ".rs", ".sh", ".sql", ".swift"}:
+        return "code"
+    if suffix in {".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml"}:
+        return "code"
+    return "file"
+
+
+def _clean_summary(raw_text: str) -> str | None:
+    first_paragraph = raw_text.strip().split("\n\n", 1)[0]
+    single_line = " ".join(first_paragraph.split())
+    if not single_line:
+        return None
+    lower = single_line.lower()
+    if lower in _GENERIC_SUMMARIES:
+        return None
+    if "run completed successfully" in lower or "run failed" in lower:
+        return None
+    if _looks_like_progress_text(single_line):
+        return None
+    return _truncate_text(single_line, 280)
+
+
+def _clean_artifact_reference(raw_reference: str) -> str:
+    path = raw_reference.strip().strip("'\"")
+    if path.startswith("<") and path.endswith(">"):
+        path = path[1:-1].strip()
+    path = path.replace("file://", "")
+    path = path.rstrip(".,;:")
+    if path.startswith(("http://", "https://")):
+        return path
+    if not path.startswith("/") and not path.startswith("~") and "/" not in path:
+        return path if _looks_like_file_reference(path) else ""
+    if "/path/to/" in path.lower() or "absolute/path" in path.lower():
+        return ""
+    return path
+
+
+def _looks_like_progress_text(text: str) -> bool:
+    lower = (
+        text.strip()
+        .lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+    )
+    if not lower:
+        return False
+    if any(marker in lower for marker in ("run completed successfully", "run failed", "```")):
+        return False
+    return any(marker in lower for marker in _PROGRESS_MARKERS)
+
+
+def _envelope_text(envelope: ChatEnvelope) -> str:
+    parts = [envelope.summary]
+    for section in envelope.sections:
+        parts.append(f"## {section.title}\n{section.body}")
+    return "\n\n".join(part for part in parts if part.strip())
+
+
+def _markdown_heading(line: str) -> str | None:
+    match = re.match(r"^#{1,6}\s+(.+?)\s*:?\s*$", line)
+    if match is None:
+        return None
+    return match.group(1).strip().lower()
+
+
+def _extract_file_references_from_line(line: str) -> list[str]:
+    references: list[str] = []
+
+    def append(raw: str) -> None:
+        value = _clean_artifact_reference(raw)
+        if value and _looks_like_file_reference(value) and value not in references:
+            references.append(value)
+
+    for match in re.finditer(r"!\[[^\]]*\]\(([^)]+)\)", line):
+        append(match.group(1))
+    for match in re.finditer(r"(?<!!)\[[^\]]+\]\(([^)]+)\)", line):
+        append(match.group(1))
+    for match in re.finditer(r"`([^`\n]+)`", line):
+        append(match.group(1))
+    for match in re.finditer(_ABSOLUTE_FILE_REFERENCE_PATTERN, line):
+        append(match.group(1))
+    for match in re.finditer(_RELATIVE_FILE_REFERENCE_PATTERN, line):
+        append(match.group(1))
+    return references
+
+
+def _looks_like_file_reference(value: str) -> bool:
+    if value.startswith(("http://", "https://")):
+        return True
+    if any(value.startswith(prefix) for prefix in ("/", "~", "./", "../")):
+        return bool(Path(value).suffix)
+    return "/" in value and bool(Path(value).suffix)
+
+
+def _file_status_from_text(text: str) -> str:
+    lower = text.lower()
+    if any(marker in lower for marker in ("deleted", "removed")):
+        return "deleted"
+    if any(marker in lower for marker in ("renamed", "moved")):
+        return "renamed"
+    if any(marker in lower for marker in ("created", "added", "generated", "saved", "wrote")):
+        return "generated" if any(marker in lower for marker in ("generated", "saved")) else "created"
+    if any(marker in lower for marker in ("changed", "edited", "modified", "patched", "refined", "updated")):
+        return "modified"
+    return "unknown"
+
+
+def _run_status_from_text(text: str) -> str:
+    lower = text.lower()
+    if "failed first" in lower or "red test failed" in lower:
+        return "unknown"
+    if any(marker in lower for marker in ("not run", "skipped", "could not run")):
+        return "skipped"
+    if any(marker in lower for marker in ("failed", "failing", "error", "interrupted")):
+        return "failed"
+    if any(marker in lower for marker in ("passed", "pass", "succeeded", "success", "clean", "ok")):
+        return "passed"
+    return "unknown"
+
+
+def _command_from_line(line: str, *, in_verification_section: bool) -> str | None:
+    cleaned = _clean_list_item(line)
+    if cleaned.startswith("$ "):
+        command = _strip_run_status_suffix(cleaned[2:])
+        return command or None
+    for match in re.finditer(r"`([^`\n]+)`", cleaned):
+        candidate = match.group(1).strip()
+        if _looks_like_command(candidate):
+            return candidate
+    command = _strip_run_status_suffix(cleaned)
+    if in_verification_section and _looks_like_command(command):
+        return command
+    return None
+
+
+def _looks_like_command(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped or "\n" in stripped:
+        return False
+    lower = _command_probe_text(stripped).lower()
+    return any(lower.startswith(marker) for marker in _COMMAND_MARKERS)
+
+
+def _command_probe_text(value: str) -> str:
+    parts = value.split()
+    while parts and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", parts[0]):
+        parts = parts[1:]
+    return " ".join(parts)
+
+
+def _strip_run_status_suffix(value: str) -> str:
+    stripped = value.strip().rstrip(".")
+    return re.sub(
+        r"\s+(?:clean|failed|failing|interrupted|not run|ok|pass|passed|skipped|succeeded|success)(?::.*)?$",
+        "",
+        stripped,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def _looks_like_test_command(value: str) -> bool:
+    lower = value.lower()
+    return any(marker in lower for marker in _TEST_COMMAND_MARKERS)
+
+
+def _content_lines(text: str) -> list[str]:
+    lines = [_clean_list_item(line) for line in text.splitlines()]
+    return [line for line in lines if line]
+
+
+def _clean_list_item(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"^\s*[-*]\s+", "", cleaned)
+    cleaned = re.sub(r"^\s*\d+\.\s+", "", cleaned)
+    return cleaned.strip()
+
+
+def _first_sentence(text: str) -> str:
+    match = re.search(r"(?<=[.!?])\s+", text)
+    if match is None:
+        return text.strip()
+    return text[: match.start()].strip()
+
+
+def _next_action_kind(text: str) -> str:
+    lower = text.lower()
+    if "log" in lower:
+        return "open_logs"
+    if "retry" in lower or "try again" in lower:
+        return "retry"
+    if "continue" in lower or "resume" in lower:
+        return "continue"
+    if "open" in lower or "artifact" in lower or "file" in lower:
+        return "inspect_artifact"
+    return "custom"
+
+
+def _artifacts_by_reference(artifacts: list[ChatArtifact]) -> dict[str, ChatArtifact]:
+    refs: dict[str, ChatArtifact] = {}
+    for artifact in artifacts:
+        for reference in (artifact.path, artifact.url, artifact.title):
+            if reference:
+                refs[reference] = artifact
+    return refs
