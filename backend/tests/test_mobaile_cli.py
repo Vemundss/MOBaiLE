@@ -661,7 +661,10 @@ def test_mobaile_doctor_passes_for_tailscale_pairing(tmp_path: Path):
     assert result.returncode == 0
     assert "[ok] Tailscale mode advertises a Tailscale phone path" in result.stdout
     assert "[ok] Codex binary is available: codex 9.9.9" in result.stdout
-    assert "[ok] Keep-awake service is running" in result.stdout
+    if platform.system() == "Darwin":
+        assert "[ok] Keep-awake service is running" in result.stdout
+    else:
+        assert "[warn] Keep-awake service is macOS-only" in result.stdout
     assert "Doctor result: ready" in result.stdout
 
 
@@ -755,7 +758,10 @@ def test_mobaile_doctor_warns_when_keep_awake_is_stopped(tmp_path: Path):
     )
 
     assert result.returncode == 0
-    assert "[warn] Keep-awake service is not running; run mobaile awake" in result.stdout
+    if platform.system() == "Darwin":
+        assert "[warn] Keep-awake service is not running; run mobaile awake" in result.stdout
+    else:
+        assert "[warn] Keep-awake service is macOS-only" in result.stdout
     assert "Doctor result: ready" in result.stdout
 
 
