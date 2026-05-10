@@ -48,8 +48,10 @@ def test_install_backend_script_persists_phone_access_and_pairing_urls(tmp_path:
             import sys
 
             args = sys.argv[1:]
-            if args == ["sync"]:
+            if args in (["sync"], ["sync", "--python", "3.11"]):
                 raise SystemExit(0)
+            if args[:4] == ["run", "--python", "3.11", "python"]:
+                raise SystemExit(subprocess.call([{sys.executable!r}] + args[4:]))
             if args[:2] == ["run", "python"]:
                 raise SystemExit(subprocess.call([{sys.executable!r}] + args[2:]))
             raise SystemExit(f"unsupported uv invocation: {{args}}")
@@ -137,8 +139,10 @@ def test_install_backend_script_updates_existing_env_file(tmp_path: Path):
             import sys
 
             args = sys.argv[1:]
-            if args == ["sync"]:
+            if args in (["sync"], ["sync", "--python", "3.11"]):
                 raise SystemExit(0)
+            if args[:4] == ["run", "--python", "3.11", "python"]:
+                raise SystemExit(subprocess.call([{sys.executable!r}] + args[4:]))
             if args[:2] == ["run", "python"]:
                 raise SystemExit(subprocess.call([{sys.executable!r}] + args[2:]))
             raise SystemExit(f"unsupported uv invocation: {{args}}")
@@ -209,9 +213,11 @@ def test_install_backend_script_brief_mode_skips_verbose_summary(tmp_path: Path)
             import sys
 
             args = sys.argv[1:]
-            if args == ["sync"]:
+            if args in (["sync"], ["sync", "--python", "3.11"]):
                 print("sync complete")
                 raise SystemExit(0)
+            if args[:4] == ["run", "--python", "3.11", "python"]:
+                raise SystemExit(subprocess.call([{sys.executable!r}] + args[4:]))
             if args[:2] == ["run", "python"]:
                 raise SystemExit(subprocess.call([{sys.executable!r}] + args[2:]))
             raise SystemExit(f"unsupported uv invocation: {{args}}")
@@ -240,5 +246,74 @@ def test_install_backend_script_brief_mode_skips_verbose_summary(tmp_path: Path)
     assert "What you have now:" not in result.stdout
     assert "MOBaiLE backend setup" not in result.stdout
     assert "sync complete" not in result.stdout
+
+
+def test_install_backend_script_uses_uv_python_instead_of_system_python3(tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[2]
+    source_script = repo_root / "scripts" / "install_backend.sh"
+    source_app_init = repo_root / "backend" / "app" / "__init__.py"
+    source_pairing_url = repo_root / "backend" / "app" / "pairing_url.py"
+
+    temp_repo = tmp_path / "repo"
+    backend_dir = temp_repo / "backend"
+    app_dir = backend_dir / "app"
+    scripts_dir = temp_repo / "scripts"
+    fake_bin = tmp_path / "bin"
+    python3_called = tmp_path / "python3-called"
+
+    app_dir.mkdir(parents=True, exist_ok=True)
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    fake_bin.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(source_script, scripts_dir / "install_backend.sh")
+    shutil.copy2(source_app_init, app_dir / "__init__.py")
+    shutil.copy2(source_pairing_url, app_dir / "pairing_url.py")
+
+    (fake_bin / "python3").write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            echo called > {python3_called}
+            exit 99
+            """
+        ),
+        encoding="utf-8",
+    )
+    (fake_bin / "uv").write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            import subprocess
+            import sys
+
+            args = sys.argv[1:]
+            if args in (["sync"], ["sync", "--python", "3.11"]):
+                raise SystemExit(0)
+            if args[:4] == ["run", "--python", "3.11", "python"]:
+                raise SystemExit(subprocess.call([{sys.executable!r}] + args[4:]))
+            raise SystemExit(f"unsupported uv invocation: {{args}}")
+            """
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(fake_bin / "python3", 0o755)
+    os.chmod(fake_bin / "uv", 0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}/usr/bin:/bin:/usr/sbin:/sbin"
+    env["HOME"] = str(tmp_path / "home")
+    env["PYTHONPATH"] = str(backend_dir)
+
+    result = subprocess.run(
+        ["bash", str(scripts_dir / "install_backend.sh"), "--phone-access", "local", "--brief"],
+        cwd=temp_repo,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not python3_called.exists()
     assert (backend_dir / ".env").exists()
     assert (backend_dir / "pairing.json").exists()

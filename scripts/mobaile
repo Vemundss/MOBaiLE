@@ -826,18 +826,37 @@ check_cmd_available() {
 }
 
 check_python_version() {
-  if ! command -v python3 > /dev/null 2>&1; then
-    check_todo "Install Python 3.11 or newer"
+  local backend_dir="${1:-}"
+  local backend_python=""
+  local version=""
+
+  if [[ -n "${backend_dir}" ]]; then
+    backend_python="${backend_dir}/.venv/bin/python"
+  fi
+
+  if [[ -x "${backend_python}" ]]; then
+    if version="$(
+      "${backend_python}" - << 'PY'
+import sys
+required = (3, 11)
+if sys.version_info < required:
+    raise SystemExit(1)
+print(".".join(str(part) for part in sys.version_info[:3]))
+PY
+    )"; then
+      check_ok "Backend Python ${version} is ready via uv"
+    else
+      check_todo "Backend uv environment needs Python 3.11 or newer; run mobaile repair"
+    fi
     return
   fi
 
-  if python3 - << 'PY'; then
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
-PY
-    check_ok "Python $(python3 --version 2>&1 | awk '{print $2}') is ready"
+  if command -v uv > /dev/null 2>&1; then
+    check_info "uv is available and can prepare Python 3.11+ for the backend"
+  elif command -v python3 > /dev/null 2>&1; then
+    check_info "System $(python3 --version 2>&1) is available; MOBaiLE can use uv-managed Python for the backend"
   else
-    check_todo "Python 3.11 or newer is required; current python3 is $(python3 --version 2>&1)"
+    check_info "The installer can add uv and a backend Python automatically"
   fi
 }
 
@@ -863,19 +882,20 @@ check_agent_cli() {
   fi
 }
 
-check_browser_automation_runtime() {
+check_autonomy_dependencies() {
   local env_file="$1"
   local security_mode
-
   security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+
   if [[ "${security_mode}" != "full-access" ]]; then
     return
   fi
-  if command -v npx > /dev/null 2>&1; then
-    return
-  fi
 
-  check_info "Full Access browser/desktop automation needs npx; install Node.js/npm when you want browser or desktop control"
+  if command -v npx > /dev/null 2>&1; then
+    check_ok "npx is available for browser/desktop automation"
+  else
+    check_info "Node.js/npm is not installed; browser/desktop automation needs npx. Direct shell and agent runs still work."
+  fi
 }
 
 check_phone_path() {
@@ -984,6 +1004,25 @@ def command_status(command: str) -> bool:
     return shutil.which(command) is not None
 
 
+def read_python_version(binary: Path):
+    result = subprocess.run(
+        [str(binary), "-c", "import sys; print('.'.join(str(part) for part in sys.version_info[:3]))"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    raw_version = result.stdout.strip()
+    try:
+        version = tuple(int(part) for part in raw_version.split(".")[:3])
+    except ValueError:
+        return None
+    if len(version) != 3:
+        return None
+    return version, raw_version
+
+
 def add(checks: list[dict[str, str]], check_id: str, status: str, message: str) -> None:
     checks.append({"id": check_id, "status": status, "message": message})
 
@@ -1003,10 +1042,19 @@ checks: list[dict[str, str]] = []
 
 add(checks, "git", "ok" if command_status("git") else "todo", "Git is available" if command_status("git") else "Install Git, then rerun the installer")
 add(checks, "curl", "ok" if command_status("curl") else "todo", "curl is available" if command_status("curl") else "Install curl, then rerun the installer")
-if sys.version_info >= (3, 11):
-    add(checks, "python", "ok", f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} is ready")
+backend_python = Path(backend_dir) / ".venv" / "bin" / "python"
+backend_python_version = read_python_version(backend_python) if backend_python.exists() else None
+if backend_python_version is not None and backend_python_version[0] >= (3, 11, 0):
+    add(checks, "python", "ok", f"Backend Python {backend_python_version[1]} is ready via uv")
+elif backend_python.exists():
+    add(checks, "python", "todo", "Backend uv environment needs Python 3.11 or newer; run mobaile repair")
+elif command_status("uv"):
+    add(checks, "python", "info", "uv is available and can prepare Python 3.11+ for the backend")
+elif command_status("python3"):
+    system_version = ".".join(str(part) for part in sys.version_info[:3])
+    add(checks, "python", "info", f"System Python {system_version} is available; MOBaiLE can use uv-managed Python for the backend")
 else:
-    add(checks, "python", "todo", "Python 3.11 or newer is required")
+    add(checks, "python", "info", "The installer can add uv and a backend Python automatically")
 add(checks, "uv", "ok" if command_status("uv") else "info", "uv is available" if command_status("uv") else "The MOBaiLE installer can add uv automatically")
 
 codex_binary = read_env(env_file, "VOICE_AGENT_CODEX_BINARY", "codex")
@@ -1023,13 +1071,14 @@ if codex_path or claude_path:
 else:
     add(checks, "agent_cli", "todo", "Install and sign in to Codex CLI or Claude CLI for real agent runs")
 
-security_mode = read_env(env_file, "VOICE_AGENT_SECURITY_MODE", "safe")
-if security_mode == "full-access" and not command_status("npx"):
+if read_env(env_file, "VOICE_AGENT_SECURITY_MODE", "safe") == "full-access":
     add(
         checks,
-        "browser_automation_runtime",
-        "info",
-        "Full Access browser/desktop automation needs npx; install Node.js/npm when you want browser or desktop control",
+        "autonomy_npx",
+        "ok" if command_status("npx") else "info",
+        "npx is available for browser/desktop automation"
+        if command_status("npx")
+        else "Node.js/npm is not installed; browser/desktop automation needs npx. Direct shell and agent runs still work.",
     )
 
 if phone_access_mode == "tailscale" and not public_server_url:
@@ -1145,14 +1194,14 @@ check_command() {
 
   check_cmd_available git "Install Git, then rerun the installer" || true
   check_cmd_available curl "Install curl, then rerun the installer" || true
-  check_python_version
+  check_python_version "${backend_dir}"
   if command -v uv > /dev/null 2>&1; then
     check_ok "uv is available"
   else
     check_info "uv is not installed yet; the MOBaiLE installer can add it automatically"
   fi
   check_agent_cli "${env_file}"
-  check_browser_automation_runtime "${env_file}"
+  check_autonomy_dependencies "${env_file}"
   check_phone_path "${phone_access_mode}" "${public_server_url}"
 
   if [[ "${service_state}" == "Running" ]]; then
@@ -1482,7 +1531,6 @@ doctor_backend_config_check() {
   fi
 
   body_file="$(mktemp)"
-  trap 'rm -f "${body_file}"' RETURN
 
   for url in "${urls[@]}"; do
     code="$(curl -sS --connect-timeout 3 --max-time 5 -H "Authorization: Bearer ${api_token}" -o "${body_file}" -w "%{http_code}" "${url}/v1/config" 2> /dev/null || true)"
@@ -1537,12 +1585,15 @@ PY
   done
 
   if [[ "${successes}" -gt 0 ]]; then
+    rm -f "${body_file}"
     return 0
   fi
   if [[ "${failures}" -gt 0 ]]; then
+    rm -f "${body_file}"
     return 1
   fi
 
+  rm -f "${body_file}"
   echo "[warn] Backend executor config check could not reach /v1/config"
   return 0
 }

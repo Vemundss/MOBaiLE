@@ -124,27 +124,42 @@ import sys
 
 payload = json.loads(os.environ["CAPABILITIES_JSON"])
 capabilities = payload.get("capabilities", [])
-blocked = [item for item in capabilities if item.get("status") == "blocked"]
 degraded = [item for item in capabilities if item.get("status") == "degraded"]
+critical_ids = {
+    "codex_cli",
+    "uv_cli",
+    "npx_cli",
+    "codex_mcp_playwright",
+    "codex_mcp_peekaboo",
+    "playwright_persistence",
+    "peekaboo_permissions",
+}
+blocked = [item for item in capabilities if item.get("status") == "blocked"]
+critical_blocked = [item for item in blocked if item.get("id") in critical_ids]
+optional_blocked = [item for item in blocked if item.get("id") not in critical_ids]
 
 print(f"Checked at: {payload.get('checked_at', '')}")
 print(f"Host platform: {payload.get('host_platform', '')}")
 print(f"Security mode: {payload.get('security_mode', '')}")
 print("")
 for item in capabilities:
-    print(f"- {item.get('id')}: {item.get('status')} ({item.get('code')})")
+    status = item.get("status")
+    if status == "blocked" and item.get("id") not in critical_ids:
+        status = "optional"
+    print(f"- {item.get('id')}: {status} ({item.get('code')})")
     print(f"  {item.get('message')}")
 if payload.get("report_path"):
     print("")
     print(f"Report path: {payload['report_path']}")
 
-if blocked:
+if critical_blocked:
     print("")
-    print(f"Readiness failed: {len(blocked)} blocked capability(ies).", file=sys.stderr)
+    print(f"Readiness failed: {len(critical_blocked)} required capability(ies) need action.", file=sys.stderr)
     sys.exit(2)
-if degraded:
+if optional_blocked or degraded:
     print("")
-    print(f"Readiness warning: {len(degraded)} degraded capability(ies).", file=sys.stderr)
+    total_warnings = len(optional_blocked) + len(degraded)
+    print(f"Readiness warning: {total_warnings} optional capability issue(s).", file=sys.stderr)
     sys.exit(0)
 PY
 }
