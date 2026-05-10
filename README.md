@@ -18,6 +18,8 @@
 <p align="center">
   <a href="docs/USAGE.md"><strong>Install Guide</strong></a>
   ·
+  <a href="docs/MARKETING.md"><strong>Marketing Plan</strong></a>
+  ·
   <a href="backend/README.md"><strong>Backend</strong></a>
   ·
   <a href="ARCHITECTURE.md"><strong>Architecture</strong></a>
@@ -40,8 +42,9 @@ If you want the shortest path, do this:
 3. When the installer shows the pairing QR, open MOBaiLE on your iPhone and tap `Scan Pairing QR`.
 4. Point the phone at the screen, confirm the pairing, and send a small prompt.
 5. Run `mobaile first-run` to try a safe starter task in `~/MOBaiLE-playground`.
-6. Run `mobaile autonomy --deep --open-permissions` on the Mac if browser or desktop control needs final permission approval.
-7. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
+6. Run `mobaile demo --out mobaile-demo.md` if you want a sanitized shareable proof artifact.
+7. Run `mobaile autonomy --deep --open-permissions` on the Mac if browser or desktop control needs final permission approval.
+8. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
 Run `mobaile setup` on the backend computer to open the computer-local setup page with the pairing QR, backend readiness checks, first-run status, and autonomy readiness. It uses `127.0.0.1`, so it is not a phone-openable link; scan the QR with the iPhone instead. On macOS, run `mobaile awake` if this computer should stay reachable while you are logged in. If setup feels off, run `mobaile check` for a quick preflight or `mobaile repair` to refresh pairing, restart the service, and run diagnostics. When you want the latest installed CLI/backend later, run `mobaile update`.
 
@@ -58,6 +61,12 @@ Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USA
   <img src="docs/readme-hero.png" alt="MOBaiLE hero showing a ready chat, a live run thread, and voice mode on iPhone" width="1200" />
 </p>
 
+## Who it is for
+
+MOBaiLE is for people who already trust a local Mac or Linux environment and want phone-native control over the agents running there. It fits developers, operators, and founders who use Codex or Claude locally, keep credentials on their own machine, and want to start or follow work when opening the laptop is awkward.
+
+The first success should be simple: install the backend, pair the iPhone, run `mobaile first-run`, then see planning, execution, and the final result come back in one live phone thread.
+
 ## Why people use it
 
 - **Use the environment that already has the work.** Run against your actual repo, shell, credentials, files, and network instead of copying context into a hosted IDE.
@@ -65,12 +74,25 @@ Need the longer setup and operations path? Start with [`docs/USAGE.md`](docs/USA
 - **Start the next step when the laptop is awkward.** Voice mode, silence-based send, widgets, haptics, audio cues, and Shortcuts make quick work practical away from the desk.
 - **Keep context attached to the workspace.** Pair once, stay in the same workspace thread, and make the next run inherit what just happened.
 
+## Show it without exposing your work
+
+Backend activity events are the same progress source the phone UI follows. `mobaile demo` turns those events into a sanitized Markdown or JSON replay you can share without raw logs, stdout, stderr, prompts, file paths, or tokens.
+
+```bash
+mobaile demo --out mobaile-demo.md
+mobaile demo --run-id <run-id> --out mobaile-demo.md
+```
+
+Use the built-in sample for a quick public artifact, or point it at a real run when you want a phone-safe proof of what happened.
+
 ## Keep trust boundaries explicit
 
 - **The phone does not run the code.** It sends prompts, audio, attachments, and session metadata to the backend you control.
 - **Access mode stays visible.** Use `safe` on a cautious host, or `full-access` on a trusted private machine.
 - **Pairing is deliberate.** MOBaiLE uses a QR and one-time `pair_code`; the long-lived API token stays on the host.
 - **The network path is inspectable.** Pairing prefers Tailscale or a configured public URL, and the backend remains yours to operate.
+
+For public-facing trust copy, use the GitHub Pages trust page source in [`docs/trust.html`](docs/trust.html).
 
 ## Three moments that matter
 
@@ -307,6 +329,7 @@ bash ./scripts/pairing_qr.sh
 - Backend details and endpoints: [`backend/README.md`](backend/README.md)
 - Scripts reference: [`scripts/README.md`](scripts/README.md)
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Marketing plan: [`docs/MARKETING.md`](docs/MARKETING.md)
 - Documentation policy: [`docs/POLICY.md`](docs/POLICY.md)
 - Public pages and App Store URLs: [`docs/PUBLIC_PAGES.md`](docs/PUBLIC_PAGES.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)

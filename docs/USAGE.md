@@ -81,6 +81,15 @@ mobaile first-run
 
 This creates `~/MOBaiLE-playground` and starts a tiny hello-Python task through the paired backend.
 
+To create a phone-safe proof artifact for sharing or launch posts:
+
+```bash
+mobaile demo --out mobaile-demo.md
+mobaile demo --run-id <run-id> --out mobaile-demo.md
+```
+
+The sample export is safe to share as-is. A real run export uses the backend's activity events and omits raw logs, stdout, stderr, prompts, file paths, and tokens by default.
+
 To open the computer-local browser checklist with the QR, backend readiness, and first-run status:
 
 ```bash
@@ -123,6 +132,7 @@ When you want the latest MOBaiLE updates later, run:
 ```bash
 mobaile update
 ```
+
 
 ### Step 4. Reach for fallback or advanced setup only when you need it
 

@@ -6,7 +6,7 @@
     <title>MOBaiLE | Run your own computer from iPhone</title>
     <meta
       name="description"
-      content="MOBaiLE pairs your iPhone with your own Mac or Linux machine so you can send text or voice tasks and follow each run in one live thread."
+      content="MOBaiLE pairs your iPhone with your own Mac or Linux machine so you can run local coding agents by text or voice and follow each run in one live thread."
     />
     <style>
       :root {
@@ -428,12 +428,13 @@
           <div class="eyebrow">Paired iPhone control for your own machine</div>
           <h1>Run your own computer from iPhone.</h1>
           <p class="lede">
-            Pair a Mac or Linux host, send a prompt by text or voice, and keep
-            planning, execution, results, and follow-up in one live thread.
+            Pair a Mac or Linux host, run local Codex or Claude work by text or
+            voice, and keep planning, execution, results, and follow-up in one
+            live thread.
           </p>
           <div class="tag-row">
             <span class="tag blue">Voice and text</span>
-            <span class="tag green">Mac or Linux host</span>
+            <span class="tag green">Codex or Claude host</span>
             <span class="tag gold">Live run stream</span>
           </div>
           <div class="actions">
@@ -446,6 +447,7 @@
               >Install guide</a
             >
             <a class="button secondary" href="support.html">Support</a>
+            <a class="button secondary" href="trust.html">Trust model</a>
           </div>
         </div>
         <div class="hero-media">
@@ -520,7 +522,7 @@
               to control, keep the default answers, then pair the iPhone with
               the QR it shows.
             </p>
-            <pre><code>curl -fsSL https://raw.githubusercontent.com/Vemundss/mobaile/main/scripts/install.sh | bash</code></pre>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/Vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes</code></pre>
             <ol>
               <li>Run the installer on your Mac or Linux machine.</li>
               <li>
@@ -531,6 +533,7 @@
                 Open MOBaiLE on iPhone and tap <strong>Scan Pairing QR</strong>.
               </li>
               <li>Send a small prompt and keep going in the same thread.</li>
+              <li>Run <code>mobaile demo</code> to create a sanitized proof artifact.</li>
             </ol>
             <div class="footer-links">
               <a
@@ -540,8 +543,8 @@
               >
               <a
                 class="link-pill"
-                href="https://github.com/Vemundss/mobaile/blob/main/docs/USAGE.md"
-                >Setup guide</a
+                href="https://github.com/Vemundss/mobaile/blob/main/docs/MARKETING.md"
+                >Demo workflow</a
               >
             </div>
           </article>
@@ -569,6 +572,7 @@
             </ul>
             <div class="footer-links">
               <a class="link-pill" href="privacy-policy.html">Privacy policy</a>
+              <a class="link-pill" href="trust.html">Trust model</a>
               <a
                 class="link-pill"
                 href="https://github.com/Vemundss/mobaile/blob/main/SECURITY.md"
@@ -635,6 +639,41 @@
       <section class="section">
         <div class="split">
           <article class="panel">
+            <h3>For local-agent users</h3>
+            <p>
+              MOBaiLE is built for people who already trust a local Mac or
+              Linux environment and want phone-native control over the agents
+              running there. Your host keeps the repo, shell, credentials,
+              files, and network.
+            </p>
+          </article>
+          <article class="panel">
+            <h3>Proof without private logs</h3>
+            <p>
+              Backend activity events can be exported with
+              <code>mobaile demo</code> as a Markdown or JSON replay. The export
+              omits raw logs, stdout, stderr, prompts, file paths, and tokens by
+              default.
+            </p>
+            <div class="footer-links">
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/mobaile/blob/main/docs/MARKETING.md"
+                >Marketing plan</a
+              >
+              <a
+                class="link-pill"
+                href="https://github.com/Vemundss/mobaile/blob/main/docs/USAGE.md"
+                >Demo command</a
+              >
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="split">
+          <article class="panel">
             <h3>Need help?</h3>
             <p>
               Most setup issues come down to backend health, the saved URL, the
@@ -671,8 +710,9 @@
       </section>
 
       <footer>
-        Public pages for MOBaiLE. Last updated: April 29, 2026.
+        Public pages for MOBaiLE. Last updated: May 10, 2026.
         <a href="privacy-policy.html">Privacy</a> ·
+        <a href="trust.html">Trust</a> ·
         <a href="support.html">Support</a> ·
         <a href="https://github.com/Vemundss/mobaile">GitHub</a>
       </footer>

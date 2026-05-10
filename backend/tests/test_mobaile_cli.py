@@ -88,6 +88,99 @@ def create_fake_first_run_curl(tmp_path: Path) -> Path:
     return fake_bin
 
 
+def create_fake_demo_curl(tmp_path: Path) -> Path:
+    fake_bin = tmp_path / "demo-curl-bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    write_executable(
+        fake_bin / "curl",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import sys
+            from pathlib import Path
+
+            args = sys.argv[1:]
+            out_path = None
+            write_code = False
+            url = ""
+            i = 0
+            while i < len(args):
+                arg = args[i]
+                if arg == "-o":
+                    out_path = args[i + 1]
+                    i += 2
+                    continue
+                if arg == "-w":
+                    write_code = True
+                    i += 2
+                    continue
+                if arg.startswith("http"):
+                    url = arg
+                i += 1
+
+            code = "200"
+            if "/v1/runs/demo-run" in url:
+                body = json.dumps({
+                    "run_id": "demo-run",
+                    "status": "completed",
+                    "executor": "codex",
+                    "utterance_text": "SECRET prompt should not be exported",
+                    "working_directory": "/Users/me/private-project",
+                    "summary": "Updated the README and generated a public demo artifact.",
+                    "events": [
+                        {
+                            "seq": 0,
+                            "type": "activity.started",
+                            "stage": "planning",
+                            "display_message": "Planning the public proof artifact.",
+                            "message": "Planning the public proof artifact.",
+                        },
+                        {
+                            "seq": 1,
+                            "type": "log.message",
+                            "message": "SECRET raw log should be omitted",
+                        },
+                        {
+                            "seq": 2,
+                            "type": "action.stdout",
+                            "message": "SECRET stdout should be omitted",
+                        },
+                        {
+                            "seq": 3,
+                            "type": "chat.message",
+                            "message": json.dumps({
+                                "type": "assistant_response",
+                                "version": "1.0",
+                                "summary": "Public demo artifact is ready.",
+                                "sections": [],
+                                "agenda_items": [],
+                            }),
+                        },
+                        {
+                            "seq": 4,
+                            "type": "run.completed",
+                            "stage": "summarizing",
+                            "message": "Run completed successfully.",
+                        },
+                    ],
+                })
+            else:
+                code = "404"
+                body = '{"detail":"unexpected url"}'
+
+            if out_path:
+                Path(out_path).write_text(body, encoding="utf-8")
+            else:
+                print(body, end="")
+            if write_code:
+                print(code, end="")
+            """
+        ),
+    )
+    return fake_bin
+
+
 def run_git(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
@@ -518,6 +611,73 @@ def test_mobaile_first_run_starts_playground_run(tmp_path: Path):
     assert "Run: first-run-1" in result.stdout
     assert "Status: completed" in result.stdout
     assert "First run complete" in result.stdout
+
+
+def test_mobaile_demo_exports_sample_markdown(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    out_path = tmp_path / "mobaile-demo.md"
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "demo", "--out", str(out_path)],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"MOBaiLE demo exported: {out_path}" in result.stdout
+    body = out_path.read_text(encoding="utf-8")
+    assert "# MOBaiLE Demo Replay" in body
+    assert "Planning a safe starter task." in body
+    assert "bash -s -- --yes" in body
+    assert "without exposing raw logs" in body
+
+
+def test_mobaile_demo_exports_sanitized_real_run(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    fake_curl_bin = create_fake_demo_curl(tmp_path)
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text("VOICE_AGENT_API_TOKEN=test-token\n", encoding="utf-8")
+    (backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://127.0.0.1:8000","session_id":"iphone-app","pair_code":"pair-1234","pair_code_expires_at":"2999-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(PROJECT_ROOT / "scripts" / "mobaile"),
+            "demo",
+            "--run-id",
+            "demo-run",
+            "--events-limit",
+            "25",
+            "--out",
+            "-",
+        ],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "PATH": f"{fake_curl_bin}:{os.environ['PATH']}",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Public demo artifact is ready." in result.stdout
+    assert "Planning the public proof artifact." in result.stdout
+    assert "SECRET" not in result.stdout
+    assert "/Users/me/private-project" not in result.stdout
+    assert "SECRET raw log should be omitted" not in result.stdout
 
 
 def test_mobaile_pair_requests_fresh_pair_code(tmp_path: Path):

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MOBaiLE Trust Model</title>
+    <meta
+      name="description"
+      content="How MOBaiLE separates the iPhone control surface from the Mac or Linux host that runs code, stores credentials, and enforces access mode."
+    />
+    <style>
+      :root {
+        --bg: #edf4f2;
+        --paper: rgba(249, 252, 251, 0.92);
+        --panel: rgba(255, 255, 255, 0.82);
+        --text: #121820;
+        --muted: #52616b;
+        --line: rgba(31, 29, 26, 0.12);
+        --accent: #0a6a5b;
+        --accent-strong: #073c35;
+        --blue: #1268d3;
+        --shadow: 0 24px 64px rgba(16, 33, 42, 0.14);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        color: var(--text);
+        background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 54%, #e9eef4 100%);
+        padding: 24px;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .shell {
+        max-width: 1040px;
+        margin: 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        overflow: hidden;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+      }
+
+      .hero,
+      .section,
+      footer {
+        padding-left: 32px;
+        padding-right: 32px;
+      }
+
+      .hero {
+        padding-top: 28px;
+        padding-bottom: 26px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(15, 92, 77, 0.1);
+        color: var(--accent-strong);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 16px 0 12px;
+        font-size: clamp(42px, 7vw, 74px);
+        line-height: 1.02;
+        letter-spacing: 0;
+      }
+
+      .lede {
+        max-width: 780px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 20px;
+        line-height: 1.58;
+      }
+
+      .actions,
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 22px;
+      }
+
+      .button,
+      .link-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        padding: 0 16px;
+        border-radius: 999px;
+        font-size: 15px;
+        font-weight: 700;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.58);
+      }
+
+      .button.primary {
+        background: var(--accent);
+        border-color: transparent;
+        color: #f7f4ee;
+      }
+
+      .section {
+        padding-top: 26px;
+        padding-bottom: 30px;
+      }
+
+      .section-header {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: clamp(30px, 5vw, 46px);
+        line-height: 1.04;
+        letter-spacing: 0;
+      }
+
+      .section-copy {
+        max-width: 820px;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.62;
+        font-size: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--panel);
+        padding: 22px;
+      }
+
+      .card h3,
+      .panel h3 {
+        margin: 0 0 10px;
+        font-size: 22px;
+        line-height: 1.14;
+      }
+
+      .card p,
+      .card li,
+      .panel p,
+      .panel li {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.66;
+      }
+
+      .card ul,
+      .panel ul {
+        margin: 12px 0 0;
+        padding-left: 22px;
+      }
+
+      footer {
+        padding-top: 0;
+        padding-bottom: 32px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      footer a {
+        color: var(--accent-strong);
+        font-weight: 700;
+      }
+
+      @media (max-width: 860px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          padding: 14px;
+        }
+
+        .hero,
+        .section,
+        footer {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+
+        h1 {
+          font-size: 42px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">MOBaiLE Trust</div>
+        <h1>Your phone controls the run. Your machine does the work.</h1>
+        <p class="lede">
+          MOBaiLE is designed around an explicit split: the iPhone captures
+          prompts and follows progress, while the paired Mac or Linux backend
+          owns execution, files, credentials, policy, and network access.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/Vemundss/mobaile"
+            >Inspect the backend</a
+          >
+          <a class="button" href="index.html">Product overview</a>
+          <a class="button" href="privacy-policy.html">Privacy policy</a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div class="eyebrow">Data flow</div>
+          <h2>What runs where</h2>
+          <p class="section-copy">
+            MOBaiLE should not be described as "no data leaves your devices."
+            Prompts, voice-derived text, attachments, and session metadata go
+            to the backend you pair. Agent providers can still receive prompts
+            through the local Codex or Claude CLI you configure on that host.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>On the iPhone</h3>
+            <ul>
+              <li>Text prompts, voice capture, attachments, and thread UI.</li>
+              <li>Saved backend profile and API token in iOS storage.</li>
+              <li>Live progress, summaries, artifacts, and follow-up controls.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>On the host</h3>
+            <ul>
+              <li>Backend API, pairing, auth, policy, and run history.</li>
+              <li>Repo, shell, files, credentials, network, and agent CLIs.</li>
+              <li>Safe or full-access execution mode chosen during setup.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="grid">
+          <article class="card">
+            <h3>Pairing is deliberate</h3>
+            <p>
+              The setup flow uses a QR and one-time pair code. The long-lived
+              API token stays host-side and is exchanged only after the app
+              proves it has the fresh pair code.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Access mode is visible</h3>
+            <p>
+              Safe mode restricts workdir and file access. Full-access mode is
+              for trusted private hosts where you intentionally want deeper
+              automation.
+            </p>
+          </article>
+          <article class="card">
+            <h3>The network path is inspectable</h3>
+            <p>
+              MOBaiLE supports same-Wi-Fi, Tailscale, local simulator, and
+              configured public HTTPS paths. Tailscale is the recommended
+              private path for off-Wi-Fi use.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Demo exports are sanitized</h3>
+            <p>
+              <code>mobaile demo</code> uses backend activity events to create a proof
+              artifact while omitting raw logs, stdout, stderr, prompts, file
+              paths, and tokens by default.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="panel">
+          <h3>Useful commands</h3>
+          <ul>
+            <li><code>mobaile status</code> shows service, access mode, phone path, and pairing state.</li>
+            <li><code>mobaile check</code> runs a concise readiness preflight.</li>
+            <li><code>mobaile doctor</code> checks pairing URLs, QR state, health, and executor readiness.</li>
+            <li><code>mobaile demo --out mobaile-demo.md</code> creates a public-safe proof artifact.</li>
+          </ul>
+          <div class="footer-links">
+            <a
+              class="link-pill"
+              href="https://github.com/Vemundss/mobaile/blob/main/docs/USAGE.md"
+              >Setup guide</a
+            >
+            <a
+              class="link-pill"
+              href="https://github.com/Vemundss/mobaile/blob/main/SECURITY.md"
+              >Security policy</a
+            >
+            <a class="link-pill" href="support.html">Support</a>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        MOBaiLE trust model. Last updated: May 10, 2026.
+        <a href="index.html">Home</a> ·
+        <a href="privacy-policy.html">Privacy</a> ·
+        <a href="support.html">Support</a> ·
+        <a href="https://github.com/Vemundss/mobaile">GitHub</a>
+      </footer>
+    </main>
+  </body>
+</html>

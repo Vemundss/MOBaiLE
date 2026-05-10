@@ -28,6 +28,7 @@ Commands:
   doctor   Check service, pairing, QR, phone URLs, and executor readiness
   first-run
            Run a tiny starter task in ~/MOBaiLE-playground
+  demo     Export a sanitized Markdown or JSON demo replay
   repair   Refresh pairing, restart the service when installed, then run doctor
   pair     Generate or surface the pairing QR image
   update   Check for or install newer MOBaiLE updates
@@ -535,6 +536,7 @@ Quick actions:
   mobaile check
   mobaile pair
   mobaile first-run
+  mobaile demo
   mobaile autonomy
   mobaile doctor
   mobaile repair
@@ -1868,6 +1870,367 @@ first_run_command() {
   return 1
 }
 
+demo_usage() {
+  cat << 'EOF'
+Usage: mobaile demo [options]
+
+Options:
+  --sample                       Export the built-in sanitized sample replay (default)
+  --run-id <id>                  Export a sanitized replay from an existing backend run
+  --format <markdown|json>       Output format (default: markdown)
+  --out <path|->                 Output path, or - for stdout
+  --events-limit <count>         Max events to fetch for --run-id (default: 100)
+EOF
+}
+
+cleanup_demo_response_file() {
+  if [[ -n "${MOBAILE_DEMO_RESPONSE_FILE:-}" ]]; then
+    rm -f "${MOBAILE_DEMO_RESPONSE_FILE}"
+  fi
+}
+
+demo_sample_run_json() {
+  python3 - << 'PY'
+import json
+
+print(json.dumps({
+    "run_id": "demo-local-agent-from-phone",
+    "status": "completed",
+    "executor": "codex",
+    "summary": "Created a small hello script, ran it, and returned the result to the phone.",
+    "events": [
+        {
+            "seq": 0,
+            "type": "activity.started",
+            "stage": "planning",
+            "display_message": "Planning a safe starter task.",
+            "message": "Planning a safe starter task.",
+        },
+        {
+            "seq": 1,
+            "type": "activity.updated",
+            "stage": "executing",
+            "display_message": "Creating and running the script on the paired host.",
+            "message": "Creating and running the script on the paired host.",
+        },
+        {
+            "seq": 2,
+            "type": "activity.completed",
+            "stage": "summarizing",
+            "display_message": "Summarizing the result for the phone thread.",
+            "message": "Summarizing the result for the phone thread.",
+        },
+        {
+            "seq": 3,
+            "type": "chat.message",
+            "message": json.dumps({
+                "type": "assistant_response",
+                "version": "1.0",
+                "summary": "The hello script ran successfully on the host.",
+                "sections": [],
+                "agenda_items": [],
+            }),
+        },
+        {
+            "seq": 4,
+            "type": "run.completed",
+            "stage": "summarizing",
+            "message": "Run completed successfully.",
+        },
+    ],
+}))
+PY
+}
+
+demo_render_file() {
+  local run_file="$1"
+  local output_format="$2"
+  local source_label="$3"
+
+  python3 - "${run_file}" "${output_format}" "${source_label}" << 'PY'
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import re
+import sys
+from typing import Any
+
+run_path = Path(sys.argv[1])
+output_format = sys.argv[2]
+source_label = sys.argv[3]
+
+try:
+    raw_run = json.loads(run_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    print(f"Could not read run JSON: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def text(value: object, *, limit: int = 220) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "..."
+
+
+def stage_label(raw_stage: object, event_type: str) -> str:
+    stage = text(raw_stage, limit=40).lower()
+    if stage:
+        return stage
+    if event_type == "run.completed":
+        return "summarizing"
+    if event_type == "run.blocked":
+        return "blocked"
+    if event_type in {"run.failed", "run.cancelled"}:
+        return "blocked"
+    return "executing"
+
+
+def message_for_event(event: dict[str, Any]) -> str:
+    return text(
+        event.get("display_message")
+        or event.get("title")
+        or event.get("message")
+        or event.get("type")
+    )
+
+
+def chat_summary(event: dict[str, Any]) -> str:
+    raw = event.get("message")
+    if not isinstance(raw, str):
+        return ""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    if isinstance(payload, dict) and payload.get("type") == "assistant_response":
+        return text(payload.get("summary"))
+    return ""
+
+
+def sanitized_events(raw_events: list[Any]) -> list[dict[str, str]]:
+    events: list[dict[str, str]] = []
+    for raw in raw_events:
+        if not isinstance(raw, dict):
+            continue
+        event_type = text(raw.get("type"), limit=60)
+        if event_type.startswith("activity."):
+            events.append({
+                "stage": stage_label(raw.get("stage"), event_type),
+                "message": message_for_event(raw),
+                "type": event_type,
+            })
+            continue
+        if event_type in {"run.completed", "run.failed", "run.blocked", "run.cancelled"}:
+            events.append({
+                "stage": stage_label(raw.get("stage"), event_type),
+                "message": message_for_event(raw),
+                "type": event_type,
+            })
+            continue
+        summary = chat_summary(raw)
+        if summary:
+            events.append({
+                "stage": "summarizing",
+                "message": summary,
+                "type": "chat.summary",
+            })
+    return events
+
+
+events = sanitized_events(raw_run.get("events") if isinstance(raw_run.get("events"), list) else [])
+summary = text(raw_run.get("summary"), limit=260)
+payload = {
+    "type": "mobaile_demo_replay",
+    "version": "1.0",
+    "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "source": source_label,
+    "run_id": text(raw_run.get("run_id"), limit=100),
+    "status": text(raw_run.get("status"), limit=40),
+    "executor": text(raw_run.get("executor"), limit=40),
+    "summary": summary,
+    "events": events,
+    "trust_notes": [
+        "The iPhone is the control surface; code runs on the paired Mac or Linux host.",
+        "The replay omits raw logs, stdout, stderr, prompts, file paths, and tokens by default.",
+        "Pairing uses a QR and one-time pair code; the long-lived API token stays host-side.",
+    ],
+}
+
+if output_format == "json":
+    print(json.dumps(payload, indent=2))
+    raise SystemExit(0)
+
+install_command = "curl -fsSL https://raw.githubusercontent.com/Vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes"
+print("# MOBaiLE Demo Replay")
+print()
+print("MOBaiLE turns an iPhone into a control surface for a Mac or Linux machine you already trust.")
+print("The host keeps the repo, shell, credentials, files, and network access; the phone starts and follows the run.")
+print()
+print("## Demo Source")
+print()
+print(f"- Source: {payload['source']}")
+print(f"- Run: `{payload['run_id'] or 'sample'}`")
+print(f"- Executor: `{payload['executor'] or 'unknown'}`")
+print(f"- Status: `{payload['status'] or 'unknown'}`")
+if summary:
+    print(f"- Summary: {summary}")
+print()
+print("## Sanitized Run Flow")
+print()
+print("| Stage | What the phone can show |")
+print("| --- | --- |")
+if events:
+    for event in events:
+        print(f"| {event['stage']} | {event['message']} |")
+else:
+    print("| summarizing | No phone-safe activity events were available in this run export. |")
+print()
+print("## Why It Matters")
+print()
+print("- Start work from the phone without moving private repo context into a hosted workspace.")
+print("- Follow planning, execution, blocked states, and final results in one live thread.")
+print("- Share a proof artifact without exposing raw logs, commands, file paths, or tokens.")
+print()
+print("## Try It")
+print()
+print("```bash")
+print(install_command)
+print("mobaile first-run")
+print("mobaile demo --out mobaile-demo.md")
+print("```")
+PY
+}
+
+demo_command() {
+  local repo_root="$1"
+  shift || true
+  local run_id="" output_format="markdown" out_path="" events_limit="100" use_sample="true"
+  local backend_dir env_file pairing_file server_url token response_file code render_file extension
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --sample)
+        use_sample="true"
+        shift
+        ;;
+      --run-id)
+        if [[ $# -lt 2 ]]; then
+          echo "--run-id requires a value." >&2
+          return 1
+        fi
+        run_id="$2"
+        use_sample="false"
+        shift 2
+        ;;
+      --format)
+        if [[ $# -lt 2 ]]; then
+          echo "--format requires a value." >&2
+          return 1
+        fi
+        output_format="$2"
+        shift 2
+        ;;
+      --out)
+        if [[ $# -lt 2 ]]; then
+          echo "--out requires a value." >&2
+          return 1
+        fi
+        out_path="$2"
+        shift 2
+        ;;
+      --events-limit)
+        if [[ $# -lt 2 ]]; then
+          echo "--events-limit requires a value." >&2
+          return 1
+        fi
+        events_limit="$2"
+        shift 2
+        ;;
+      -h | --help)
+        demo_usage
+        return 0
+        ;;
+      *)
+        demo_usage >&2
+        echo "Unknown demo argument: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  case "${output_format}" in
+    markdown | json) ;;
+    *)
+      echo "--format must be markdown or json." >&2
+      return 1
+      ;;
+  esac
+  case "${events_limit}" in
+    '' | *[!0-9]*)
+      echo "--events-limit must be a non-negative integer." >&2
+      return 1
+      ;;
+  esac
+  if [[ "${events_limit}" -gt 500 ]]; then
+    echo "--events-limit must be 500 or lower." >&2
+    return 1
+  fi
+
+  response_file="$(mktemp)"
+  MOBAILE_DEMO_RESPONSE_FILE="${response_file}"
+  trap cleanup_demo_response_file EXIT
+
+  if [[ "${use_sample}" == "true" ]]; then
+    demo_sample_run_json > "${response_file}"
+    render_file="${response_file}"
+  else
+    if ! command -v curl > /dev/null 2>&1; then
+      echo "curl is required for mobaile demo --run-id." >&2
+      return 1
+    fi
+    backend_dir="$(active_backend_dir "${repo_root}")"
+    env_file="${backend_dir}/.env"
+    pairing_file="${backend_dir}/pairing.json"
+    server_url="$(read_pairing_value "${pairing_file}" "server_url" "")"
+    token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
+    if [[ -z "${server_url}" || -z "${token}" ]]; then
+      echo "Run export needs a configured backend URL and API token." >&2
+      echo "Run mobaile status, then mobaile pair if pairing is not ready." >&2
+      return 1
+    fi
+    code="$(
+      curl -sS -o "${response_file}" -w "%{http_code}" \
+        -H "Authorization: Bearer ${token}" \
+        "${server_url}/v1/runs/${run_id}?events_limit=${events_limit}" || true
+    )"
+    if [[ "${code}" != "200" ]]; then
+      echo "Could not export run; /v1/runs/${run_id} returned ${code:-no response}." >&2
+      return 1
+    fi
+    render_file="${response_file}"
+  fi
+
+  if [[ -z "${out_path}" ]]; then
+    extension="md"
+    if [[ "${output_format}" == "json" ]]; then
+      extension="json"
+    fi
+    out_path="mobaile-demo.${extension}"
+  fi
+
+  if [[ "${out_path}" == "-" ]]; then
+    demo_render_file "${render_file}" "${output_format}" "$([[ "${use_sample}" == "true" ]] && printf "built-in sample" || printf "backend run")"
+    return
+  fi
+
+  mkdir -p "$(dirname "${out_path}")"
+  demo_render_file "${render_file}" "${output_format}" "$([[ "${use_sample}" == "true" ]] && printf "built-in sample" || printf "backend run")" > "${out_path}"
+  echo "MOBaiLE demo exported: ${out_path}"
+}
+
 pair_command() {
   local repo_root="$1"
   local backend_dir
@@ -2101,6 +2464,10 @@ main() {
     first-run)
       shift || true
       first_run_command "${repo_root}" "$@"
+      ;;
+    demo)
+      shift || true
+      demo_command "${repo_root}" "$@"
       ;;
     repair) repair_command "${repo_root}" ;;
     update)

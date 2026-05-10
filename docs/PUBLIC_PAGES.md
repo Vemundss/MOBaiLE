@@ -7,6 +7,7 @@ Apple requires a public privacy-policy URL for App Store submissions.
 ## Repo Source Of Truth
 
 - `docs/index.html`
+- `docs/trust.html`
 - `docs/privacy-policy.html`
 - `docs/support.html`
 
@@ -19,6 +20,7 @@ Apple requires a public privacy-policy URL for App Store submissions.
 After GitHub Pages is enabled for this repository:
 
 - Site: `https://vemundss.github.io/MOBaiLE/`
+- Trust model: `https://vemundss.github.io/MOBaiLE/trust.html`
 - Privacy policy: `https://vemundss.github.io/MOBaiLE/privacy-policy.html`
 - Support: `https://vemundss.github.io/MOBaiLE/support.html`
 
