@@ -329,6 +329,43 @@ def test_coerce_assistant_text_to_envelope_lifts_json_wrapped_result_manifest():
     assert envelope.file_changes[0].artifact is not None
 
 
+def test_shell_envelope_does_not_infer_metadata_from_terminal_output():
+    module = reload_module("app.chat_envelope")
+    envelope = module.enhance_chat_envelope(
+        module.ChatEnvelope(
+            summary="Command completed successfully",
+            sections=[
+                module.ChatSection(title="Command", body="`rg test`"),
+                module.ChatSection(
+                    title="Output",
+                    body=(
+                        "AGENTS.md:- Backend Python changes: run `uv run pytest tests/test_api.py`\n"
+                        "AGENTS.md:- Known hotspots: `storage/run_store.py`, `tests/test_api.py`."
+                    ),
+                ),
+            ],
+            shell_results=[
+                module.ChatShellResult(
+                    command="rg test",
+                    status="passed",
+                    exit_code=0,
+                    stdout=(
+                        "AGENTS.md:- Backend Python changes: run `uv run pytest tests/test_api.py`\n"
+                        "AGENTS.md:- Known hotspots: `storage/run_store.py`, `tests/test_api.py`."
+                    ),
+                    stderr="",
+                    summary="ran 'rg test'",
+                )
+            ],
+        )
+    )
+
+    assert envelope.shell_results
+    assert envelope.file_changes == []
+    assert envelope.commands_run == []
+    assert envelope.tests_run == []
+
+
 def test_coerce_assistant_text_to_envelope_marks_progress_messages():
     module = reload_module("app.chat_envelope")
     envelope = module.coerce_assistant_text_to_envelope("Running the test suite now...")

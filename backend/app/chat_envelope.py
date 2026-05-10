@@ -338,14 +338,23 @@ def enhance_chat_envelope(envelope: ChatEnvelope, *, infer_message_kind: bool = 
     normalized = envelope.model_copy(update={"summary": summary, "sections": sections})
 
     text = _envelope_text(normalized)
-    artifacts = _dedupe_artifacts([*envelope.artifacts, *extract_artifacts_from_text(text)])
-    file_changes = envelope.file_changes or extract_file_changes_from_text(text, artifacts)
-    artifacts, file_changes = _with_actionable_file_change_artifacts(artifacts, file_changes)
-    commands_run = envelope.commands_run or extract_command_runs_from_text(text)
     shell_results = envelope.shell_results
-    tests_run = envelope.tests_run or extract_test_runs_from_text(text, commands_run)
-    warnings = _dedupe_by_id([*envelope.warnings, *extract_warnings_from_text(sections, text)])
-    next_actions = _with_actionable_next_action_artifacts(envelope.next_actions or extract_next_actions_from_text(sections))
+    if shell_results:
+        artifacts = _dedupe_artifacts(envelope.artifacts)
+        file_changes = envelope.file_changes
+        artifacts, file_changes = _with_actionable_file_change_artifacts(artifacts, file_changes)
+        commands_run = envelope.commands_run
+        tests_run = envelope.tests_run
+        warnings = _dedupe_by_id(envelope.warnings)
+        next_actions = _with_actionable_next_action_artifacts(envelope.next_actions)
+    else:
+        artifacts = _dedupe_artifacts([*envelope.artifacts, *extract_artifacts_from_text(text)])
+        file_changes = envelope.file_changes or extract_file_changes_from_text(text, artifacts)
+        artifacts, file_changes = _with_actionable_file_change_artifacts(artifacts, file_changes)
+        commands_run = envelope.commands_run or extract_command_runs_from_text(text)
+        tests_run = envelope.tests_run or extract_test_runs_from_text(text, commands_run)
+        warnings = _dedupe_by_id([*envelope.warnings, *extract_warnings_from_text(sections, text)])
+        next_actions = _with_actionable_next_action_artifacts(envelope.next_actions or extract_next_actions_from_text(sections))
 
     message_kind = envelope.message_kind
     if infer_message_kind:

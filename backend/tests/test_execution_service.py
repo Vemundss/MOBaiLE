@@ -142,6 +142,45 @@ def test_execution_service_records_direct_shell_result_payload(tmp_path: Path) -
     ]
 
 
+def test_shell_output_paths_do_not_become_file_change_cards(tmp_path: Path) -> None:
+    run_state = RunState(RunStore(tmp_path / "runs.db"), max_event_message_chars=16000)
+    run_state.store_run(
+        RunRecord(
+            run_id="run-shell-path-output",
+            session_id="session-1",
+            executor="shell",
+            utterance_text="rg test",
+            working_directory=str(tmp_path),
+            status="running",
+            summary="Run started",
+            events=[],
+        )
+    )
+    service = ExecutionService(
+        environment=_FakeEnvironment(),  # type: ignore[arg-type]
+        run_state=run_state,
+        profile_store=_FakeProfileStore(),  # type: ignore[arg-type]
+        fetch_calendar_events=lambda: [],
+    )
+
+    command = (
+        "printf '%s\\n' "
+        "'AGENTS.md:- Backend Python changes: run `uv run pytest tests/test_api.py`' "
+        "'AGENTS.md:- Known hotspots: `storage/run_store.py`, `tests/test_api.py`.'"
+    )
+    service.run_shell_command("run-shell-path-output", command, tmp_path)
+
+    run = run_state.get_run("run-shell-path-output")
+    assert run is not None
+    chat_events = [event for event in run.events if event.type == "chat.message"]
+    assert chat_events
+    payload = json.loads(chat_events[-1].message)
+    assert payload["shell_results"]
+    assert payload["file_changes"] == []
+    assert payload["commands_run"] == []
+    assert payload["tests_run"] == []
+
+
 def test_shell_result_summary_names_ripgrep_no_matches() -> None:
     result = ActionResult(success=False, exit_code=1, stdout="", stderr="", details="ran 'rg missing'")
 
