@@ -20,6 +20,8 @@
   ·
   <a href="docs/MARKETING.md"><strong>Marketing Plan</strong></a>
   ·
+  <a href="docs/LAUNCH_KIT.md"><strong>Launch Kit</strong></a>
+  ·
   <a href="backend/README.md"><strong>Backend</strong></a>
   ·
   <a href="ARCHITECTURE.md"><strong>Architecture</strong></a>
@@ -74,16 +76,28 @@ The first success should be simple: install the backend, pair the iPhone, run `m
 - **Start the next step when the laptop is awkward.** Voice mode, silence-based send, widgets, haptics, audio cues, and Shortcuts make quick work practical away from the desk.
 - **Keep context attached to the workspace.** Pair once, stay in the same workspace thread, and make the next run inherit what just happened.
 
-## Show it without exposing your work
+## Create proof without exposing your work
 
 Backend activity events are the same progress source the phone UI follows. `mobaile demo` turns those events into a sanitized Markdown or JSON replay you can share without raw logs, stdout, stderr, prompts, file paths, or tokens.
 
 ```bash
+mobaile first-run
 mobaile demo --out mobaile-demo.md
 mobaile demo --run-id <run-id> --out mobaile-demo.md
 ```
 
 Use the built-in sample for a quick public artifact, or point it at a real run when you want a phone-safe proof of what happened.
+
+For launches, posts, and README updates, use the backend-owned [`docs/LAUNCH_KIT.md`](docs/LAUNCH_KIT.md). It keeps the public message centered on the host/runtime truth: your iPhone starts and follows the work, while your own Mac or Linux machine keeps execution, files, credentials, and network access.
+
+## Launch from the backend repo
+
+The public backend should be the first conversion path because it proves the claims before anyone installs the private iPhone app:
+
+1. Show the value in one line: run local coding agents from iPhone without moving your repo, shell, files, credentials, or network into a hosted workspace.
+2. Give the installer immediately, then define first success as `mobaile first-run` returning progress and a result to one live phone thread.
+3. Attach a sanitized `mobaile demo` artifact to release notes, founder posts, and community launches.
+4. Link the trust model whenever you mention full-access mode, Tailscale, pairing, credentials, or agent providers.
 
 ## Keep trust boundaries explicit
 

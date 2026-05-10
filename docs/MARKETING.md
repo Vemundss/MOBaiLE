@@ -17,7 +17,21 @@ The first success is: install the backend, pair the phone, send one prompt, and 
 1. **README as landing page.** Keep the top of `README.md` optimized for value proposition, install, screenshots, trust boundaries, and first success.
 2. **GitHub Pages as product site.** Keep `docs/index.html`, `docs/trust.html`, `docs/support.html`, and `docs/privacy-policy.html` aligned with the App Store and public install story.
 3. **Demo artifacts as proof.** Use `mobaile demo --out mobaile-demo.md` for a built-in sample, or `mobaile demo --run-id <run-id>` after a real run. These exports are designed to omit raw logs, stdout, stderr, prompts, file paths, and tokens.
-4. **Releases as launch moments.** Every meaningful backend/runtime improvement should ship with a GitHub Release that includes a short "why it matters", an install/update command, and a demo artifact or screenshot.
+4. **Launch kit as reusable copy.** Use `docs/LAUNCH_KIT.md` for release notes, community posts, founder posts, trust replies, and first-success commands.
+5. **Releases as launch moments.** Every meaningful backend/runtime improvement should ship with a GitHub Release that includes a short "why it matters", an install/update command, and a demo artifact or screenshot.
+
+## Backend Funnel
+
+Optimize every public backend surface around one first-success loop:
+
+1. Visitor understands the split: phone controls, host executes.
+2. Visitor runs the installer on a Mac or Linux host.
+3. Visitor pairs the iPhone with the QR.
+4. Visitor runs `mobaile first-run`.
+5. Visitor sees planning, execution, and result return to one live phone thread.
+6. Visitor exports proof with `mobaile demo --out mobaile-demo.md`.
+
+The backend should do the trust work before the App Store listing has to. The public repo can prove the install flow, the activity-event progress model, the access-mode boundary, the pairing model, and the sanitized demo exporter.
 
 ## Message Pillars
 
@@ -69,3 +83,14 @@ mobaile demo --out mobaile-demo.md
 
 <Mention any execution, pairing, permissions, or data-flow implications.>
 ````
+
+## 90-Minute Launch Sequence
+
+Use this when a backend/runtime improvement is ready and verified:
+
+1. Update the README or `docs/USAGE.md` only if the first-success path changed.
+2. Run `mobaile first-run` on the host you are willing to show publicly.
+3. Export a sanitized replay with `mobaile demo --out mobaile-demo.md`.
+4. Create a GitHub Release using the template above and attach or link the replay.
+5. Post one short founder note using `docs/LAUNCH_KIT.md`, then answer questions with specific trust-boundary details.
+6. Feed repeated questions back into README, support, or trust docs.
