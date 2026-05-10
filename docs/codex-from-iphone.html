@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Run Codex from iPhone with MOBaiLE</title>
+    <meta
+      name="description"
+      content="Use MOBaiLE to start and follow Codex CLI work from iPhone while your own Mac or Linux host keeps the repo, shell, credentials, files, and network."
+    />
+    <link rel="canonical" href="https://vemundss.github.io/MOBaiLE/codex-from-iphone.html" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Run Codex from iPhone with MOBaiLE" />
+    <meta
+      property="og:description"
+      content="Control Codex CLI work from iPhone while your own Mac or Linux host keeps execution, files, credentials, and network access."
+    />
+    <meta property="og:url" content="https://vemundss.github.io/MOBaiLE/codex-from-iphone.html" />
+    <meta property="og:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Run Codex from iPhone with MOBaiLE" />
+    <meta
+      name="twitter:description"
+      content="Start and follow Codex runs from iPhone without moving your local development environment into a hosted workspace."
+    />
+    <meta name="twitter:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <link rel="stylesheet" href="search-pages.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Run Codex from iPhone with MOBaiLE",
+        "description": "How MOBaiLE pairs an iPhone with a Mac or Linux host so Codex CLI work can be started and followed from the phone.",
+        "url": "https://vemundss.github.io/MOBaiLE/codex-from-iphone.html",
+        "dateModified": "2026-05-10",
+        "publisher": {
+          "@type": "Organization",
+          "name": "MOBaiLE"
+        },
+        "about": ["Codex CLI", "iPhone coding agent", "local coding agent"],
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Can I run Codex from iPhone?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "MOBaiLE lets an iPhone start and follow Codex CLI runs on a paired Mac or Linux host. The phone is the control surface; the host keeps the repo, shell, credentials, files, network, and Codex CLI session."
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">Codex from iPhone</div>
+        <h1>Run Codex from iPhone while your Mac does the work.</h1>
+        <p class="lede">
+          MOBaiLE pairs your iPhone with a Mac or Linux host so you can start
+          Codex work by text or voice, follow progress live, and keep the run in
+          one phone thread.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/Vemundss/MOBaiLE">View backend</a>
+          <a class="button" href="index.html">Product overview</a>
+          <a class="button" href="trust.html">Trust model</a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="answer">
+          <h2>Can you run Codex from iPhone?</h2>
+          <p>
+            Yes. MOBaiLE lets the iPhone start and follow Codex CLI runs on a
+            paired Mac or Linux host. The phone does not execute code. Your host
+            keeps the repo, shell, credentials, files, network access, and signed-in
+            Codex CLI environment.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Use the real repo</h3>
+            <p>
+              Codex runs where your work already lives, instead of requiring a
+              copied prompt, uploaded project, or hosted development workspace.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Follow the run live</h3>
+            <p>
+              Planning, execution, blocked states, results, artifacts, and
+              follow-up stay in the same phone-visible thread.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Keep access explicit</h3>
+            <p>
+              MOBaiLE keeps safe mode and full-access mode visible so you know
+              how much authority the host runtime has.
+            </p>
+          </article>
+        </div>
+
+        <article class="panel">
+          <h2>Setup path</h2>
+          <ol>
+            <li>Install MOBaiLE on the Mac or Linux host you want Codex to use.</li>
+            <li>Make sure Codex CLI is installed and signed in on that host.</li>
+            <li>Pair the iPhone with the QR shown by the backend.</li>
+            <li>Run <code>mobaile first-run</code> to prove the live thread.</li>
+            <li>Use <code>mobaile demo --out mobaile-demo.md</code> for a sanitized proof artifact.</li>
+          </ol>
+          <div class="footer-links">
+            <a class="link-pill" href="https://github.com/Vemundss/MOBaiLE/blob/main/docs/USAGE.md">Install guide</a>
+            <a class="link-pill" href="https://help.openai.com/en/articles/11096431">Codex CLI docs</a>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>Common questions</h2>
+          <ul>
+            <li><strong>Does the iPhone run Codex?</strong> No. The paired host runs Codex.</li>
+            <li><strong>Do I need credentials on the phone?</strong> The host keeps the signed-in CLI environment.</li>
+            <li><strong>Can I share a demo?</strong> Yes. Demo exports are built from backend activity events and omit raw logs, prompts, paths, and tokens by default.</li>
+          </ul>
+        </article>
+      </section>
+
+      <footer>
+        MOBaiLE search guide. <a href="index.html">Home</a> |
+        <a href="claude-code-from-iphone.html">Claude Code guide</a> |
+        <a href="safe-vs-full-access.html">Access modes</a>
+      </footer>
+    </main>
+  </body>
+</html>

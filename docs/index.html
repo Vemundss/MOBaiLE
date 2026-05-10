@@ -8,6 +8,39 @@
       name="description"
       content="MOBaiLE pairs your iPhone with your own Mac or Linux machine so you can run local coding agents by text or voice and follow each run in one live thread."
     />
+    <link rel="canonical" href="https://vemundss.github.io/MOBaiLE/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="MOBaiLE | Run your own computer from iPhone" />
+    <meta
+      property="og:description"
+      content="Pair your iPhone with a Mac or Linux host, run local Codex or Claude work by text or voice, and follow every run in one live thread."
+    />
+    <meta property="og:url" content="https://vemundss.github.io/MOBaiLE/" />
+    <meta property="og:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MOBaiLE | Run your own computer from iPhone" />
+    <meta
+      name="twitter:description"
+      content="An iPhone control surface for Codex or Claude work that still runs on your own Mac or Linux host."
+    />
+    <meta name="twitter:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "MOBaiLE",
+        "url": "https://vemundss.github.io/MOBaiLE/",
+        "codeRepository": "https://github.com/Vemundss/MOBaiLE",
+        "image": "https://vemundss.github.io/MOBaiLE/readme-hero.png",
+        "description": "MOBaiLE pairs an iPhone with a Mac or Linux host so you can start and follow local coding-agent runs from your phone.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "iOS, macOS, Linux",
+        "softwareRequirements": "Mac or Linux host, iPhone, and a signed-in Codex CLI or Claude Code CLI for agent runs",
+        "sameAs": [
+          "https://github.com/Vemundss/MOBaiLE"
+        ]
+      }
+    </script>
     <style>
       :root {
         --bg: #edf4f2;
@@ -335,6 +368,33 @@
         padding: 18px 18px 20px;
       }
 
+      .guide-list {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .guide-link {
+        color: inherit;
+        text-decoration: none;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.76);
+      }
+
+      .guide-link strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .guide-link span {
+        display: block;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.45;
+      }
+
       .footer-links {
         display: flex;
         flex-wrap: wrap;
@@ -364,6 +424,7 @@
         .hero,
         .split,
         .showcase,
+        .guide-list,
         .grid {
           grid-template-columns: 1fr;
         }
@@ -679,6 +740,40 @@
               >
             </div>
           </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div class="eyebrow">Search guides</div>
+          <h2>Specific answers for the way people look for this.</h2>
+          <p class="section-copy">
+            These pages explain the concrete setups MOBaiLE is built for:
+            Codex, Claude Code, self-hosted phone control, Tailscale reachability,
+            and explicit access modes.
+          </p>
+        </div>
+        <div class="guide-list">
+          <a class="guide-link" href="codex-from-iphone.html">
+            <strong>Codex from iPhone</strong>
+            <span>Control Codex CLI work from your phone while the host keeps the repo.</span>
+          </a>
+          <a class="guide-link" href="claude-code-from-iphone.html">
+            <strong>Claude Code from iPhone</strong>
+            <span>Start and follow Claude Code runs without moving work off the host.</span>
+          </a>
+          <a class="guide-link" href="self-hosted-iphone-agent.html">
+            <strong>Self-hosted phone agent</strong>
+            <span>Use iPhone as the control surface for a backend you operate.</span>
+          </a>
+          <a class="guide-link" href="tailscale-iphone-agent.html">
+            <strong>Tailscale setup</strong>
+            <span>Reach the paired host from iPhone without opening a public port.</span>
+          </a>
+          <a class="guide-link" href="safe-vs-full-access.html">
+            <strong>Safe vs full access</strong>
+            <span>Choose the host policy that matches the machine you trust.</span>
+          </a>
         </div>
       </section>
 

@@ -1,0 +1,40 @@
+# MOBaiLE
+
+MOBaiLE is an iPhone control surface for a Mac or Linux host. The phone captures prompts, voice, attachments, progress, and follow-up. The paired host owns execution, files, credentials, network access, pairing, access mode, host policy, and run history.
+
+## Canonical Public Pages
+
+- Product overview: https://vemundss.github.io/MOBaiLE/
+- Trust model: https://vemundss.github.io/MOBaiLE/trust.html
+- Support: https://vemundss.github.io/MOBaiLE/support.html
+- Privacy policy: https://vemundss.github.io/MOBaiLE/privacy-policy.html
+- Codex from iPhone: https://vemundss.github.io/MOBaiLE/codex-from-iphone.html
+- Claude Code from iPhone: https://vemundss.github.io/MOBaiLE/claude-code-from-iphone.html
+- Self-hosted iPhone agent: https://vemundss.github.io/MOBaiLE/self-hosted-iphone-agent.html
+- Tailscale iPhone agent: https://vemundss.github.io/MOBaiLE/tailscale-iphone-agent.html
+- Safe mode vs full access: https://vemundss.github.io/MOBaiLE/safe-vs-full-access.html
+
+## Repository Docs
+
+- Backend repository: https://github.com/Vemundss/MOBaiLE
+- Install guide: https://github.com/Vemundss/MOBaiLE/blob/main/docs/USAGE.md
+- Launch kit: https://github.com/Vemundss/MOBaiLE/blob/main/docs/LAUNCH_KIT.md
+- Marketing plan: https://github.com/Vemundss/MOBaiLE/blob/main/docs/MARKETING.md
+- Architecture: https://github.com/Vemundss/MOBaiLE/blob/main/ARCHITECTURE.md
+
+## Key Facts
+
+- The iPhone does not run code on-device.
+- The paired Mac or Linux host runs code and owns the runtime boundary.
+- The backend enforces pairing, auth, access mode, host policy, and file/runtime permissions.
+- Safe mode and full-access mode are intentionally different.
+- MOBaiLE supports same-Wi-Fi, Tailscale, local simulator, and configured public HTTPS paths.
+- `mobaile first-run` is the first proof point after install and pairing.
+- `mobaile demo --out mobaile-demo.md` exports sanitized activity-event replays for public proof.
+
+## Claims To Avoid
+
+- Do not describe MOBaiLE as "no data leaves your devices."
+- Do not say the iPhone runs code.
+- Do not imply full autonomy is the default for every host.
+- Do not collapse run, session, thread, executor, runtime context, and profile state.

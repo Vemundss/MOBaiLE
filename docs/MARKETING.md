@@ -16,9 +16,11 @@ The first success is: install the backend, pair the phone, send one prompt, and 
 
 1. **README as landing page.** Keep the top of `README.md` optimized for value proposition, install, screenshots, trust boundaries, and first success.
 2. **GitHub Pages as product site.** Keep `docs/index.html`, `docs/trust.html`, `docs/support.html`, and `docs/privacy-policy.html` aligned with the App Store and public install story.
-3. **Demo artifacts as proof.** Use `mobaile demo --out mobaile-demo.md` for a built-in sample, or `mobaile demo --run-id <run-id>` after a real run. These exports are designed to omit raw logs, stdout, stderr, prompts, file paths, and tokens.
-4. **Launch kit as reusable copy.** Use `docs/LAUNCH_KIT.md` for release notes, community posts, founder posts, trust replies, and first-success commands.
-5. **Releases as launch moments.** Every meaningful backend/runtime improvement should ship with a GitHub Release that includes a short "why it matters", an install/update command, and a demo artifact or screenshot.
+3. **Search-intent pages as demand capture.** Keep `docs/codex-from-iphone.html`, `docs/claude-code-from-iphone.html`, `docs/self-hosted-iphone-agent.html`, `docs/tailscale-iphone-agent.html`, and `docs/safe-vs-full-access.html` focused on specific high-intent queries.
+4. **Crawl and AI-search files.** Keep `docs/robots.txt`, `docs/sitemap.xml`, and `docs/llms.txt` current when public pages change.
+5. **Demo artifacts as proof.** Use `mobaile demo --out mobaile-demo.md` for a built-in sample, or `mobaile demo --run-id <run-id>` after a real run. These exports are designed to omit raw logs, stdout, stderr, prompts, file paths, and tokens.
+6. **Launch kit as reusable copy.** Use `docs/LAUNCH_KIT.md` for release notes, community posts, founder posts, trust replies, and first-success commands.
+7. **Releases as launch moments.** Every meaningful backend/runtime improvement should ship with a GitHub Release that includes a short "why it matters", an install/update command, and a demo artifact or screenshot.
 
 ## Backend Funnel
 
@@ -32,6 +34,19 @@ Optimize every public backend surface around one first-success loop:
 6. Visitor exports proof with `mobaile demo --out mobaile-demo.md`.
 
 The backend should do the trust work before the App Store listing has to. The public repo can prove the install flow, the activity-event progress model, the access-mode boundary, the pairing model, and the sanitized demo exporter.
+
+## Search Targets
+
+Prioritize narrow developer/operator intent over broad "AI app" language:
+
+- `run codex from iphone`
+- `claude code iphone`
+- `control local coding agent from phone`
+- `self hosted iphone agent`
+- `tailscale iphone agent`
+- `safe mode vs full access agent`
+
+Each page should answer the query directly in the first content block, then link to the install guide, trust model, and closest adjacent guide.
 
 ## Message Pillars
 

@@ -107,6 +107,14 @@ The public backend should be the first conversion path because it proves the cla
 3. Attach a sanitized `mobaile demo` artifact to release notes, founder posts, and community launches.
 4. Link the trust model whenever you mention full-access mode, Tailscale, pairing, credentials, or agent providers.
 
+Search-focused public pages live under `docs/` for the highest-intent questions:
+
+- [`docs/codex-from-iphone.html`](docs/codex-from-iphone.html)
+- [`docs/claude-code-from-iphone.html`](docs/claude-code-from-iphone.html)
+- [`docs/self-hosted-iphone-agent.html`](docs/self-hosted-iphone-agent.html)
+- [`docs/tailscale-iphone-agent.html`](docs/tailscale-iphone-agent.html)
+- [`docs/safe-vs-full-access.html`](docs/safe-vs-full-access.html)
+
 ## Keep trust boundaries explicit
 
 - **The phone does not run the code.** It sends prompts, audio, attachments, and session metadata to the backend you control.

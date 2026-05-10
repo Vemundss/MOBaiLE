@@ -50,6 +50,7 @@ Use these backend-owned assets before asking anyone to trust a broad claim:
 - Phone screenshots: `docs/readme-screens/`
 - Trust page: `docs/trust.html`
 - Install guide: `docs/USAGE.md`
+- Search-intent pages: `docs/codex-from-iphone.html`, `docs/claude-code-from-iphone.html`, `docs/self-hosted-iphone-agent.html`, `docs/tailscale-iphone-agent.html`, and `docs/safe-vs-full-access.html`
 - Sanitized replay: `mobaile demo --out mobaile-demo.md`
 - Real-run replay, when safe: `mobaile demo --run-id <run-id> --out mobaile-demo.md`
 
@@ -139,6 +140,8 @@ If someone asks what to try first:
 
 - README top section shows the one-line value, install command, screenshot, and trust boundary.
 - `docs/index.html`, `docs/trust.html`, `docs/support.html`, and `docs/privacy-policy.html` match the same public story.
+- `docs/robots.txt`, `docs/sitemap.xml`, and `docs/llms.txt` are current.
+- Search-intent pages link back to the install guide, trust model, and related guides.
 - `mobaile first-run` succeeds on a representative host before posting.
 - `mobaile demo --out mobaile-demo.md` produces a shareable artifact.
 - Release notes include a "why it matters" section, not only a changelog.

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MOBaiLE Safe Mode vs Full Access</title>
+    <meta
+      name="description"
+      content="Understand MOBaiLE safe mode and full-access mode before controlling local agent runs from iPhone."
+    />
+    <link rel="canonical" href="https://vemundss.github.io/MOBaiLE/safe-vs-full-access.html" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="MOBaiLE Safe Mode vs Full Access" />
+    <meta
+      property="og:description"
+      content="Choose the MOBaiLE host access mode that matches how much authority you want backend-launched agents to have."
+    />
+    <meta property="og:url" content="https://vemundss.github.io/MOBaiLE/safe-vs-full-access.html" />
+    <meta property="og:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MOBaiLE Safe Mode vs Full Access" />
+    <meta
+      name="twitter:description"
+      content="Safe mode and full-access mode make MOBaiLE host permissions explicit."
+    />
+    <meta name="twitter:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <link rel="stylesheet" href="search-pages.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "MOBaiLE Safe Mode vs Full Access",
+        "description": "How MOBaiLE safe mode and full-access mode differ for host-side agent execution.",
+        "url": "https://vemundss.github.io/MOBaiLE/safe-vs-full-access.html",
+        "dateModified": "2026-05-10",
+        "publisher": {
+          "@type": "Organization",
+          "name": "MOBaiLE"
+        },
+        "about": ["safe mode", "full access", "host policy", "iPhone coding agent"]
+      }
+    </script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">Access modes</div>
+        <h1>Safe mode and full access are intentionally different.</h1>
+        <p class="lede">
+          MOBaiLE keeps host authority visible. Use safe mode for cautious
+          machines, and full-access mode for trusted private hosts where you
+          intentionally want deeper automation.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/Vemundss/MOBaiLE">View backend</a>
+          <a class="button" href="trust.html">Trust model</a>
+          <a class="button" href="index.html">Product overview</a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="answer">
+          <h2>What is the difference?</h2>
+          <p>
+            Safe mode restricts backend-launched agent execution and file access.
+            Full-access mode is for trusted private hosts where you want agents
+            to operate with broader local authority. The backend enforces this
+            boundary; the private iPhone app is not the security layer.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Safe mode</h3>
+            <p>
+              Use safe mode for cautious hosts, demos, simulator testing, and
+              workspaces where broad file or command access is not acceptable.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Full access</h3>
+            <p>
+              Use full-access mode only on a trusted private host where your
+              local agent workflow already has the authority it needs.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Visible policy</h3>
+            <p>
+              The active access mode is surfaced by setup, readiness, status,
+              and trust docs so it is not hidden behind mobile UI copy.
+            </p>
+          </article>
+        </div>
+
+        <article class="panel">
+          <h2>How to choose</h2>
+          <ul>
+            <li>Choose safe mode if the host is shared, experimental, or used for demos.</li>
+            <li>Choose full access if the host is private and already trusted for local agent runs.</li>
+            <li>Use Tailscale or a configured public HTTPS URL only as the network path; it does not replace backend auth or host policy.</li>
+            <li>Run <code>mobaile status</code> to inspect service, access mode, phone path, and pairing state.</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <h2>Related setup pages</h2>
+          <div class="footer-links">
+            <a class="link-pill" href="https://github.com/Vemundss/MOBaiLE/blob/main/docs/USAGE.md">Install guide</a>
+            <a class="link-pill" href="trust.html">Trust model</a>
+            <a class="link-pill" href="tailscale-iphone-agent.html">Tailscale setup</a>
+          </div>
+        </article>
+      </section>
+
+      <footer>
+        MOBaiLE search guide. <a href="index.html">Home</a> |
+        <a href="codex-from-iphone.html">Codex guide</a> |
+        <a href="claude-code-from-iphone.html">Claude Code guide</a>
+      </footer>
+    </main>
+  </body>
+</html>

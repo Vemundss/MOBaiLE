@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Self-Hosted iPhone Agent Control with MOBaiLE</title>
+    <meta
+      name="description"
+      content="MOBaiLE gives iPhone a self-hosted control surface for agent runs while your own Mac or Linux backend owns execution, pairing, policy, files, and credentials."
+    />
+    <link rel="canonical" href="https://vemundss.github.io/MOBaiLE/self-hosted-iphone-agent.html" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Self-Hosted iPhone Agent Control with MOBaiLE" />
+    <meta
+      property="og:description"
+      content="Use iPhone as the control surface for a backend you operate, while the paired host keeps execution and trust boundaries."
+    />
+    <meta property="og:url" content="https://vemundss.github.io/MOBaiLE/self-hosted-iphone-agent.html" />
+    <meta property="og:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Self-Hosted iPhone Agent Control with MOBaiLE" />
+    <meta
+      name="twitter:description"
+      content="A phone control surface for local agent runs on a backend you operate."
+    />
+    <meta name="twitter:image" content="https://vemundss.github.io/MOBaiLE/readme-hero.png" />
+    <link rel="stylesheet" href="search-pages.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Self-Hosted iPhone Agent Control with MOBaiLE",
+        "description": "How MOBaiLE lets an iPhone control agent runs through a backend hosted on the user's own Mac or Linux machine.",
+        "url": "https://vemundss.github.io/MOBaiLE/self-hosted-iphone-agent.html",
+        "dateModified": "2026-05-10",
+        "publisher": {
+          "@type": "Organization",
+          "name": "MOBaiLE"
+        },
+        "about": ["self-hosted AI agent", "iPhone agent", "local backend"]
+      }
+    </script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="eyebrow">Self-hosted agent control</div>
+        <h1>A self-hosted iPhone control surface for local agent work.</h1>
+        <p class="lede">
+          MOBaiLE is not a hosted IDE. It pairs your iPhone with a backend on
+          your own Mac or Linux machine, then lets the phone start, follow, and
+          continue agent runs.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/Vemundss/MOBaiLE">View backend</a>
+          <a class="button" href="index.html">Product overview</a>
+          <a class="button" href="trust.html">Trust model</a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="answer">
+          <h2>What is a self-hosted iPhone agent control surface?</h2>
+          <p>
+            In MOBaiLE, the iPhone controls the run and the paired backend does
+            the work. The backend lives on a host you operate, so your execution
+            context stays attached to your repo, shell, files, credentials,
+            network access, agent CLI, and host policy.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Host-owned runtime</h3>
+            <p>
+              The backend owns execution, pairing, auth, access mode, runtime
+              state, run history, and file/runtime boundaries.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Phone-owned interaction</h3>
+            <p>
+              The phone captures prompts, voice, attachments, progress,
+              summaries, artifacts, and follow-up.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Proof without private logs</h3>
+            <p>
+              <code>mobaile demo</code> exports sanitized activity-event replays
+              for public proof without raw logs, prompts, file paths, or tokens.
+            </p>
+          </article>
+        </div>
+
+        <article class="panel">
+          <h2>Who this is for</h2>
+          <ul>
+            <li>Developers who already use local Codex or Claude Code workflows.</li>
+            <li>Founders and operators who need to start or follow work away from the desk.</li>
+            <li>Security-conscious users who want inspectable host-side boundaries.</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <h2>First success</h2>
+          <ol>
+            <li>Install the backend on the host you trust.</li>
+            <li>Pair the iPhone with the backend QR.</li>
+            <li>Run <code>mobaile first-run</code>.</li>
+            <li>Watch planning, execution, and result return to one live phone thread.</li>
+          </ol>
+        </article>
+      </section>
+
+      <footer>
+        MOBaiLE search guide. <a href="index.html">Home</a> |
+        <a href="tailscale-iphone-agent.html">Tailscale setup</a> |
+        <a href="safe-vs-full-access.html">Access modes</a>
+      </footer>
+    </main>
+  </body>
+</html>
