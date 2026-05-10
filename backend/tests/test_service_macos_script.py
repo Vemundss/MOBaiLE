@@ -23,6 +23,7 @@ def test_service_macos_install_summarizes_warmup_failures(tmp_path: Path):
     backend_dir = repo / "backend"
     fake_bin = tmp_path / "bin"
     home = tmp_path / "home"
+    uv_log = tmp_path / "service_macos_install.uv.log"
     report_path = home / "Library" / "Application Support" / "MOBaiLE" / "backend-runtime" / "data" / "capabilities.json"
 
     scripts_dir.mkdir(parents=True)
@@ -62,7 +63,14 @@ def test_service_macos_install_summarizes_warmup_failures(tmp_path: Path):
     )
     write_executable(
         fake_bin / "uv",
-        "#!/usr/bin/env bash\nif [[ \"$1\" == \"sync\" ]]; then exit 0; fi\nexit 0\n",
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            printf "%s\\n" "$*" >> "{uv_log}"
+            if [[ "$1" == "sync" ]]; then exit 0; fi
+            exit 0
+            """
+        ),
     )
     write_executable(
         fake_bin / "launchctl",
@@ -97,6 +105,7 @@ def test_service_macos_sync_preserves_paired_clients_in_runtime_state(tmp_path: 
     backend_dir = repo / "backend"
     fake_bin = tmp_path / "bin"
     home = tmp_path / "home"
+    uv_log = tmp_path / "service_macos_sync.uv.log"
     runtime_dir = home / "Library" / "Application Support" / "MOBaiLE" / "backend-runtime"
 
     scripts_dir.mkdir(parents=True)
@@ -152,7 +161,14 @@ def test_service_macos_sync_preserves_paired_clients_in_runtime_state(tmp_path: 
     )
     write_executable(
         fake_bin / "uv",
-        "#!/usr/bin/env bash\nif [[ \"$1\" == \"sync\" ]]; then exit 0; fi\nexit 0\n",
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            printf "%s\\n" "$*" >> "{uv_log}"
+            if [[ "$1" == "sync" ]]; then exit 0; fi
+            exit 0
+            """
+        ),
     )
 
     result = subprocess.run(
@@ -246,6 +262,7 @@ def assert_service_sync_preserves_newer_runtime_pair_code(
     backend_dir = repo / "backend"
     fake_bin = tmp_path / "bin"
     home = tmp_path / "home"
+    uv_log = tmp_path / f"{script_name}.uv.log"
 
     scripts_dir.mkdir(parents=True)
     backend_dir.mkdir(parents=True)
@@ -292,7 +309,14 @@ def assert_service_sync_preserves_newer_runtime_pair_code(
     )
     write_executable(
         fake_bin / "uv",
-        "#!/usr/bin/env bash\nif [[ \"$1\" == \"sync\" ]]; then exit 0; fi\nexit 0\n",
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            printf "%s\\n" "$*" >> "{uv_log}"
+            if [[ "$1" == "sync" ]]; then exit 0; fi
+            exit 0
+            """
+        ),
     )
 
     result = subprocess.run(
@@ -316,6 +340,7 @@ def assert_service_sync_preserves_newer_runtime_pair_code(
     assert merged["pair_code_expires_at"] == "2999-01-01T00:00:00Z"
     assert merged["paired_clients"] == [{"token_sha256": "token-hash"}]
     assert not (runtime_dir / "pairing-qr.png").exists()
+    assert "sync --python 3.11" in uv_log.read_text(encoding="utf-8")
 
 
 def test_service_macos_sync_preserves_newer_runtime_pair_code(tmp_path: Path):

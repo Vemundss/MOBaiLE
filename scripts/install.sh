@@ -242,6 +242,10 @@ print_dependency_notes() {
     echo "  Agent CLI: install and sign in to Codex CLI or Claude CLI for real coding runs. Without one, MOBaiLE can still run direct shell commands."
     echo "    Codex CLI: https://developers.openai.com/codex/cli"
   fi
+  if should_run_autonomy_setup && ! command -v npx > /dev/null 2>&1; then
+    echo "  Browser/desktop automation: Node.js/npm is needed for npx-based Playwright and Peekaboo MCP servers."
+    echo "    MOBaiLE is installed; direct shell and agent runs still work without npx."
+  fi
   if [[ "${PHONE_ACCESS_MODE}" == "tailscale" && -z "${PUBLIC_SERVER_URL}" ]]; then
     if command -v tailscale > /dev/null 2>&1; then
       echo "  Tailscale: detected on this computer. Make sure Tailscale is also installed and signed in on the iPhone."

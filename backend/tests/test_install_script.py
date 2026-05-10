@@ -204,6 +204,21 @@ def test_install_script_yes_alias_skips_prompts_with_recommended_defaults(tmp_pa
     assert "Background service: Yes" in result.stdout
 
 
+def test_install_script_full_access_mentions_missing_npx_as_optional(tmp_path: Path):
+    checkout = make_checkout(tmp_path)
+    home = tmp_path / "home"
+
+    result = run_install_script(
+        home,
+        checkout=checkout,
+        extra_env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+    )
+
+    assert result.returncode == 0
+    assert "Browser/desktop automation: Node.js/npm is needed" in result.stdout
+    assert "direct shell and agent runs still work without npx" in result.stdout
+
+
 def test_install_script_can_switch_to_wifi_without_background_service(tmp_path: Path):
     checkout = make_checkout(tmp_path)
     home = tmp_path / "home"

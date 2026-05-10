@@ -306,7 +306,7 @@ def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
             "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_TEST_SERVICE_STATE": "running",
             "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
         },
         capture_output=True,
         text=True,
@@ -316,6 +316,7 @@ def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
     assert result.returncode == 0
     assert "MOBaiLE setup check" in result.stdout
     assert "[ok] Codex CLI is available: codex 9.9.9" in result.stdout
+    assert "browser/desktop automation needs npx" in result.stdout
     assert "[info] Wi-Fi mode does not require Tailscale" in result.stdout
     assert "Check result: ready" in result.stdout
 
@@ -665,6 +666,96 @@ def test_mobaile_doctor_passes_for_tailscale_pairing(tmp_path: Path):
         assert "[ok] Keep-awake service is running" in result.stdout
     else:
         assert "[warn] Keep-awake service is macOS-only" in result.stdout
+    assert "Doctor result: ready" in result.stdout
+
+
+def test_mobaile_doctor_network_config_check_does_not_leak_return_trap(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    fake_bin = create_fake_codex_bin(tmp_path)
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_PHONE_ACCESS_MODE=local",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=codex",
+                "VOICE_AGENT_API_TOKEN=test-token",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://127.0.0.1:8000",
+                "server_urls": ["http://127.0.0.1:8000"],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+    write_executable(
+        fake_bin / "curl",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            out_path="/dev/null"
+            write_code="false"
+            url=""
+            while [[ $# -gt 0 ]]; do
+              case "$1" in
+                -o)
+                  out_path="$2"
+                  shift 2
+                  ;;
+                -w)
+                  write_code="true"
+                  shift 2
+                  ;;
+                http*)
+                  url="$1"
+                  shift
+                  ;;
+                *)
+                  shift
+                  ;;
+              esac
+            done
+            if [[ "${url}" == */v1/config ]]; then
+              printf '{"default_executor":"codex","available_executors":["codex"],"executors":[]}' > "${out_path}"
+            else
+              printf '{"status":"ok"}' > "${out_path}"
+            fi
+            if [[ "${write_code}" == "true" ]]; then
+              printf "200"
+            fi
+            """
+        ),
+    )
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_TEST_KEEP_AWAKE_STATE": "running",
+            "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Backend reports Codex executor ready" in result.stdout
+    assert "unbound variable" not in result.stderr
     assert "Doctor result: ready" in result.stdout
 
 

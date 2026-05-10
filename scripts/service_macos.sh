@@ -14,6 +14,7 @@ WARMUP_ON_START="${VOICE_AGENT_WARMUP_ON_START:-true}"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 KEEP_AWAKE_PLIST_PATH="${HOME}/Library/LaunchAgents/${KEEP_AWAKE_LABEL}.plist"
 DOMAIN="gui/$(id -u)"
+REQUIRED_PYTHON_VERSION="3.11"
 
 usage() {
   cat << EOF
@@ -178,7 +179,7 @@ sync_runtime() {
   local sync_output=""
   if sync_output="$(
     cd "${RUNTIME_DIR}"
-    uv sync 2>&1
+    uv sync --python "${REQUIRED_PYTHON_VERSION}" 2>&1
   )"; then
     return
   fi

@@ -853,6 +853,22 @@ check_agent_cli() {
   fi
 }
 
+check_autonomy_dependencies() {
+  local env_file="$1"
+  local security_mode
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+
+  if [[ "${security_mode}" != "full-access" ]]; then
+    return
+  fi
+
+  if command -v npx > /dev/null 2>&1; then
+    check_ok "npx is available for browser/desktop automation"
+  else
+    check_info "Node.js/npm is not installed; browser/desktop automation needs npx. Direct shell and agent runs still work."
+  fi
+}
+
 check_phone_path() {
   local phone_access_mode="$1"
   local public_server_url="$2"
@@ -1026,6 +1042,16 @@ if codex_path or claude_path:
 else:
     add(checks, "agent_cli", "todo", "Install and sign in to Codex CLI or Claude CLI for real agent runs")
 
+if read_env(env_file, "VOICE_AGENT_SECURITY_MODE", "safe") == "full-access":
+    add(
+        checks,
+        "autonomy_npx",
+        "ok" if command_status("npx") else "info",
+        "npx is available for browser/desktop automation"
+        if command_status("npx")
+        else "Node.js/npm is not installed; browser/desktop automation needs npx. Direct shell and agent runs still work.",
+    )
+
 if phone_access_mode == "tailscale" and not public_server_url:
     if not command_status("tailscale"):
         add(checks, "phone_path", "todo", "Install Tailscale on this computer and the iPhone for Anywhere mode")
@@ -1146,6 +1172,7 @@ check_command() {
     check_info "uv is not installed yet; the MOBaiLE installer can add it automatically"
   fi
   check_agent_cli "${env_file}"
+  check_autonomy_dependencies "${env_file}"
   check_phone_path "${phone_access_mode}" "${public_server_url}"
 
   if [[ "${service_state}" == "Running" ]]; then
@@ -1475,7 +1502,6 @@ doctor_backend_config_check() {
   fi
 
   body_file="$(mktemp)"
-  trap 'rm -f "${body_file}"' RETURN
 
   for url in "${urls[@]}"; do
     code="$(curl -sS --connect-timeout 3 --max-time 5 -H "Authorization: Bearer ${api_token}" -o "${body_file}" -w "%{http_code}" "${url}/v1/config" 2> /dev/null || true)"
@@ -1530,12 +1556,15 @@ PY
   done
 
   if [[ "${successes}" -gt 0 ]]; then
+    rm -f "${body_file}"
     return 0
   fi
   if [[ "${failures}" -gt 0 ]]; then
+    rm -f "${body_file}"
     return 1
   fi
 
+  rm -f "${body_file}"
   echo "[warn] Backend executor config check could not reach /v1/config"
   return 0
 }
