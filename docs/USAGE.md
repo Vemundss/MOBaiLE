@@ -36,6 +36,8 @@ If you are already inside this repo and want to run the installer there:
 bash ./scripts/install.sh --checkout "$PWD"
 ```
 
+On macOS, opening `scripts/MOBaiLE Setup.command` from a checkout or the `MOBaiLE-Setup-macOS.zip` release asset starts the same high-autonomy path as `--yes --high-autonomy` and keeps Terminal open so you can read any human unblock steps.
+
 Useful one-liner variants:
 
 ```bash

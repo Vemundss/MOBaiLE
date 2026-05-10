@@ -11,6 +11,8 @@ Most people should start with the installer:
 curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes
 ```
 
+On macOS, open `scripts/MOBaiLE Setup.command` when you want a clickable high-autonomy setup launcher instead of pasting a command.
+
 If you are already in a checkout, run:
 
 ```bash
@@ -43,7 +45,9 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/insta
 ## Install and Bootstrap
 
 - `install.sh`: main installer and onboarding flow
+- `MOBaiLE Setup.command`: clickable macOS launcher for the high-autonomy install path
 - `install_backend.sh`: lower-level backend-only install/configure path for the current checkout
+- `package_macos_setup_launcher.sh`: package the clickable macOS launcher for release downloads
 - `set_security_mode.sh`: switch an existing `backend/.env` between `safe` and `full-access`
 - `rotate_api_token.sh`: rotate `VOICE_AGENT_API_TOKEN` and refresh pairing code exports
 

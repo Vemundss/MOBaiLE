@@ -20,6 +20,7 @@ backend/.mobaile/
 .bundle/
 vendor/bundle/
 build/
+dist/
 output/
 error.log
 ios/VoiceAgentApp 2.xcodeproj/

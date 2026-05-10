@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import stat
 import subprocess
 import textwrap
 from pathlib import Path
+from zipfile import ZipFile
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -78,6 +82,25 @@ def make_standalone_install_script(tmp_path: Path) -> Path:
         (PROJECT_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8"),
     )
     return script_path
+
+
+def make_fake_command_launcher_tools(fake_bin: Path) -> None:
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    write_executable(fake_bin / "git", "#!/usr/bin/env bash\nexit 0\n")
+    write_executable(
+        fake_bin / "curl",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            cat << 'SCRIPT'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf "installer args: %s\\n" "$*"
+            SCRIPT
+            """
+        ),
+    )
 
 
 def run_install_script(
@@ -184,6 +207,61 @@ def test_install_script_defaults_to_full_access_and_tailscale(tmp_path: Path):
     assert "VOICE_AGENT_WARMUP_ON_START=false" in result.stdout
     assert "mobaile autonomy --no-open-permissions" in result.stdout
     assert not (home / ".local" / "bin" / "mobaile").exists()
+
+
+def test_macos_command_launcher_runs_high_autonomy_installer(tmp_path: Path):
+    fake_bin = tmp_path / "bin"
+    make_fake_command_launcher_tools(fake_bin)
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "MOBaiLE Setup.command")],
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "MOBAILE_COMMAND_ASSUME_YES": "1",
+            "MOBAILE_COMMAND_NO_PAUSE": "1",
+            "MOBAILE_INSTALL_URL": "https://example.invalid/install.sh",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "MOBaiLE Host Setup" in result.stdout
+    assert "Downloading MOBaiLE installer" in result.stdout
+    assert "installer args: --yes --high-autonomy" in result.stdout
+
+
+def test_macos_setup_launcher_package_preserves_executable_bit(tmp_path: Path):
+    if shutil.which("ditto") is None and shutil.which("zip") is None:
+        pytest.skip("package script needs ditto or zip")
+
+    out_dir = tmp_path / "release"
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(PROJECT_ROOT / "scripts" / "package_macos_setup_launcher.sh"),
+            "--out-dir",
+            str(out_dir),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    asset_path = out_dir / "MOBaiLE-Setup-macOS.zip"
+    assert result.returncode == 0, result.stderr
+    assert asset_path.exists()
+    assert f"Wrote {asset_path}" in result.stdout
+
+    with ZipFile(asset_path) as archive:
+        launcher = archive.getinfo("MOBaiLE-Setup-macOS/MOBaiLE Setup.command")
+
+    mode = (launcher.external_attr >> 16) & 0o777
+    assert mode & stat.S_IRUSR
+    assert mode & stat.S_IXUSR
 
 
 def test_install_script_yes_alias_skips_prompts_with_recommended_defaults(tmp_path: Path):

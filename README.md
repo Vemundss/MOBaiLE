@@ -54,7 +54,9 @@ For the most autonomous private-host setup, use the same installer with one extr
 curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --high-autonomy
 ```
 
-That path keeps Full Access explicit, starts the background service, prepares the QR, runs `mobaile ready --open-permissions --open-setup`, installs the macOS keep-awake helper when available, checks local Codex sign-in when supported, and lands on the computer-local setup page. It still cannot sign in to Codex/Claude, sign in to Tailscale, grant macOS privacy permissions, or solve 2FA/CAPTCHAs for you; it reports those as human unblock steps.
+On macOS, you can also open `scripts/MOBaiLE Setup.command` from a checkout or the `MOBaiLE-Setup-macOS.zip` release asset. It opens Terminal, runs the same high-autonomy installer, and keeps the window open so human unblock steps remain visible.
+
+That high-autonomy path keeps Full Access explicit, starts the background service, prepares the QR, runs `mobaile ready --open-permissions --open-setup`, installs the macOS keep-awake helper when available, checks local Codex sign-in when supported, and lands on the computer-local setup page. It still cannot sign in to Codex/Claude, sign in to Tailscale, grant macOS privacy permissions, or solve 2FA/CAPTCHAs for you; it reports those as human unblock steps.
 
 Run `mobaile setup` on the backend computer to open the computer-local setup page with the pairing QR, backend readiness checks, first-run status, and autonomy readiness. It uses `127.0.0.1`, so it is not a phone-openable link; scan the QR with the iPhone instead. If setup feels off, run `mobaile ready --open-permissions --open-setup` for the guided high-autonomy flow, `mobaile check` for a quick preflight, or `mobaile repair` to refresh pairing, restart the service, and run diagnostics. When you want the latest installed CLI/backend later, run `mobaile update`. To remove MOBaiLE from the host, run `mobaile uninstall`; add `--delete-data --yes` when you also want local pairing, run history, logs, and runtime data deleted.
 
@@ -149,6 +151,7 @@ For public-facing trust copy, use the GitHub Pages trust page source in [`docs/t
 Use these only if the main install command is not what you want.
 
 - Already in a checkout and want to run the installer there: `bash ./scripts/install.sh --checkout "$PWD"`
+- macOS clickable high-autonomy setup: open `scripts/MOBaiLE Setup.command`
 - Same recommended setup with explicit flags: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --mode full-access --phone-access tailscale --background-service yes`
 - Guided high-autonomy setup: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --high-autonomy`
 - Same Wi-Fi only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --phone-access wifi`

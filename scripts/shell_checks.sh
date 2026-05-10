@@ -41,6 +41,7 @@ shell_targets() {
     "${SCRIPTS_DIR}/doctor.sh" \
     "${SCRIPTS_DIR}/install.sh" \
     "${SCRIPTS_DIR}/install_backend.sh" \
+    "${SCRIPTS_DIR}/package_macos_setup_launcher.sh" \
     "${SCRIPTS_DIR}/pairing_qr.sh" \
     "${SCRIPTS_DIR}/phone_connectivity_smoke.sh" \
     "${SCRIPTS_DIR}/rotate_api_token.sh" \
@@ -48,7 +49,8 @@ shell_targets() {
     "${SCRIPTS_DIR}/service_macos.sh" \
     "${SCRIPTS_DIR}/set_security_mode.sh" \
     "${SCRIPTS_DIR}/warmup_capabilities.sh" \
-    "${SCRIPTS_DIR}/mobaile"
+    "${SCRIPTS_DIR}/mobaile" \
+    "${SCRIPTS_DIR}/MOBaiLE Setup.command"
 }
 
 lint() {
