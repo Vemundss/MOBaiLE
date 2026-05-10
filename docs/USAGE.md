@@ -155,11 +155,13 @@ All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 - `git` and `curl`
 - `uv` and Python 3.11+, only if you are not letting `install_backend.sh` add them for you
 - Codex CLI or Claude CLI, installed and signed in, for real agent runs
+- Node.js/npm only if you want `npx`-based browser/desktop automation in Full Access mode
 - Tailscale on the computer and iPhone for the default `Anywhere with Tailscale` setup
 
 If you are setting this up for the iPhone app, you also need a reachable backend URL. For local testing that can be `127.0.0.1`; for a real phone it should be a Tailscale, LAN, public HTTPS, or other reachable host URL. Tailscale is recommended for off-Wi-Fi private use, but it is not required for same-Wi-Fi pairing, local simulator testing, or a public HTTPS endpoint.
 
 MOBaiLE can install and pair without Codex or Claude; direct shell commands still work. For the intended agent coding experience, install and sign in to at least one agent CLI before the first real run. Current Codex CLI setup is documented by OpenAI at <https://developers.openai.com/codex/cli>.
+MOBaiLE can also run without Node.js/npm; only browser and desktop MCP automation need `npx`. `mobaile check` reports that as an informational setup item when it is missing.
 
 Check versions after install:
 
@@ -167,6 +169,7 @@ Check versions after install:
 uv --version
 cd backend && uv run python --version
 codex --version
+npx --version
 tailscale status
 ```
 

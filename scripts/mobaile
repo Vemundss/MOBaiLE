@@ -807,7 +807,8 @@ check_python_version() {
   fi
 
   if [[ -x "${backend_python}" ]]; then
-    if version="$("${backend_python}" - << 'PY'
+    if version="$(
+      "${backend_python}" - << 'PY'
 import sys
 required = (3, 11)
 if sys.version_info < required:

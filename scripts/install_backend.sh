@@ -37,7 +37,8 @@ run_python() {
 
 ensure_setup_python() {
   local python_version=""
-  if python_version="$(run_python - << 'PY'
+  if python_version="$(
+    run_python - << 'PY'
 import sys
 
 required = (3, 11)
