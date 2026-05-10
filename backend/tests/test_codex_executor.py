@@ -21,6 +21,17 @@ def test_build_command_places_search_before_exec(monkeypatch) -> None:
     ]
 
 
+def test_build_command_defaults_to_unrestricted_when_mode_is_unset(monkeypatch) -> None:
+    monkeypatch.delenv("VOICE_AGENT_SECURITY_MODE", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_CODEX_UNRESTRICTED", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_CODEX_MODEL", raising=False)
+    executor = CodexExecutor(Path.cwd(), binary="codex", enable_web_search=False)
+
+    command = executor._build_command("Test prompt")
+
+    assert "--dangerously-bypass-approvals-and-sandbox" in command
+
+
 def test_build_command_resume_keeps_exec_subcommand_flags(monkeypatch) -> None:
     monkeypatch.setenv("VOICE_AGENT_SECURITY_MODE", "full-access")
     monkeypatch.delenv("VOICE_AGENT_CODEX_UNRESTRICTED", raising=False)

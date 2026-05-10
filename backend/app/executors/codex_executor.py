@@ -27,7 +27,7 @@ class CodexExecutor:
         self.codex_home = codex_home or (Path(codex_home_raw).expanduser().resolve() if codex_home_raw else None)
         self.default_model = os.getenv("VOICE_AGENT_CODEX_MODEL", "").strip()
         self.default_reasoning_effort = os.getenv("VOICE_AGENT_CODEX_REASONING_EFFORT", "").strip().lower()
-        security_mode = os.getenv("VOICE_AGENT_SECURITY_MODE", "safe").strip().lower()
+        security_mode = os.getenv("VOICE_AGENT_SECURITY_MODE", "full-access").strip().lower()
         default_unrestricted = "true" if security_mode == "full-access" else "false"
         unrestricted = os.getenv("VOICE_AGENT_CODEX_UNRESTRICTED", default_unrestricted).strip().lower()
         self.unrestricted = unrestricted not in {"0", "false", "no", "off"}

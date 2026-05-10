@@ -163,13 +163,15 @@ The iPhone app only talks to this backend. It does not run code on-device.
 
 The phone starts and follows the run. The paired host machine does the work.
 
-Safe mode defaults:
+Full Access is the default for the recommended private-host setup. It gives backend-launched Codex unrestricted execution and allows host file browsing through the backend file APIs.
+
+Safe mode is still available when you want a cautious host:
 
 - restricted codex execution (`VOICE_AGENT_CODEX_UNRESTRICTED=false`)
 - restricted file reads (`VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false`)
 - workdir constrained to default root
 
-Use `full-access` only on trusted private hosts.
+Use `full-access` only on trusted private hosts. Use `safe` explicitly for local simulator testing, demos, or machines where you do not want unrestricted agent execution.
 All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 
 ## Prerequisites

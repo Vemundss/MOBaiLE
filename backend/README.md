@@ -13,14 +13,14 @@ This document is backend-scoped. The canonical human setup and operations flow l
 
 ## Runtime Notes
 
-- Default posture is `safe`; `full-access` must be an explicit choice.
+- Default posture is `full-access` for trusted private hosts; use `safe` explicitly on cautious hosts.
 - `shell` is always available for direct host commands. `codex` and `claude` are optional agent executors.
 - The iPhone app prefers on-device speech first. Backend `/v1/audio` still needs transcription configuration when that fallback is used.
 
 ## Key Files and State
 
 - Config: `backend/.env`
-- Safe template: `backend/.env.example`
+- Environment template: `backend/.env.example`
 - Pairing payload: `backend/pairing.json` for `server_url`, `session_id`, and `pair_code` only
 - Repo-local runtime assets: `../.mobaile/runtime/`
 - Persistent profiles:

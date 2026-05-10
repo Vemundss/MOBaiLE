@@ -170,7 +170,9 @@ def test_install_backend_script_updates_existing_env_file(tmp_path: Path):
     assert "VOICE_AGENT_API_TOKEN=keep-me" in env_contents
     assert "VOICE_AGENT_HOST=127.0.0.1" in env_contents
     assert "VOICE_AGENT_PHONE_ACCESS_MODE=local" in env_contents
-    assert "VOICE_AGENT_SECURITY_MODE=safe" in env_contents
+    assert "VOICE_AGENT_SECURITY_MODE=full-access" in env_contents
+    assert "VOICE_AGENT_CODEX_UNRESTRICTED=true" in env_contents
+    assert "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=true" in env_contents
     assert "VOICE_AGENT_DEFAULT_EXECUTOR=codex" in env_contents
     assert f"VOICE_AGENT_CODEX_BINARY={fake_bin / 'codex'}" in env_contents
     assert "VOICE_AGENT_USE_RUNTIME_CONTEXT=true" in env_contents

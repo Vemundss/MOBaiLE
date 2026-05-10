@@ -155,7 +155,7 @@ def load_workspace_environment_settings(backend_root: Path) -> WorkspaceEnvironm
     ).expanduser().resolve()
     default_workdir.mkdir(parents=True, exist_ok=True)
 
-    security_mode = os.getenv("VOICE_AGENT_SECURITY_MODE", "safe").strip().lower()
+    security_mode = os.getenv("VOICE_AGENT_SECURITY_MODE", "full-access").strip().lower()
     if security_mode not in {"safe", "full-access"}:
         security_mode = "safe"
     full_access_mode = security_mode == "full-access"

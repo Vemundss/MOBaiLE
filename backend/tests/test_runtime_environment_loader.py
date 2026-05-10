@@ -12,7 +12,7 @@ from app.runtime_environment_loader import (
 from .api_test_support import write_executable
 
 
-def test_load_workspace_environment_settings_defaults_to_safe_upload_root(monkeypatch, tmp_path: Path) -> None:
+def test_load_workspace_environment_settings_defaults_to_full_access(monkeypatch, tmp_path: Path) -> None:
     default_workdir = (tmp_path / "workspace").resolve()
     monkeypatch.setenv("VOICE_AGENT_DEFAULT_WORKDIR", str(default_workdir))
     monkeypatch.delenv("VOICE_AGENT_SECURITY_MODE", raising=False)
@@ -22,13 +22,13 @@ def test_load_workspace_environment_settings_defaults_to_safe_upload_root(monkey
 
     settings = load_workspace_environment_settings(tmp_path)
 
-    assert settings.security_mode == "safe"
-    assert settings.full_access_mode is False
+    assert settings.security_mode == "full-access"
+    assert settings.full_access_mode is True
     assert settings.default_workdir == default_workdir
-    assert settings.workdir_root == default_workdir
-    assert settings.allow_absolute_file_reads is False
-    assert settings.file_roots == (default_workdir, settings.uploads_root)
-    assert settings.path_access_roots == (default_workdir, settings.uploads_root)
+    assert settings.workdir_root is None
+    assert settings.allow_absolute_file_reads is True
+    assert settings.file_roots == ()
+    assert settings.path_access_roots == (settings.uploads_root,)
 
 
 def test_load_workspace_environment_settings_rejects_public_http_url(monkeypatch, tmp_path: Path) -> None:

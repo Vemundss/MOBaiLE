@@ -21,7 +21,7 @@ def test_runtime_environment_autonomy_paths(monkeypatch, tmp_path: Path):
     assert env.codex_enable_web_search is True
 
 
-def test_runtime_environment_defaults_to_safe_and_unbounded_agent_timeout(monkeypatch, tmp_path: Path):
+def test_runtime_environment_defaults_to_full_access_and_unbounded_agent_timeout(monkeypatch, tmp_path: Path):
     default_workdir = (tmp_path / "workspace").resolve()
     monkeypatch.setenv("VOICE_AGENT_DEFAULT_WORKDIR", str(default_workdir))
     monkeypatch.delenv("VOICE_AGENT_SECURITY_MODE", raising=False)
@@ -33,12 +33,12 @@ def test_runtime_environment_defaults_to_safe_and_unbounded_agent_timeout(monkey
 
     env = RuntimeEnvironment.from_env(tmp_path)
 
-    assert env.security_mode == "safe"
-    assert env.full_access_mode is False
+    assert env.security_mode == "full-access"
+    assert env.full_access_mode is True
     assert env.default_workdir == default_workdir
-    assert env.workdir_root == default_workdir
-    assert env.allow_absolute_file_reads is False
-    assert env.file_roots == (default_workdir, env.uploads_root)
+    assert env.workdir_root is None
+    assert env.allow_absolute_file_reads is True
+    assert env.file_roots == ()
     assert env.codex_model_override == "gpt-5.4"
     assert env.codex_timeout_sec == 0
     assert env.claude_timeout_sec == 0
