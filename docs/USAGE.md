@@ -82,9 +82,9 @@ For the least-friction private host, run this after install, or pass `--high-aut
 mobaile ready --open-permissions --open-setup
 ```
 
-This restarts the backend service if it is installed, installs the macOS keep-awake helper when available, provisions browser/desktop automation, opens the relevant macOS privacy panes, refreshes the pairing QR, runs the deep backend warmup, finishes with `mobaile check`, and opens the computer-local setup page.
+This restarts the backend service if it is installed, installs the macOS keep-awake helper when available, provisions browser/desktop automation, opens the relevant macOS privacy panes, refreshes the pairing QR, runs the deep backend warmup, checks local Codex sign-in when supported, finishes with `mobaile check`, and opens the computer-local setup page.
 
-It still leaves real trust-boundary work to you: sign in to Codex or Claude, sign in to Tailscale on both devices, approve macOS privacy prompts, and handle CAPTCHAs, 2FA, Apple ID, or admin approvals when a run reaches them.
+It still leaves real trust-boundary work to you: sign in to Codex or Claude, sign in to Tailscale on both devices, approve macOS privacy prompts, and handle CAPTCHAs, 2FA, Apple ID, or admin approvals when a run reaches them. When those actions are still required, `mobaile ready` ends with a compact `Human Unblock` section.
 
 ### Step 4. Later, check status with one command
 

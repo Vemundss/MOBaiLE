@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -353,7 +354,23 @@ def _agent_cli_state(env: RuntimeEnvironment) -> SetupAgentState:
             available=[],
             message="Install and sign in to Codex CLI or Claude CLI for real agent runs.",
         )
-    names = [name.capitalize() for name in available]
+    codex_status = _codex_login_status(env.codex_binary) if "codex" in available else "missing"
+    if available == ["codex"] and codex_status == "todo":
+        return SetupAgentState(
+            status="todo",
+            available=available,
+            message="Sign in to Codex CLI for real agent runs.",
+        )
+    names = []
+    if "codex" in available:
+        if codex_status == "ok":
+            names.append("Codex signed in")
+        elif codex_status == "todo":
+            names.append("Codex needs sign-in")
+        else:
+            names.append("Codex")
+    if "claude" in available:
+        names.append("Claude")
     return SetupAgentState(
         status="ok",
         available=available,
@@ -361,10 +378,31 @@ def _agent_cli_state(env: RuntimeEnvironment) -> SetupAgentState:
     )
 
 
+def _codex_login_status(codex_binary: str) -> str:
+    try:
+        result = subprocess.run(
+            [codex_binary, "login", "status"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if "not logged" in output or "not authenticated" in output or "login required" in output:
+        return "todo"
+    if "logged in" in output:
+        return "ok"
+    return "unknown"
+
+
 def _autonomy_state(env: RuntimeEnvironment) -> SetupAutonomyState:
     checks: list[SetupReadinessCheck] = []
     available_agents = env.available_agent_executors()
     codex_available = "codex" in available_agents
+    codex_status = _codex_login_status(env.codex_binary) if codex_available else "missing"
+    codex_ready = codex_available and codex_status != "todo"
 
     checks.append(
         SetupReadinessCheck(
@@ -394,11 +432,15 @@ def _autonomy_state(env: RuntimeEnvironment) -> SetupAutonomyState:
         SetupReadinessCheck(
             id="autonomy_codex_cli",
             title="Codex MCP Host",
-            status="ok" if codex_available else "todo",
+            status="ok" if codex_ready else "todo",
             message=(
-                "Codex CLI is available for browser and desktop MCP tools."
-                if codex_available
-                else "Install and sign in to Codex CLI to use the packaged browser and desktop automation stack."
+                "Codex CLI is available and signed in for browser and desktop MCP tools."
+                if codex_status == "ok"
+                else (
+                    "Codex CLI is available, but login status could not be verified."
+                    if codex_ready
+                    else "Install and sign in to Codex CLI to use the packaged browser and desktop automation stack."
+                )
             ),
         )
     )
@@ -440,7 +482,7 @@ def _autonomy_state(env: RuntimeEnvironment) -> SetupAutonomyState:
     )
 
     next_actions = [check.message for check in checks if check.status == "todo"]
-    enabled = env.full_access_mode and env.allow_absolute_file_reads and codex_available
+    enabled = env.full_access_mode and env.allow_absolute_file_reads and codex_ready
     if next_actions:
         status: SetupCheckStatus = "todo"
         message = next_actions[0]

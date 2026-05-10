@@ -16,18 +16,24 @@ def write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
-def create_fake_codex_bin(tmp_path: Path) -> Path:
+def create_fake_codex_bin(tmp_path: Path, *, logged_in: bool = True) -> Path:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True, exist_ok=True)
+    login_status = "Logged in using ChatGPT" if logged_in else "Not logged in"
+    login_exit = "0" if logged_in else "1"
     write_executable(
         fake_bin / "codex",
         textwrap.dedent(
-            """\
+            f"""\
             #!/usr/bin/env bash
             set -euo pipefail
             if [[ "${1:-}" == "--version" ]]; then
               echo "codex 9.9.9"
               exit 0
+            fi
+            if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
+              echo "{login_status}"
+              exit {login_exit}
             fi
             echo "fake codex"
             """
@@ -489,6 +495,64 @@ def test_mobaile_ready_dry_run_guides_high_autonomy(tmp_path: Path):
     assert "Ready result: ready or waiting on human approval." in result.stdout
 
 
+def test_mobaile_ready_prints_human_unblock_summary(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    scripts_dir = repo / "scripts"
+    fake_bin = create_fake_codex_bin(tmp_path, logged_in=False)
+    backend_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    write_executable(
+        scripts_dir / "provision_codex_autonomy.py",
+        "#!/usr/bin/env python3\nraise SystemExit(0)\n",
+    )
+    (backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_SECURITY_MODE=full-access",
+                "VOICE_AGENT_PHONE_ACCESS_MODE=wifi",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=codex",
+                "VOICE_AGENT_API_TOKEN=test-token",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://192.168.1.20:8000","session_id":"iphone-app","pair_code":"pair-1234","pair_code_expires_at":"2999-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(PROJECT_ROOT / "scripts" / "mobaile"),
+            "ready",
+            "--quick",
+            "--skip-pair",
+            "--no-open-setup",
+            "--no-keep-awake",
+        ],
+        env={
+            **os.environ,
+            "HOME": str(tmp_path / "home"),
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+            "PATH": f"{fake_bin}{os.pathsep}/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "## Human Unblock" in result.stdout
+    assert "- Sign in to Codex CLI for real agent runs" in result.stdout
+    assert "rerun `mobaile ready --open-permissions --open-setup`" in result.stdout
+
+
 def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"
@@ -534,7 +598,7 @@ def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
 
     assert result.returncode == 0
     assert "MOBaiLE setup check" in result.stdout
-    assert "[ok] Codex CLI is available: codex 9.9.9" in result.stdout
+    assert "[ok] Codex CLI is available and logged in: codex 9.9.9" in result.stdout
     assert "browser/desktop automation needs npx" in result.stdout
     assert "[info] Wi-Fi mode does not require Tailscale" in result.stdout
     assert "Check result: ready" in result.stdout
@@ -613,6 +677,49 @@ def test_mobaile_check_points_to_missing_agent_and_tailscale(tmp_path: Path):
     assert result.returncode == 1
     assert "Install and sign in to Codex CLI or Claude CLI" in result.stdout
     assert "Install Tailscale on this computer and the iPhone" in result.stdout
+    assert "Check result: needs action" in result.stdout
+
+
+def test_mobaile_check_requires_codex_login_when_no_agent_is_signed_in(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    fake_bin = create_fake_codex_bin(tmp_path, logged_in=False)
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_SECURITY_MODE=full-access",
+                "VOICE_AGENT_PHONE_ACCESS_MODE=wifi",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=codex",
+                "VOICE_AGENT_API_TOKEN=test-token",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://192.168.1.20:8000","session_id":"iphone-app","pair_code":"pair-1234","pair_code_expires_at":"2999-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "check"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+            "PATH": f"{fake_bin}{os.pathsep}/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "[todo] Sign in to Codex CLI for real agent runs" in result.stdout
+    assert "Run: codex login" in result.stdout
     assert "Check result: needs action" in result.stdout
 
 

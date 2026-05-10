@@ -26,8 +26,8 @@ Run `mobaile first-run` for a safe starter task in `~/MOBaiLE-playground`.
 Run `mobaile demo --out mobaile-demo.md` when you want a sanitized proof artifact
 for README updates, launch posts, or a quick product walkthrough.
 Run `mobaile ready --open-permissions --open-setup` on the Mac when you want to
-finish high-autonomy readiness, including pairing refresh, browser and desktop
-automation checks, and the local setup page.
+finish high-autonomy readiness, including pairing refresh, Codex sign-in checks,
+browser and desktop automation checks, and the local setup page.
 Use `mobaile check` for preflight and `mobaile repair` to refresh pairing, restart the
 service when installed, and run diagnostics. When you want the latest installed version
 later, run `mobaile update`.

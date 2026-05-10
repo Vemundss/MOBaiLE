@@ -74,6 +74,33 @@ def test_local_setup_page_surfaces_readiness_and_qr(make_client, tmp_path: Path)
     assert qr.content == b"fake-png"
 
 
+def test_setup_readiness_reports_codex_sign_in_when_codex_is_logged_out(make_client, tmp_path: Path) -> None:
+    pairing_file = tmp_path / "pairing.json"
+    _write_pairing_file(pairing_file)
+    codex = tmp_path / "codex"
+    codex.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [[ \"${1:-}\" == \"login\" && \"${2:-}\" == \"status\" ]]; then echo 'Not logged in'; exit 1; fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    codex.chmod(0o755)
+    client, token = make_client(
+        extra_env={
+            "VOICE_AGENT_PAIRING_FILE": str(pairing_file),
+            "VOICE_AGENT_CODEX_BINARY": str(codex),
+            "VOICE_AGENT_CLAUDE_BINARY": str(tmp_path / "missing-claude"),
+        }
+    )
+
+    response = client.get("/v1/setup/readiness", headers=auth_headers(token))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agent_cli"]["status"] == "todo"
+    assert payload["agent_cli"]["message"] == "Sign in to Codex CLI for real agent runs."
+
+
 def test_pair_exchange_records_local_onboarding_event(make_client, tmp_path: Path) -> None:
     pairing_file = tmp_path / "pairing.json"
     _write_pairing_file(pairing_file, pair_code="654321")

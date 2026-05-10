@@ -904,6 +904,7 @@ ready_command() {
   local open_setup="false"
   local run_check="true"
   local dry_run="false"
+  local check_needs_action="false"
   local failures=0
   local service_script service_state
 
@@ -1047,10 +1048,16 @@ ready_command() {
     if [[ "${dry_run}" == "true" ]]; then
       echo "Would run mobaile check."
     elif ! check_command "${repo_root}"; then
+      check_needs_action="true"
       failures=$((failures + 1))
     fi
   else
     echo "Final setup check: skipped"
+  fi
+
+  if [[ "${check_needs_action}" == "true" ]]; then
+    echo
+    ready_human_unblock_summary "${repo_root}"
   fi
 
   echo
@@ -1135,25 +1142,64 @@ PY
   fi
 }
 
+codex_login_state() {
+  local codex_path="$1"
+  local output=""
+
+  output="$("${codex_path}" login status 2>&1 || true)"
+  case "$(printf "%s" "${output}" | tr '[:upper:]' '[:lower:]')" in
+    *"not logged"* | *"not authenticated"* | *"login required"*)
+      printf "todo\n"
+      ;;
+    *"logged in"*)
+      printf "ok\n"
+      ;;
+    *)
+      printf "unknown\n"
+      ;;
+  esac
+}
+
 check_agent_cli() {
   local env_file="$1"
-  local codex_binary claude_binary codex_path claude_path any_agent="false"
+  local codex_binary claude_binary codex_path claude_path agent_ready="false" agent_seen="false" agent_todo=""
 
   codex_binary="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_BINARY" "codex")"
   claude_binary="$(read_env_value "${env_file}" "VOICE_AGENT_CLAUDE_BINARY" "claude")"
 
   if codex_path="$(resolve_executable_path "${codex_binary}")"; then
-    check_ok "Codex CLI is available: $("${codex_path}" --version 2>&1 | head -n 1 || printf "%s" "${codex_path}")"
-    any_agent="true"
+    agent_seen="true"
+    local codex_version codex_state
+    codex_version="$("${codex_path}" --version 2>&1 | head -n 1 || printf "%s" "${codex_path}")"
+    codex_state="$(codex_login_state "${codex_path}")"
+    case "${codex_state}" in
+      ok)
+        check_ok "Codex CLI is available and logged in: ${codex_version}"
+        agent_ready="true"
+        ;;
+      todo)
+        agent_todo="Sign in to Codex CLI for real agent runs"
+        ;;
+      *)
+        check_info "Codex CLI is available, but login status could not be verified: ${codex_version}"
+        agent_ready="true"
+        ;;
+    esac
   fi
   if claude_path="$(resolve_executable_path "${claude_binary}")"; then
     check_ok "Claude CLI is available: ${claude_path}"
-    any_agent="true"
+    agent_seen="true"
+    agent_ready="true"
   fi
 
-  if [[ "${any_agent}" != "true" ]]; then
+  if [[ "${agent_seen}" != "true" ]]; then
     check_todo "Install and sign in to Codex CLI or Claude CLI for real agent runs"
     echo "       Codex CLI: https://developers.openai.com/codex/cli"
+  elif [[ "${agent_ready}" != "true" ]]; then
+    check_todo "${agent_todo:-No signed-in agent CLI is ready for real agent runs}"
+    if [[ "${agent_todo}" == "Sign in to Codex CLI for real agent runs" ]]; then
+      echo "       Run: codex login"
+    fi
   fi
 }
 
@@ -1275,6 +1321,25 @@ def resolve_executable(binary: str) -> str:
     return shutil.which(binary) or ""
 
 
+def codex_login_status(codex_path: str) -> str:
+    try:
+        result = subprocess.run(
+            [codex_path, "login", "status"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if "not logged" in output or "not authenticated" in output or "login required" in output:
+        return "todo"
+    if "logged in" in output:
+        return "ok"
+    return "unknown"
+
+
 def command_status(command: str) -> bool:
     return shutil.which(command) is not None
 
@@ -1336,15 +1401,30 @@ codex_binary = read_env(env_file, "VOICE_AGENT_CODEX_BINARY", "codex")
 claude_binary = read_env(env_file, "VOICE_AGENT_CLAUDE_BINARY", "claude")
 codex_path = resolve_executable(codex_binary)
 claude_path = resolve_executable(claude_binary)
-if codex_path or claude_path:
-    agents = []
-    if codex_path:
-        agents.append("Codex")
-    if claude_path:
-        agents.append("Claude")
-    add(checks, "agent_cli", "ok", "Agent CLI available: " + ", ".join(agents))
-else:
+agent_ready = False
+agent_messages = []
+agent_todos = []
+if codex_path:
+    codex_status = codex_login_status(codex_path)
+    if codex_status == "ok":
+        agent_ready = True
+        agent_messages.append("Codex CLI is available and logged in")
+    elif codex_status == "todo":
+        agent_todos.append("Sign in to Codex CLI for real agent runs")
+    else:
+        agent_ready = True
+        agent_messages.append("Codex CLI is available, but login status could not be verified")
+if claude_path:
+    agent_ready = True
+    agent_messages.append("Claude CLI is available")
+if not codex_path and not claude_path:
     add(checks, "agent_cli", "todo", "Install and sign in to Codex CLI or Claude CLI for real agent runs")
+elif not agent_ready:
+    add(checks, "agent_cli", "todo", agent_todos[0] if agent_todos else "No signed-in agent CLI is ready for real agent runs")
+elif agent_messages:
+    add(checks, "agent_cli", "ok", "; ".join(agent_messages))
+else:
+    pass
 
 if read_env(env_file, "VOICE_AGENT_SECURITY_MODE", "safe") == "full-access":
     add(
@@ -1501,6 +1581,34 @@ check_command() {
   fi
   echo "Check result: needs action"
   return 1
+}
+
+ready_human_unblock_summary() {
+  local repo_root="$1"
+  local json_file
+
+  json_file="$(mktemp)"
+  check_command "${repo_root}" --json > "${json_file}" 2> /dev/null || true
+  python3 - "${json_file}" << 'PY'
+import json
+from pathlib import Path
+import sys
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+actions = [str(item).strip() for item in payload.get("next_actions", []) if str(item).strip()]
+if not actions:
+    raise SystemExit(0)
+
+print("## Human Unblock")
+for action in actions:
+    print(f"- {action}")
+print("- After completing these, rerun `mobaile ready --open-permissions --open-setup`.")
+PY
+  rm -f "${json_file}"
 }
 
 doctor_pairing_report() {
