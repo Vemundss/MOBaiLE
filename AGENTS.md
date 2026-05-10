@@ -24,6 +24,11 @@ The canonical agent guidance lives in the workspace root `../AGENTS.md` when thi
 - Shell changes: `npm run shell:lint` when available; otherwise at least `bash -n <touched script>`.
 - Host-runtime changes: after checks, sync/restart the installed service when local availability matters, then confirm `mobaile status`, service status, or `/health`.
 
+## Concurrent Work
+
+- For parallel backend edits, prefer one branch/worktree per agent from this repo; do not share a dirty checkout.
+- Merge only after the relevant checks pass, then remove finished worktrees and branches.
+
 ## Backend Notes
 
 - `backend/app/models/schemas.py` is the source of truth for API shapes.
