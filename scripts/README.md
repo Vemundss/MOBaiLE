@@ -25,8 +25,8 @@ stay reachable while you are logged in, and `mobaile awake-status` to check it.
 Run `mobaile first-run` for a safe starter task in `~/MOBaiLE-playground`.
 Run `mobaile demo --out mobaile-demo.md` when you want a sanitized proof artifact
 for README updates, launch posts, or a quick product walkthrough.
-Run `mobaile autonomy --deep --open-permissions` on the Mac when you want to finish
-browser and desktop automation readiness.
+Run `mobaile ready --open-permissions` on the Mac when you want to finish
+high-autonomy readiness, including browser and desktop automation checks.
 Use `mobaile check` for preflight and `mobaile repair` to refresh pairing, restart the
 service when installed, and run diagnostics. When you want the latest installed version
 later, run `mobaile update`.
@@ -52,6 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/insta
 - `mobaile setup`: open the computer-local setup page with QR, readiness, and first-run status
 - `mobaile check`: concise setup preflight for dependencies, phone access, service, and pairing
   - use `mobaile check --json` when another tool or UI needs structured readiness state
+- `mobaile ready`: guided high-autonomy readiness flow for service, keep-awake, automation, and final checks
 - `mobaile autonomy`: provision Codex MCP browser/desktop automation against the active backend runtime
 - `mobaile first-run`: starter playground run through the paired backend
 - `mobaile demo`: export a sanitized Markdown or JSON demo replay from a sample or existing run

@@ -244,6 +244,67 @@ def test_install_script_can_switch_to_wifi_without_background_service(tmp_path: 
     assert not (home / ".local" / "bin" / "mobaile").exists()
 
 
+def test_install_script_high_autonomy_runs_guided_ready_flow(tmp_path: Path):
+    checkout = make_checkout(tmp_path)
+    home = tmp_path / "home"
+
+    result = run_install_script(
+        home,
+        "--high-autonomy",
+        checkout=checkout,
+    )
+
+    assert result.returncode == 0
+    assert "Autonomy setup: Guided high-autonomy readiness" in result.stdout
+    assert "mobaile ready --open-permissions" in result.stdout
+    assert "mobaile autonomy --no-open-permissions" not in result.stdout
+
+
+def test_install_script_high_autonomy_keeps_core_install_when_ready_needs_action(tmp_path: Path):
+    checkout = make_checkout(tmp_path)
+    home = tmp_path / "home"
+    write_executable(
+        checkout / "scripts" / "mobaile",
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf "mobaile %s\\n" "$*" >> "${MOBAILE_TEST_LOG}"
+            exit 1
+            """
+        ),
+    )
+
+    result = run_install_script(
+        home,
+        "--high-autonomy",
+        "--background-service",
+        "no",
+        checkout=checkout,
+        dry_run=False,
+    )
+
+    assert result.returncode == 0
+    assert "High-autonomy readiness needs action. Core install and pairing setup completed." in result.stdout
+    assert (home / ".local" / "bin" / "mobaile").is_symlink()
+
+
+def test_install_script_rejects_high_autonomy_in_safe_mode(tmp_path: Path):
+    checkout = make_checkout(tmp_path)
+    home = tmp_path / "home"
+
+    result = run_install_script(
+        home,
+        "--mode",
+        "safe",
+        "--high-autonomy",
+        checkout=checkout,
+    )
+
+    assert result.returncode != 0
+    assert "--high-autonomy requires --mode full-access" in result.stderr
+
+
 def test_install_script_local_mode_summary_uses_distinct_step_numbers(tmp_path: Path):
     checkout = make_checkout(tmp_path)
     home = tmp_path / "home"
@@ -259,7 +320,7 @@ def test_install_script_local_mode_summary_uses_distinct_step_numbers(tmp_path: 
     assert "This install is local-only on this computer." in result.stdout
     assert "  2. Run `mobaile first-run` to test a safe playground task." in result.stdout
     assert "  3. Re-run with On this Wi-Fi or Anywhere with Tailscale if you want to connect your iPhone." in result.stdout
-    assert "  4. Run `mobaile autonomy --deep --open-permissions` if desktop/browser control is not ready." in result.stdout
+    assert "  4. Run `mobaile ready --open-permissions` if desktop/browser control is not ready." in result.stdout
     assert "  5. Run `mobaile status` any time to check the connection." in result.stdout
 
 

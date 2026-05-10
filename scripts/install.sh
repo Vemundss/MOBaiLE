@@ -8,6 +8,7 @@ CHECKOUT=""
 MODE="full-access"
 PHONE_ACCESS_MODE="tailscale"
 BACKGROUND_SERVICE="yes"
+HIGH_AUTONOMY_SETUP="false"
 PUBLIC_SERVER_URL=""
 NON_INTERACTIVE="false"
 DRY_RUN="false"
@@ -34,6 +35,7 @@ Options:
   --phone-access <mode>        tailscale, wifi, or local
   --background-service <value> yes or no
   --mode <value>               full-access or safe
+  --high-autonomy              Run the guided high-autonomy readiness flow
   --public-url <url>           Use an HTTPS public URL for pairing
   -h, --help                   Show this help
 EOF
@@ -156,6 +158,15 @@ validate_public_server_url() {
   esac
 }
 
+validate_high_autonomy_setup() {
+  if [[ "${HIGH_AUTONOMY_SETUP}" != "true" ]]; then
+    return
+  fi
+  if [[ "${MODE}" != "full-access" ]]; then
+    fail "--high-autonomy requires --mode full-access. Use the default mode or remove --high-autonomy."
+  fi
+}
+
 format_command() {
   local formatted=""
   local arg
@@ -198,6 +209,10 @@ background_service_label() {
 }
 
 autonomy_label() {
+  if [[ "${HIGH_AUTONOMY_SETUP}" == "true" ]]; then
+    printf "Guided high-autonomy readiness\n"
+    return
+  fi
   if [[ "${MODE}" == "full-access" ]]; then
     printf "Included\n"
   else
@@ -320,6 +335,9 @@ build_reexec_args() {
   fi
   if [[ "${DRY_RUN}" == "true" ]]; then
     args+=(--dry-run)
+  fi
+  if [[ "${HIGH_AUTONOMY_SETUP}" == "true" ]]; then
+    args+=(--high-autonomy)
   fi
 
   printf "%s\n" "${args[@]}"
@@ -558,13 +576,13 @@ print_product_summary() {
     echo "  1. This install is local-only on this computer."
     echo "  2. Run \`mobaile first-run\` to test a safe playground task."
     echo "  3. Re-run with On this Wi-Fi or Anywhere with Tailscale if you want to connect your iPhone."
-    echo "  4. Run \`mobaile autonomy --deep --open-permissions\` if desktop/browser control is not ready."
+    echo "  4. Run \`mobaile ready --open-permissions\` if desktop/browser control is not ready."
     print_status_follow_up 5
   else
     echo "  1. Scan the QR on this computer with your iPhone."
     echo "     If it did not open automatically, run \`mobaile pair\`."
     echo "  2. Run \`mobaile first-run\` to test a safe playground task."
-    echo "  3. Run \`mobaile autonomy --deep --open-permissions\` if desktop/browser control is not ready."
+    echo "  3. Run \`mobaile ready --open-permissions\` if desktop/browser control is not ready."
     print_status_follow_up 4
   fi
 }
@@ -597,10 +615,14 @@ print_dry_run_summary() {
       echo "  # background service skipped on unsupported platform"
     fi
   fi
-  if should_run_autonomy_setup; then
-    print_command bash "${CHECKOUT}/scripts/mobaile" autonomy --no-open-permissions
-  fi
   print_command bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
+  if should_run_autonomy_setup; then
+    if [[ "${HIGH_AUTONOMY_SETUP}" == "true" ]]; then
+      print_command bash "${CHECKOUT}/scripts/mobaile" ready --open-permissions
+    else
+      print_command bash "${CHECKOUT}/scripts/mobaile" autonomy --no-open-permissions
+    fi
+  fi
 }
 
 open_qr_if_possible() {
@@ -670,11 +692,6 @@ run_install() {
     fi
   fi
 
-  if should_run_autonomy_setup; then
-    step "Provisioning autonomy setup"
-    bash "${CHECKOUT}/scripts/mobaile" autonomy --no-open-permissions
-  fi
-
   step "Preparing pairing QR"
   if [[ "${BACKGROUND_SERVICE}" == "yes" ]] && [[ -n "${service_script}" ]]; then
     MOBAILE_SKIP_OPEN=1 bash "${CHECKOUT}/scripts/mobaile" pair > /dev/null
@@ -682,6 +699,20 @@ run_install() {
     bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
   fi
   open_qr_if_possible
+
+  if should_run_autonomy_setup; then
+    if [[ "${HIGH_AUTONOMY_SETUP}" == "true" ]]; then
+      step "Running high-autonomy readiness"
+      if ! bash "${CHECKOUT}/scripts/mobaile" ready --open-permissions; then
+        echo
+        echo "High-autonomy readiness needs action. Core install and pairing setup completed."
+      fi
+    else
+      step "Provisioning autonomy setup"
+      bash "${CHECKOUT}/scripts/mobaile" autonomy --no-open-permissions
+    fi
+  fi
+
   print_product_summary "Done."
 }
 
@@ -712,6 +743,10 @@ main() {
         MODE="$2"
         shift 2
         ;;
+      --high-autonomy)
+        HIGH_AUTONOMY_SETUP="true"
+        shift
+        ;;
       --public-url)
         PUBLIC_SERVER_URL="${2%/}"
         shift 2
@@ -731,6 +766,7 @@ main() {
   validate_phone_access
   validate_background_service
   validate_public_server_url
+  validate_high_autonomy_setup
 
   enable_non_interactive_defaults_if_needed
   ensure_checkout
@@ -741,6 +777,7 @@ main() {
   validate_phone_access
   validate_background_service
   validate_public_server_url
+  validate_high_autonomy_setup
 
   run_install
 }

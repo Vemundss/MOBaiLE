@@ -42,6 +42,9 @@ Useful one-liner variants:
 # Recommended private-host setup
 curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes
 
+# Recommended setup plus guided high-autonomy readiness
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --high-autonomy
+
 # Same Wi-Fi only
 curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --phone-access wifi
 
@@ -71,7 +74,19 @@ What success looks like:
 - the thread shows live progress instead of only a final result
 - the final message comes back to the same thread that launched the run
 
-### Step 3. Later, check status with one command
+### Step 3. Finish high-autonomy readiness when you need it
+
+For the least-friction private host, run this after install, or pass `--high-autonomy` to the installer:
+
+```bash
+mobaile ready --open-permissions
+```
+
+This restarts the backend service if it is installed, installs the macOS keep-awake helper when available, provisions browser/desktop automation, opens the relevant macOS privacy panes, runs the deep backend warmup, and finishes with `mobaile check`.
+
+It still leaves real trust-boundary work to you: sign in to Codex or Claude, sign in to Tailscale on both devices, approve macOS privacy prompts, and handle CAPTCHAs, 2FA, Apple ID, or admin approvals when a run reaches them.
+
+### Step 4. Later, check status with one command
 
 To try the backend before touching a real repo:
 
@@ -147,12 +162,12 @@ mobaile uninstall --delete-data --yes
 
 If this is the managed `~/MOBaiLE` checkout and you want to delete the checkout too, add `--delete-checkout`. MOBaiLE leaves user-owned tools such as Tailscale, Codex, Claude, Python, Node, and `uv` installed.
 
-### Step 4. Reach for fallback or advanced setup only when you need it
+### Step 5. Reach for fallback or advanced setup only when you need it
 
 - Local-only testing on the same machine: `bash ./scripts/install_backend.sh --mode safe --phone-access local`
 - Backend-only/manual install from a checkout: `bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale`
 - Stable public hostname: set `VOICE_AGENT_PUBLIC_SERVER_URL` in `backend/.env` or pass `--public-url https://your-host`
-- Trusted private host with more autonomy: use the main `install.sh` path, or run `mobaile autonomy` after a backend-only install
+- Trusted private host with more autonomy: use `--high-autonomy`, or run `mobaile ready --open-permissions` after a backend-only install
 
 `install.sh` is the main setup entry point. `install_backend.sh` is the lower-level backend-only path.
 `install_backend.sh` installs `uv` if needed, lets `uv` provide a compatible backend Python, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
@@ -415,16 +430,16 @@ curl -s -H "Authorization: Bearer ${TOKEN}" \
   "http://127.0.0.1:8000/v1/capabilities?deep=true&launch_apps=true"
 ```
 
-Provision Codex for autonomous remote control:
+Run the guided high-autonomy readiness flow:
+
+```bash
+mobaile ready --open-permissions
+```
+
+Provision only the Codex browser/desktop automation layer:
 
 ```bash
 mobaile autonomy
-```
-
-Deep-check browser and desktop permissions on macOS:
-
-```bash
-mobaile autonomy --deep --open-permissions
 ```
 
 List an existing directory (read-only):

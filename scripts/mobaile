@@ -24,6 +24,7 @@ Commands:
   setup    Open the computer-local setup page with QR and readiness checks
   check    Preflight install, dependency, service, and pairing readiness
            Use `mobaile check --json` for machine-readable output
+  ready    Run the guided high-autonomy readiness flow
   autonomy Provision browser/desktop automation for more unattended work
   doctor   Check service, pairing, QR, phone URLs, and executor readiness
   first-run
@@ -638,6 +639,7 @@ Quick actions:
   mobaile pair
   mobaile first-run
   mobaile demo
+  mobaile ready
   mobaile autonomy
   mobaile doctor
   mobaile repair
@@ -846,7 +848,7 @@ autonomy_command() {
   elif [[ "$(uname -s)" == "Darwin" ]]; then
     echo
     echo "macOS privacy approvals are still manual when needed:"
-    echo "  mobaile autonomy --deep --open-permissions"
+    echo "  mobaile ready --open-permissions"
   fi
 
   if [[ "${deep}" != "true" ]]; then
@@ -861,7 +863,7 @@ autonomy_command() {
   fi
 
   if [[ "$(service_state_label "${repo_root}")" != "Running" ]]; then
-    echo "Deep readiness needs the backend running. Run mobaile restart, then mobaile autonomy --deep."
+    echo "Deep readiness needs the backend running. Run mobaile restart, then mobaile ready."
     return 1
   fi
 
@@ -872,6 +874,159 @@ autonomy_command() {
     return 1
   fi
   bash "${service_script}" warmup
+}
+
+ready_usage() {
+  cat << 'EOF'
+Usage: mobaile ready [options]
+
+Options:
+  --open-permissions     Open macOS privacy panes during the autonomy check
+  --no-open-permissions  Do not open System Settings (default)
+  --quick                Skip the deep backend capability warmup
+  --keep-awake           Install the macOS keep-awake helper (default on macOS)
+  --no-keep-awake        Do not change keep-awake state
+  --skip-check           Skip the final mobaile check
+  --dry-run              Print commands without changing the host
+EOF
+}
+
+ready_command() {
+  local repo_root="$1"
+  shift || true
+  local open_permissions="false"
+  local deep="true"
+  local keep_awake="auto"
+  local run_check="true"
+  local dry_run="false"
+  local failures=0
+  local service_script service_state
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --open-permissions)
+        open_permissions="true"
+        shift
+        ;;
+      --no-open-permissions)
+        open_permissions="false"
+        shift
+        ;;
+      --quick)
+        deep="false"
+        shift
+        ;;
+      --keep-awake)
+        keep_awake="yes"
+        shift
+        ;;
+      --no-keep-awake)
+        keep_awake="no"
+        shift
+        ;;
+      --skip-check)
+        run_check="false"
+        shift
+        ;;
+      --dry-run)
+        dry_run="true"
+        shift
+        ;;
+      -h | --help)
+        ready_usage
+        return 0
+        ;;
+      *)
+        ready_usage >&2
+        echo "Unknown ready argument: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  echo "MOBaiLE high-autonomy setup"
+  echo "Automatic host steps run here; CLI sign-in, Tailscale sign-in, and OS privacy approval remain manual."
+
+  service_script="$(service_script_path "${repo_root}")"
+  service_state="$(service_state_label "${repo_root}")"
+  echo
+  if [[ "$(service_install_preference)" == "yes" ]]; then
+    if [[ "${service_state}" == "Running" ]]; then
+      echo "Backend service: running"
+    elif [[ "${dry_run}" == "true" ]]; then
+      echo "Would restart backend service:"
+      echo "  $(format_command bash "${service_script}" restart)"
+    elif [[ -f "${service_script}" ]]; then
+      echo "Restarting backend service..."
+      if ! bash "${service_script}" restart; then
+        echo "Backend restart reported a problem." >&2
+        failures=$((failures + 1))
+      fi
+    else
+      echo "Service helper is missing: ${service_script}" >&2
+      failures=$((failures + 1))
+    fi
+  else
+    echo "Backend service: not installed. Re-run the installer with --background-service yes for always-on phone control."
+  fi
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo
+    if [[ "${keep_awake}" != "no" ]]; then
+      if [[ "${dry_run}" == "true" ]]; then
+        echo "Would install the macOS keep-awake helper:"
+        echo "  $(format_command bash "${service_script}" keep-awake-install)"
+      elif [[ -f "${service_script}" ]]; then
+        echo "Installing macOS keep-awake helper..."
+        if ! bash "${service_script}" keep-awake-install; then
+          echo "Keep-awake setup reported a problem." >&2
+          failures=$((failures + 1))
+        fi
+      else
+        echo "Service helper is missing: ${service_script}" >&2
+        failures=$((failures + 1))
+      fi
+    else
+      echo "Keep-awake helper: skipped"
+    fi
+  fi
+
+  local autonomy_args=()
+  if [[ "${deep}" == "true" ]]; then
+    autonomy_args+=(--deep)
+  fi
+  if [[ "${open_permissions}" == "true" ]]; then
+    autonomy_args+=(--open-permissions)
+  else
+    autonomy_args+=(--no-open-permissions)
+  fi
+  if [[ "${dry_run}" == "true" ]]; then
+    autonomy_args+=(--dry-run)
+  fi
+
+  echo
+  if ! autonomy_command "${repo_root}" "${autonomy_args[@]}"; then
+    failures=$((failures + 1))
+  fi
+
+  echo
+  if [[ "${run_check}" == "true" ]]; then
+    if [[ "${dry_run}" == "true" ]]; then
+      echo "Would run mobaile check."
+    elif ! check_command "${repo_root}"; then
+      failures=$((failures + 1))
+    fi
+  else
+    echo "Final setup check: skipped"
+  fi
+
+  echo
+  if [[ "${failures}" -eq 0 ]]; then
+    echo "Ready result: ready or waiting on human approval."
+    return 0
+  fi
+  echo "Ready result: needs action"
+  return 1
 }
 
 CHECK_FAILURES=0
@@ -2912,6 +3067,10 @@ main() {
     check)
       shift || true
       check_command "${repo_root}" "$@"
+      ;;
+    ready)
+      shift || true
+      ready_command "${repo_root}" "$@"
       ;;
     pair) pair_command "${repo_root}" ;;
     first-run)

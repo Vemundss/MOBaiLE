@@ -440,6 +440,52 @@ def test_mobaile_autonomy_dry_run_uses_active_backend_paths(tmp_path: Path):
     assert "Deep readiness: skipped" in result.stdout
 
 
+def test_mobaile_ready_dry_run_guides_high_autonomy(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend-runtime"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_SECURITY_MODE=full-access",
+                "VOICE_AGENT_CODEX_HOME=codex-home",
+                "VOICE_AGENT_PLAYWRIGHT_OUTPUT_DIR=data/pw-out",
+                "VOICE_AGENT_PLAYWRIGHT_USER_DATA_DIR=data/browser-profile",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(PROJECT_ROOT / "scripts" / "mobaile"),
+            "ready",
+            "--dry-run",
+            "--open-permissions",
+            "--no-keep-awake",
+        ],
+        env={
+            **os.environ,
+            "HOME": str(tmp_path / "home"),
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "MOBaiLE high-autonomy setup" in result.stdout
+    assert "Backend service: not installed" in result.stdout
+    assert "MOBaiLE autonomy setup" in result.stdout
+    assert "Would run backend capability warmup." in result.stdout
+    assert "Would run mobaile check." in result.stdout
+    assert "Ready result: ready or waiting on human approval." in result.stdout
+
+
 def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"

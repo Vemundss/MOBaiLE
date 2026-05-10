@@ -45,10 +45,18 @@ If you want the shortest path, do this:
 4. Point the phone at the screen, confirm the pairing, and send a small prompt.
 5. Run `mobaile first-run` to try a safe starter task in `~/MOBaiLE-playground`.
 6. Run `mobaile demo --out mobaile-demo.md` if you want a sanitized shareable proof artifact.
-7. Run `mobaile autonomy --deep --open-permissions` on the Mac if browser or desktop control needs final permission approval.
+7. Run `mobaile ready --open-permissions` on the Mac if browser or desktop control needs final permission approval.
 8. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
-Run `mobaile setup` on the backend computer to open the computer-local setup page with the pairing QR, backend readiness checks, first-run status, and autonomy readiness. It uses `127.0.0.1`, so it is not a phone-openable link; scan the QR with the iPhone instead. On macOS, run `mobaile awake` if this computer should stay reachable while you are logged in. If setup feels off, run `mobaile check` for a quick preflight or `mobaile repair` to refresh pairing, restart the service, and run diagnostics. When you want the latest installed CLI/backend later, run `mobaile update`. To remove MOBaiLE from the host, run `mobaile uninstall`; add `--delete-data --yes` when you also want local pairing, run history, logs, and runtime data deleted.
+For the most autonomous private-host setup, use the same installer with one extra flag:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --high-autonomy
+```
+
+That path keeps Full Access explicit, starts the background service, prepares the QR, runs `mobaile ready --open-permissions`, and installs the macOS keep-awake helper when available. It still cannot sign in to Codex/Claude, sign in to Tailscale, grant macOS privacy permissions, or solve 2FA/CAPTCHAs for you; it reports those as human unblock steps.
+
+Run `mobaile setup` on the backend computer to open the computer-local setup page with the pairing QR, backend readiness checks, first-run status, and autonomy readiness. It uses `127.0.0.1`, so it is not a phone-openable link; scan the QR with the iPhone instead. If setup feels off, run `mobaile ready --open-permissions` for the guided high-autonomy flow, `mobaile check` for a quick preflight, or `mobaile repair` to refresh pairing, restart the service, and run diagnostics. When you want the latest installed CLI/backend later, run `mobaile update`. To remove MOBaiLE from the host, run `mobaile uninstall`; add `--delete-data --yes` when you also want local pairing, run history, logs, and runtime data deleted.
 
 `install.sh` installs or updates MOBaiLE in `~/MOBaiLE`, configures the backend, creates the pairing QR, keeps the service running in the background when supported, and installs the `mobaile` command for status, pairing, and logs.
 
@@ -134,6 +142,7 @@ Use these only if the main install command is not what you want.
 
 - Already in a checkout and want to run the installer there: `bash ./scripts/install.sh --checkout "$PWD"`
 - Same recommended setup with explicit flags: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --mode full-access --phone-access tailscale --background-service yes`
+- Guided high-autonomy setup: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --high-autonomy`
 - Same Wi-Fi only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --phone-access wifi`
 - Local simulator/dev only: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --mode safe --phone-access local --background-service no`
 - Preview before changing anything: `curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/install.sh | bash -s -- --yes --dry-run`

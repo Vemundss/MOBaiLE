@@ -63,8 +63,8 @@ class SetupAutonomyState(BaseModel):
     status: SetupCheckStatus
     enabled: bool
     message: str
-    setup_command: str = "mobaile autonomy"
-    deep_check_command: str = "mobaile autonomy --deep --open-permissions"
+    setup_command: str = "mobaile ready"
+    deep_check_command: str = "mobaile ready --open-permissions"
     checks: list[SetupReadinessCheck] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
 
@@ -145,7 +145,7 @@ def build_setup_readiness(
     if first_run.status != "ok":
         recommended_actions.append("Run `mobaile first-run` to test a safe starter task.")
     if autonomy.status != "ok":
-        recommended_actions.append("Run `mobaile autonomy` on the Mac to provision browser and desktop control.")
+        recommended_actions.append("Run `mobaile ready --open-permissions` to finish high-autonomy host checks.")
     if not next_actions and pairing.qr_available:
         recommended_actions.append("Scan the QR from the phone, then send a small prompt.")
     return SetupReadinessResponse(
@@ -216,6 +216,7 @@ def setup_page_html() -> str:
       <div class="actions">
         <button type="button" data-copy="mobaile pair">Copy pair command</button>
         <button type="button" data-copy="mobaile first-run">Copy first-run</button>
+        <button type="button" data-copy="mobaile ready --open-permissions">Copy ready command</button>
         <button type="button" id="refresh">Refresh</button>
       </div>
     </section>
@@ -274,7 +275,8 @@ document.querySelectorAll("[data-copy]").forEach((button) => {
   button.addEventListener("click", async () => {
     await navigator.clipboard.writeText(button.dataset.copy);
     button.textContent = "Copied";
-    setTimeout(() => { button.textContent = button.dataset.copy.includes("pair") ? "Copy pair command" : "Copy first-run"; }, 1200);
+    const label = button.dataset.copy.includes("pair") ? "Copy pair command" : button.dataset.copy.includes("ready") ? "Copy ready command" : "Copy first-run";
+    setTimeout(() => { button.textContent = label; }, 1200);
   });
 });
 $("refresh").addEventListener("click", load);
@@ -461,7 +463,7 @@ def _autonomy_state(env: RuntimeEnvironment) -> SetupAutonomyState:
 def _desktop_permission_message() -> str:
     if platform.system() != "Darwin":
         return "Native desktop permission checks are macOS-specific; browser and CLI automation can still work."
-    return "Run `mobaile autonomy --deep --open-permissions` to verify Accessibility and Screen Recording."
+    return "Run `mobaile ready --open-permissions` to verify Accessibility and Screen Recording."
 
 
 def _first_run_state(run_state: RunState) -> SetupFirstRunState:
