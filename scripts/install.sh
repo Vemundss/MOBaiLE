@@ -46,9 +46,6 @@ require_cmd() {
       git)
         fail "Missing command: git. Install Git, then run the MOBaiLE installer again."
         ;;
-      python3)
-        fail "Missing command: python3. Install Python 3.11 or newer, then run the MOBaiLE installer again."
-        ;;
       *)
         fail "Missing command: ${cmd}"
         ;;
@@ -238,7 +235,7 @@ print_status_follow_up() {
 print_dependency_notes() {
   echo
   echo "Dependencies:"
-  echo "  Handled by installer: MOBaiLE checkout/update, uv if missing, backend Python packages, mobaile command, and the selected background service."
+  echo "  Handled by installer: MOBaiLE checkout/update, uv if missing, backend Python runtime/packages, mobaile command, and the selected background service."
   if agent_cli_available; then
     echo "  Agent CLI: detected. Real agent runs can use Codex or Claude once that CLI is signed in."
   else

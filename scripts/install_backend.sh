@@ -13,6 +13,7 @@ PHONE_ACCESS_MODE=""
 PROVISION_AUTONOMY_STACK="auto"
 PUBLIC_SERVER_URL=""
 BRIEF_OUTPUT="false"
+REQUIRED_PYTHON_VERSION="3.11"
 
 step() {
   echo
@@ -22,26 +23,41 @@ step() {
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" > /dev/null 2>&1; then
-    if [[ "${cmd}" == "python3" ]]; then
-      echo "Missing required command: python3. Install Python 3.11 or newer, then run the MOBaiLE installer again." >&2
-      exit 1
-    fi
     echo "Missing required command: ${cmd}" >&2
     exit 1
   fi
 }
 
-check_python_version() {
-  python3 - << 'PY'
+run_python() {
+  (
+    cd "${BACKEND_DIR}"
+    uv run --python "${REQUIRED_PYTHON_VERSION}" python "$@"
+  )
+}
+
+ensure_setup_python() {
+  local python_version=""
+  if python_version="$(run_python - << 'PY'
 import sys
 
 required = (3, 11)
 if sys.version_info < required:
     current = ".".join(str(part) for part in sys.version_info[:3])
     needed = ".".join(str(part) for part in required)
-    print("Python {}+ is required. Current python3 is {}.".format(needed, current), file=sys.stderr)
+    print("Python {}+ is required. uv selected {}.".format(needed, current), file=sys.stderr)
     raise SystemExit(1)
+print(".".join(str(part) for part in sys.version_info[:3]))
 PY
+  )"; then
+    if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
+      echo "Using Python ${python_version} via uv."
+    fi
+    return
+  fi
+
+  echo "Could not prepare Python ${REQUIRED_PYTHON_VERSION}+ with uv." >&2
+  echo "Run \`uv python install ${REQUIRED_PYTHON_VERSION}\`, then run this installer again." >&2
+  exit 1
 }
 
 ensure_uv() {
@@ -64,14 +80,14 @@ gen_token() {
     openssl rand -hex 24
     return
   fi
-  python3 - << 'PY'
+  run_python - << 'PY'
 import secrets
 print(secrets.token_hex(24))
 PY
 }
 
 gen_pair_code() {
-  python3 - << 'PY'
+  run_python - << 'PY'
 import secrets
 print(secrets.token_urlsafe(10))
 PY
@@ -92,7 +108,7 @@ detect_codex_binary() {
 }
 
 pair_code_expiry() {
-  PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" python3 - << 'PY'
+  PAIR_TTL_MIN="${PAIR_CODE_TTL_MIN}" run_python - << 'PY'
 from datetime import datetime, timedelta, timezone
 import os
 ttl = int(os.environ["PAIR_TTL_MIN"])
@@ -106,7 +122,7 @@ run_uv_sync() {
   if [[ "${BRIEF_OUTPUT}" == "true" ]]; then
     if sync_output="$(
       cd "${BACKEND_DIR}"
-      uv sync 2>&1
+      uv sync --python "${REQUIRED_PYTHON_VERSION}" 2>&1
     )"; then
       return
     fi
@@ -116,7 +132,7 @@ run_uv_sync() {
 
   (
     cd "${BACKEND_DIR}"
-    uv sync
+    uv sync --python "${REQUIRED_PYTHON_VERSION}"
   )
 }
 
@@ -132,7 +148,7 @@ write_pairing_details() {
       BIND_PORT="8000" \
       PUBLIC_SERVER_URL="${PUBLIC_SERVER_URL%/}" \
       PHONE_ACCESS_MODE="${PHONE_ACCESS_MODE}" \
-      uv run python - << 'PY'
+      uv run --python "${REQUIRED_PYTHON_VERSION}" python - << 'PY'
 import json
 import os
 from pathlib import Path
@@ -161,7 +177,7 @@ PY
 read_pairing_value() {
   local key="$1"
 
-  PAIRING_FILE="${PAIRING_FILE}" PAIRING_KEY="${key}" python3 - << 'PY'
+  PAIRING_FILE="${PAIRING_FILE}" PAIRING_KEY="${key}" run_python - << 'PY'
 import json
 import os
 from pathlib import Path
@@ -484,9 +500,8 @@ main() {
     exit 1
   fi
 
-  require_cmd python3
-  check_python_version
   ensure_uv
+  ensure_setup_python
 
   if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
     echo "MOBaiLE backend setup"
@@ -520,7 +535,7 @@ main() {
     if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
       step "Provisioning autonomy extras"
     fi
-    python3 "${REPO_ROOT}/scripts/provision_codex_autonomy.py" --mode "${SECURITY_MODE}" || true
+    run_python "${REPO_ROOT}/scripts/provision_codex_autonomy.py" --mode "${SECURITY_MODE}" || true
   fi
 
   if [[ "${BRIEF_OUTPUT}" != "true" ]]; then
@@ -623,7 +638,7 @@ main() {
   fi
   echo
   echo "Re-provision the autonomous Codex stack later:"
-  echo "  python3 ./scripts/provision_codex_autonomy.py --mode ${SECURITY_MODE}"
+  echo "  cd backend && uv run python ../scripts/provision_codex_autonomy.py --mode ${SECURITY_MODE}"
   if [[ "${PHONE_ACCESS_MODE}" != "local" && "${server_url}" == "http://127.0.0.1:8000" ]]; then
     echo
     echo "Warning: could not detect a LAN/Tailscale IP, so pairing URL still points to 127.0.0.1." >&2

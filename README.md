@@ -47,8 +47,8 @@ Run `mobaile setup` on the backend computer to open the computer-local setup pag
 
 `install.sh` installs or updates MOBaiLE in `~/MOBaiLE`, configures the backend, creates the pairing QR, keeps the service running in the background when supported, and installs the `mobaile` command for status, pairing, and logs.
 
-What the installer handles: `uv`, backend Python dependencies, backend config, service setup, computer-local setup page, QR pairing, and Full Access autonomy provisioning.
-What you still need: `git`, `curl`, Python 3.11+, and a signed-in agent CLI for agent runs. Codex CLI or Claude CLI works; without one, MOBaiLE can pair and run direct shell commands, but not agent coding runs. The default `Anywhere with Tailscale` path also needs Tailscale on both the computer and iPhone. You can skip Tailscale only for same-Wi-Fi pairing, local simulator testing, or a public HTTPS URL.
+What the installer handles: `uv`, a backend-compatible Python through `uv`, backend Python dependencies, backend config, service setup, computer-local setup page, QR pairing, and Full Access autonomy provisioning.
+What you still need: `git`, `curl`, and a signed-in agent CLI for agent runs. Codex CLI or Claude CLI works; without one, MOBaiLE can pair and run direct shell commands, but not agent coding runs. The default `Anywhere with Tailscale` path also needs Tailscale on both the computer and iPhone. You can skip Tailscale only for same-Wi-Fi pairing, local simulator testing, or a public HTTPS URL.
 
 Want to inspect first? Append `--dry-run` to any one-liner to print the choices and commands without changing your computer.
 
@@ -115,8 +115,8 @@ If you skip QR pairing, the app can also be connected manually with a reachable 
 
 On your computer:
 
-- `git`, `curl`, and Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/) only if you are not letting the installer add it for you
+- `git` and `curl`
+- [`uv`](https://docs.astral.sh/uv/) and Python 3.11+ only if you are not letting the installer add them for you
 - [Codex CLI](https://developers.openai.com/codex/cli) or Claude CLI, installed and signed in, for real agent runs
 - [Tailscale](https://tailscale.com/download) for the default `Anywhere with Tailscale` path
 

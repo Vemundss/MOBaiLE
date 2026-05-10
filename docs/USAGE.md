@@ -132,7 +132,7 @@ mobaile update
 - Trusted private host with more autonomy: use the main `install.sh` path, or run `mobaile autonomy` after a backend-only install
 
 `install.sh` is the main setup entry point. `install_backend.sh` is the lower-level backend-only path.
-`install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
+`install_backend.sh` installs `uv` if needed, lets `uv` provide a compatible backend Python, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
 In Tailscale mode, pairing advertises Tailscale/public URLs only so a Wi-Fi LAN fallback cannot mask a broken cellular path.
 The iPhone app only talks to this backend. It does not run code on-device.
 
@@ -152,8 +152,8 @@ All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 ## Prerequisites
 
 - macOS/Linux shell
-- `git`, `curl`, and Python 3.11+
-- `uv`, only if you are not letting `install_backend.sh` add it for you
+- `git` and `curl`
+- `uv` and Python 3.11+, only if you are not letting `install_backend.sh` add them for you
 - Codex CLI or Claude CLI, installed and signed in, for real agent runs
 - Tailscale on the computer and iPhone for the default `Anywhere with Tailscale` setup
 
@@ -161,11 +161,11 @@ If you are setting this up for the iPhone app, you also need a reachable backend
 
 MOBaiLE can install and pair without Codex or Claude; direct shell commands still work. For the intended agent coding experience, install and sign in to at least one agent CLI before the first real run. Current Codex CLI setup is documented by OpenAI at <https://developers.openai.com/codex/cli>.
 
-Check versions:
+Check versions after install:
 
 ```bash
-python3 --version
 uv --version
+cd backend && uv run python --version
 codex --version
 tailscale status
 ```
