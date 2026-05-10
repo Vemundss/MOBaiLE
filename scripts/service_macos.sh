@@ -143,6 +143,7 @@ PY
 sync_runtime() {
   ensure_uv_available
   mkdir -p "${RUNTIME_DIR}"
+  echo "Syncing backend runtime from ${BACKEND_DIR} to ${RUNTIME_DIR}..."
   if command -v rsync > /dev/null 2>&1; then
     rsync -a --delete \
       --exclude ".venv" \
@@ -172,6 +173,9 @@ sync_runtime() {
 
   if [[ -f "${BACKEND_DIR}/.env" ]]; then
     cp "${BACKEND_DIR}/.env" "${RUNTIME_DIR}/.env"
+    echo "Synced runtime env: ${RUNTIME_DIR}/.env"
+  else
+    echo "Checkout env missing; active runtime env was not changed: ${BACKEND_DIR}/.env"
   fi
 
   merge_runtime_pairing_state
@@ -181,6 +185,7 @@ sync_runtime() {
     cd "${RUNTIME_DIR}"
     uv sync --python "${REQUIRED_PYTHON_VERSION}" 2>&1
   )"; then
+    echo "Runtime dependencies ready in ${RUNTIME_DIR}"
     return
   fi
 
@@ -284,6 +289,7 @@ bootout_keep_awake_if_loaded() {
 install_service() {
   sync_runtime
   write_plist
+  echo "Starting backend launch agent from ${RUNTIME_DIR}..."
   bootout_if_loaded
   launchctl bootstrap "${DOMAIN}" "${PLIST_PATH}"
   launchctl enable "${DOMAIN}/${LABEL}" || true
@@ -304,6 +310,7 @@ start_service() {
     exit 1
   fi
   sync_runtime
+  echo "Restarting backend launch agent from ${RUNTIME_DIR}..."
   bootout_if_loaded
   launchctl bootstrap "${DOMAIN}" "${PLIST_PATH}"
   launchctl enable "${DOMAIN}/${LABEL}" || true

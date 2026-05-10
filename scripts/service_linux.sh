@@ -153,6 +153,7 @@ PY
 sync_runtime() {
   ensure_uv_available
   mkdir -p "${RUNTIME_DIR}"
+  echo "Syncing backend runtime from ${BACKEND_DIR} to ${RUNTIME_DIR}..."
   if command -v rsync > /dev/null 2>&1; then
     rsync -a --delete \
       --exclude ".venv" \
@@ -179,6 +180,9 @@ sync_runtime() {
 
   if [[ -f "${BACKEND_DIR}/.env" ]]; then
     cp "${BACKEND_DIR}/.env" "${RUNTIME_DIR}/.env"
+    echo "Synced runtime env: ${RUNTIME_DIR}/.env"
+  else
+    echo "Checkout env missing; active runtime env was not changed: ${BACKEND_DIR}/.env"
   fi
 
   merge_runtime_pairing_state
@@ -188,6 +192,7 @@ sync_runtime() {
     cd "${RUNTIME_DIR}"
     uv sync --python "${REQUIRED_PYTHON_VERSION}" 2>&1
   )"; then
+    echo "Runtime dependencies ready in ${RUNTIME_DIR}"
     return
   fi
 
@@ -252,6 +257,7 @@ reload_systemd() {
 install_service() {
   sync_runtime
   write_unit
+  echo "Starting backend systemd service from ${RUNTIME_DIR}..."
   reload_systemd
   systemctl --user enable "${UNIT_NAME}" > /dev/null
   systemctl --user restart "${UNIT_NAME}" > /dev/null
@@ -273,6 +279,7 @@ start_service() {
   fi
   sync_runtime
   write_unit
+  echo "Restarting backend systemd service from ${RUNTIME_DIR}..."
   reload_systemd
   systemctl --user restart "${UNIT_NAME}" > /dev/null
   run_warmup_if_enabled

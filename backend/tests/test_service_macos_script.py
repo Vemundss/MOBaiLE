@@ -185,6 +185,8 @@ def test_service_macos_sync_preserves_paired_clients_in_runtime_state(tmp_path: 
     )
 
     assert result.returncode == 0, result.stderr
+    assert f"Synced runtime env: {runtime_dir / '.env'}" in result.stdout
+    assert f"Runtime dependencies ready in {runtime_dir}" in result.stdout
     merged = json.loads((runtime_dir / "pairing.json").read_text(encoding="utf-8"))
     assert merged["server_url"] == "http://repo.example:8000"
     assert merged["server_urls"] == ["http://repo.example:8000", "http://wifi.example:8000"]
@@ -333,6 +335,8 @@ def assert_service_sync_preserves_newer_runtime_pair_code(
     )
 
     assert result.returncode == 0, result.stderr
+    assert f"Synced runtime env: {runtime_dir / '.env'}" in result.stdout
+    assert f"Runtime dependencies ready in {runtime_dir}" in result.stdout
     merged = json.loads((runtime_dir / "pairing.json").read_text(encoding="utf-8"))
     assert merged["server_url"] == "http://repo.example:8000"
     assert merged["server_urls"] == ["http://repo.example:8000", "http://wifi.example:8000"]

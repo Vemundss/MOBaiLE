@@ -298,6 +298,76 @@ def test_mobaile_status_reports_running_summary(tmp_path: Path):
     assert "mobaile pair" in result.stdout
 
 
+def test_mobaile_status_and_config_warn_when_runtime_env_drifted(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checkout_backend_dir = repo / "backend"
+    runtime_backend_dir = tmp_path / "backend-runtime"
+    checkout_backend_dir.mkdir(parents=True)
+    runtime_backend_dir.mkdir(parents=True)
+
+    (checkout_backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_SECURITY_MODE=full-access",
+                "VOICE_AGENT_CODEX_UNRESTRICTED=true",
+                "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=true",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=codex",
+                "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_SECURITY_MODE=safe",
+                "VOICE_AGENT_CODEX_UNRESTRICTED=false",
+                "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=codex",
+                "VOICE_AGENT_PHONE_ACCESS_MODE=tailscale",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_backend_dir / "pairing.json").write_text(
+        '{"server_url":"http://mobaile.tail6a5903.ts.net:8000","session_id":"iphone-app","pair_code":"pair-1234","pair_code_expires_at":"2999-01-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+
+    env = {
+        **os.environ,
+        "MOBAILE_REPO_ROOT": str(repo),
+        "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(runtime_backend_dir),
+        "MOBAILE_TEST_SERVICE_STATE": "running",
+        "MOBAILE_SKIP_OPEN": "1",
+    }
+    status_result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    config_result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "config"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert status_result.returncode == 0
+    assert "Active runtime env differs from checkout for VOICE_AGENT_SECURITY_MODE" in status_result.stdout
+    assert "checkout=full-access, active=safe" in status_result.stdout
+    assert "Run mobaile restart" in status_result.stdout
+    assert config_result.returncode == 0
+    assert f"Checkout env file: {checkout_backend_dir / '.env'} (present)" in config_result.stdout
+    assert f"Active env file: {runtime_backend_dir / '.env'} (present)" in config_result.stdout
+    assert "Active runtime env differs from checkout for VOICE_AGENT_CODEX_UNRESTRICTED" in config_result.stdout
+
+
 def test_mobaile_setup_prints_local_setup_url(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"
@@ -834,6 +904,75 @@ def test_mobaile_doctor_passes_for_tailscale_pairing(tmp_path: Path):
     else:
         assert "[warn] Keep-awake service is macOS-only" in result.stdout
     assert "Doctor result: ready" in result.stdout
+
+
+def test_mobaile_doctor_fails_when_runtime_env_drifted_from_checkout(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checkout_backend_dir = repo / "backend"
+    runtime_backend_dir = tmp_path / "backend-runtime"
+    checkout_backend_dir.mkdir(parents=True)
+    runtime_backend_dir.mkdir(parents=True)
+
+    (checkout_backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_SECURITY_MODE=full-access",
+                "VOICE_AGENT_CODEX_UNRESTRICTED=true",
+                "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=true",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=shell",
+                "VOICE_AGENT_PHONE_ACCESS_MODE=local",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_backend_dir / ".env").write_text(
+        "\n".join(
+            [
+                "VOICE_AGENT_SECURITY_MODE=safe",
+                "VOICE_AGENT_CODEX_UNRESTRICTED=false",
+                "VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS=false",
+                "VOICE_AGENT_DEFAULT_EXECUTOR=shell",
+                "VOICE_AGENT_PHONE_ACCESS_MODE=local",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_backend_dir / "pairing.json").write_text(
+        json.dumps(
+            {
+                "server_url": "http://127.0.0.1:8000",
+                "server_urls": ["http://127.0.0.1:8000"],
+                "session_id": "iphone-app",
+                "pair_code": "pair-1234",
+                "pair_code_expires_at": "2999-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runtime_backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "doctor"],
+        env={
+            **os.environ,
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(runtime_backend_dir),
+            "MOBAILE_TEST_SERVICE_STATE": "running",
+            "MOBAILE_TEST_KEEP_AWAKE_STATE": "running",
+            "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Active runtime env differs from checkout for VOICE_AGENT_SECURITY_MODE" in result.stdout
+    assert "Run mobaile restart" in result.stdout
+    assert "Doctor result: attention needed" in result.stdout
 
 
 def test_mobaile_doctor_network_config_check_does_not_leak_return_trap(tmp_path: Path):

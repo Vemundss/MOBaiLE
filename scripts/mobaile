@@ -91,6 +91,76 @@ print(value)
 PY
 }
 
+path_presence_label() {
+  local path="$1"
+  [[ -f "${path}" ]] && printf "(present)" || printf "(missing)"
+}
+
+same_path() {
+  local left="$1"
+  local right="$2"
+
+  python3 - "${left}" "${right}" << 'PY'
+from pathlib import Path
+import sys
+
+left = Path(sys.argv[1]).expanduser().resolve()
+right = Path(sys.argv[2]).expanduser().resolve()
+print("yes" if left == right else "no")
+PY
+}
+
+runtime_env_drift_messages() {
+  local checkout_env="$1"
+  local active_env="$2"
+  local drift=0
+  local key checkout_value active_value
+
+  if [[ "$(same_path "${checkout_env}" "${active_env}")" == "yes" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "${checkout_env}" ]]; then
+    echo "[warn] Checkout env is missing, so active runtime config cannot be compared: ${checkout_env}"
+    return 1
+  fi
+
+  if [[ ! -f "${active_env}" ]]; then
+    echo "[warn] Active runtime env is missing; run mobaile restart to sync checkout config: ${active_env}"
+    return 1
+  fi
+
+  for key in \
+    VOICE_AGENT_SECURITY_MODE \
+    VOICE_AGENT_CODEX_UNRESTRICTED \
+    VOICE_AGENT_ALLOW_ABSOLUTE_FILE_READS \
+    VOICE_AGENT_DEFAULT_EXECUTOR \
+    VOICE_AGENT_PHONE_ACCESS_MODE; do
+    checkout_value="$(read_env_value "${checkout_env}" "${key}" "<unset>")"
+    active_value="$(read_env_value "${active_env}" "${key}" "<unset>")"
+    if [[ "${checkout_value}" != "${active_value}" ]]; then
+      echo "[warn] Active runtime env differs from checkout for ${key}: checkout=${checkout_value}, active=${active_value}"
+      drift=1
+    fi
+  done
+
+  if [[ "${drift}" -ne 0 ]]; then
+    echo "[warn] Run mobaile restart so the installed backend runtime uses the checkout config."
+    return 1
+  fi
+
+  return 0
+}
+
+runtime_env_drift_output() {
+  local repo_root="$1"
+  local active_backend="$2"
+  local checkout_env="${repo_root}/backend/.env"
+  local active_env="${active_backend}/.env"
+
+  runtime_env_drift_messages "${checkout_env}" "${active_env}" || true
+}
+
 read_pairing_value() {
   local pairing_file="$1"
   local field_name="$2"
@@ -539,7 +609,7 @@ status_command() {
   local backend_dir
   local env_file
   local pairing_file
-  local security_mode phone_access_mode public_server_url server_url
+  local security_mode phone_access_mode public_server_url server_url drift_output
 
   backend_dir="$(active_backend_dir "${repo_root}")"
   env_file="${backend_dir}/.env"
@@ -549,6 +619,7 @@ status_command() {
   phone_access_mode="$(read_env_value "${env_file}" "VOICE_AGENT_PHONE_ACCESS_MODE" "tailscale")"
   public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
   server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
+  drift_output="$(runtime_env_drift_output "${repo_root}" "${backend_dir}")"
 
   cat << EOF
 MOBaiLE: $(service_state_label "${repo_root}")
@@ -557,7 +628,11 @@ Phone access: $(friendly_phone_access_label "${phone_access_mode}" "${public_ser
 Phone pairing: $(pairing_status_label "${pairing_file}")
 URL: ${server_url}
 Pairing QR: $(pairing_qr_label "${backend_dir}")
-
+EOF
+  if [[ -n "${drift_output}" ]]; then
+    printf "\n%s\n" "${drift_output}"
+  fi
+  cat << EOF
 Quick actions:
   mobaile check
   mobaile pair
@@ -1598,6 +1673,27 @@ PY
   return 0
 }
 
+doctor_runtime_env_check() {
+  local repo_root="$1"
+  local active_backend="$2"
+  local checkout_env="${repo_root}/backend/.env"
+  local active_env="${active_backend}/.env"
+  local drift_output
+
+  if [[ "$(same_path "${checkout_env}" "${active_env}")" == "yes" ]]; then
+    echo "[ok] Active backend is using the checkout env file"
+    return 0
+  fi
+
+  if drift_output="$(runtime_env_drift_messages "${checkout_env}" "${active_env}")"; then
+    echo "[ok] Active runtime env matches checkout access config"
+    return 0
+  fi
+
+  printf "%s\n" "${drift_output}"
+  return 1
+}
+
 doctor_keep_awake_check() {
   local repo_root="$1"
   local state
@@ -1652,6 +1748,10 @@ doctor_command() {
   fi
 
   if ! doctor_backend_config_check "${pairing_file}" "${env_file}"; then
+    failures=$((failures + 1))
+  fi
+
+  if ! doctor_runtime_env_check "${repo_root}" "${backend_dir}"; then
     failures=$((failures + 1))
   fi
 
@@ -2684,11 +2784,13 @@ config_command() {
   local checkout_backend_dir="${repo_root}/backend"
   local backend_dir
   local env_file
+  local checkout_env_file
   local pairing_file
-  local qr_path service_script security_mode phone_access_mode public_server_url api_token server_url
+  local qr_path service_script security_mode phone_access_mode public_server_url api_token server_url drift_output
 
   backend_dir="$(active_backend_dir "${repo_root}")"
   env_file="${backend_dir}/.env"
+  checkout_env_file="${checkout_backend_dir}/.env"
   pairing_file="${backend_dir}/pairing.json"
   qr_path="$(pairing_qr_path "${backend_dir}")"
   service_script="$(service_script_path "${repo_root}")"
@@ -2697,6 +2799,7 @@ config_command() {
   public_server_url="$(read_env_value "${env_file}" "VOICE_AGENT_PUBLIC_SERVER_URL" "")"
   api_token="$(read_env_value "${env_file}" "VOICE_AGENT_API_TOKEN" "")"
   server_url="$(read_pairing_value "${pairing_file}" "server_url" "Not ready")"
+  drift_output="$(runtime_env_drift_output "${repo_root}" "${backend_dir}")"
 
   cat << EOF
 MOBaiLE configuration
@@ -2704,9 +2807,10 @@ MOBaiLE configuration
 Repo root: ${repo_root}
 Checkout backend dir: ${checkout_backend_dir}
 Active backend dir: ${backend_dir}
-Env file: ${env_file} $([[ -f "${env_file}" ]] && printf "(present)" || printf "(missing)")
-Pairing file: ${pairing_file} $([[ -f "${pairing_file}" ]] && printf "(present)" || printf "(missing)")
-Pairing QR image: ${qr_path} $([[ -f "${qr_path}" ]] && printf "(present)" || printf "(missing)")
+Checkout env file: ${checkout_env_file} $(path_presence_label "${checkout_env_file}")
+Active env file: ${env_file} $(path_presence_label "${env_file}")
+Pairing file: ${pairing_file} $(path_presence_label "${pairing_file}")
+Pairing QR image: ${qr_path} $(path_presence_label "${qr_path}")
 Service helper: ${service_script}
 
 Security mode: $(friendly_security_label "${security_mode}") (${security_mode})
@@ -2715,6 +2819,9 @@ API token: $([[ -n "${api_token}" ]] && printf "Configured" || printf "Missing")
 Server URL: ${server_url}
 Phone pairing: $(pairing_status_label "${pairing_file}")
 EOF
+  if [[ -n "${drift_output}" ]]; then
+    printf "\n%s\n" "${drift_output}"
+  fi
 }
 
 update_command() {
