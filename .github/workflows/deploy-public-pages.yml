@@ -4,9 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - docs/index.html
-      - docs/privacy-policy.html
-      - docs/support.html
+      - docs/**
       - .github/workflows/deploy-public-pages.yml
   workflow_dispatch:
 
@@ -37,9 +35,13 @@ jobs:
       - name: Prepare static files
         run: |
           mkdir -p _site
-          cp docs/index.html _site/index.html
-          cp docs/privacy-policy.html _site/privacy-policy.html
-          cp docs/support.html _site/support.html
+          cp docs/*.html _site/
+          cp docs/*.txt _site/ 2>/dev/null || true
+          cp docs/*.xml _site/ 2>/dev/null || true
+          cp docs/*.css _site/ 2>/dev/null || true
+          cp docs/*.png _site/ 2>/dev/null || true
+          cp -R docs/readme-screens _site/readme-screens
+          cp -R docs/brand _site/brand
           touch _site/.nojekyll
 
       - name: Upload Pages artifact
