@@ -32,6 +32,8 @@ Commands:
   repair   Refresh pairing, restart the service when installed, then run doctor
   pair     Generate or surface the pairing QR image
   update   Check for or install newer MOBaiLE updates
+  uninstall
+           Stop MOBaiLE services and optionally delete local MOBaiLE data
   logs     Show backend service logs
   restart  Restart the backend service
   start    Start the backend service
@@ -180,6 +182,17 @@ service_install_preference() {
   esac
 }
 
+keep_awake_install_preference() {
+  case "$(uname -s)" in
+    Darwin)
+      [[ -f "${HOME}/Library/LaunchAgents/com.mobile.voiceagent.keepawake.plist" ]] && printf "yes\n" || printf "no\n"
+      ;;
+    *)
+      printf "no\n"
+      ;;
+  esac
+}
+
 runtime_backend_dir() {
   if [[ -n "${MOBAILE_TEST_RUNTIME_BACKEND_DIR:-}" ]]; then
     printf "%s\n" "${MOBAILE_TEST_RUNTIME_BACKEND_DIR}"
@@ -189,6 +202,19 @@ runtime_backend_dir() {
   case "$(uname -s)" in
     Darwin) printf "%s\n" "${HOME}/Library/Application Support/MOBaiLE/backend-runtime" ;;
     Linux) printf "%s\n" "${HOME}/.local/share/MOBaiLE/backend-runtime" ;;
+    *) printf "\n" ;;
+  esac
+}
+
+runtime_data_root() {
+  if [[ -n "${MOBAILE_TEST_RUNTIME_DATA_ROOT:-}" ]]; then
+    printf "%s\n" "${MOBAILE_TEST_RUNTIME_DATA_ROOT}"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin) printf "%s\n" "${HOME}/Library/Application Support/MOBaiLE" ;;
+    Linux) printf "%s\n" "${HOME}/.local/share/MOBaiLE" ;;
     *) printf "\n" ;;
   esac
 }
@@ -837,6 +863,21 @@ check_agent_cli() {
   fi
 }
 
+check_browser_automation_runtime() {
+  local env_file="$1"
+  local security_mode
+
+  security_mode="$(read_env_value "${env_file}" "VOICE_AGENT_SECURITY_MODE" "safe")"
+  if [[ "${security_mode}" != "full-access" ]]; then
+    return
+  fi
+  if command -v npx > /dev/null 2>&1; then
+    return
+  fi
+
+  check_info "Full Access browser/desktop automation needs npx; install Node.js/npm when you want browser or desktop control"
+}
+
 check_phone_path() {
   local phone_access_mode="$1"
   local public_server_url="$2"
@@ -982,6 +1023,15 @@ if codex_path or claude_path:
 else:
     add(checks, "agent_cli", "todo", "Install and sign in to Codex CLI or Claude CLI for real agent runs")
 
+security_mode = read_env(env_file, "VOICE_AGENT_SECURITY_MODE", "safe")
+if security_mode == "full-access" and not command_status("npx"):
+    add(
+        checks,
+        "browser_automation_runtime",
+        "info",
+        "Full Access browser/desktop automation needs npx; install Node.js/npm when you want browser or desktop control",
+    )
+
 if phone_access_mode == "tailscale" and not public_server_url:
     if not command_status("tailscale"):
         add(checks, "phone_path", "todo", "Install Tailscale on this computer and the iPhone for Anywhere mode")
@@ -1102,6 +1152,7 @@ check_command() {
     check_info "uv is not installed yet; the MOBaiLE installer can add it automatically"
   fi
   check_agent_cli "${env_file}"
+  check_browser_automation_runtime "${env_file}"
   check_phone_path "${phone_access_mode}" "${public_server_url}"
 
   if [[ "${service_state}" == "Running" ]]; then
@@ -2319,6 +2370,250 @@ repair_command() {
   return 1
 }
 
+uninstall_usage() {
+  cat << 'EOF'
+Usage: mobaile uninstall [options]
+
+Options:
+  --keep-data       Stop services and remove the mobaile command, but keep local data (default)
+  --delete-data     Delete MOBaiLE runtime data, logs, pairing state, and checkout-local backend state
+  --delete-checkout Delete the current MOBaiLE checkout after other uninstall work
+  --remove-codex-mcp
+                    Remove Codex MCP entries named peekaboo and playwright
+  --yes             Skip confirmation for destructive options
+  --dry-run         Print what would be changed without changing anything
+EOF
+}
+
+uninstall_confirm() {
+  local delete_data="$1"
+  local delete_checkout="$2"
+  local remove_codex_mcp="$3"
+
+  if [[ "${delete_data}" != "true" && "${delete_checkout}" != "true" && "${remove_codex_mcp}" != "true" ]]; then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "Destructive uninstall options require --yes when running non-interactively." >&2
+    return 1
+  fi
+
+  local confirmation
+  echo "This will delete selected MOBaiLE files on this computer."
+  read -r -p "Continue? Type 'uninstall' to confirm: " confirmation
+  if [[ "${confirmation}" != "uninstall" ]]; then
+    echo "Uninstall cancelled."
+    return 1
+  fi
+}
+
+uninstall_run() {
+  local dry_run="$1"
+  shift
+
+  if [[ "${dry_run}" == "true" ]]; then
+    echo "Would run: $(format_command "$@")"
+    return 0
+  fi
+
+  "$@"
+}
+
+uninstall_delete_path() {
+  local dry_run="$1"
+  local path="$2"
+  local label="$3"
+
+  if [[ -z "${path}" || "${path}" == "/" || "${path}" == "${HOME}" ]]; then
+    echo "Refusing to delete unsafe ${label} path: ${path:-<empty>}" >&2
+    return 1
+  fi
+
+  if [[ ! -e "${path}" && ! -L "${path}" ]]; then
+    echo "${label}: already absent"
+    return 0
+  fi
+
+  if [[ "${dry_run}" == "true" ]]; then
+    echo "Would delete ${label}: ${path}"
+    return 0
+  fi
+
+  rm -rf "${path}"
+  echo "Deleted ${label}: ${path}"
+}
+
+uninstall_remove_command() {
+  local repo_root="$1"
+  local dry_run="$2"
+  local command_path="${HOME}/.local/bin/mobaile"
+  local expected_target="${repo_root}/scripts/mobaile"
+  local actual_target=""
+
+  if [[ ! -e "${command_path}" && ! -L "${command_path}" ]]; then
+    echo "mobaile command: already absent"
+    return 0
+  fi
+  if [[ ! -L "${command_path}" ]]; then
+    echo "Leaving ${command_path}; it is not a MOBaiLE symlink."
+    return 0
+  fi
+
+  actual_target="$(readlink "${command_path}")"
+  if [[ "${actual_target}" != "${expected_target}" ]]; then
+    echo "Leaving ${command_path}; it points to ${actual_target}, not ${expected_target}."
+    return 0
+  fi
+
+  uninstall_delete_path "${dry_run}" "${command_path}" "mobaile command"
+}
+
+uninstall_delete_checkout_state() {
+  local repo_root="$1"
+  local dry_run="$2"
+  local backend_dir="${repo_root}/backend"
+  local state_path
+
+  for state_path in \
+    "${backend_dir}/.env" \
+    "${backend_dir}/pairing.json" \
+    "${backend_dir}/pairing-qr.png" \
+    "${backend_dir}/data" \
+    "${backend_dir}/logs" \
+    "${backend_dir}/sandbox" \
+    "${backend_dir}/.mobaile"; do
+    uninstall_delete_path "${dry_run}" "${state_path}" "checkout state"
+  done
+}
+
+uninstall_remove_codex_mcp() {
+  local repo_root="$1"
+  local dry_run="$2"
+  local backend_dir env_file codex_home_raw codex_home name
+
+  if ! command -v codex > /dev/null 2>&1; then
+    echo "Codex MCP cleanup skipped; codex is not available."
+    return 0
+  fi
+
+  backend_dir="$(active_backend_dir "${repo_root}")"
+  env_file="${backend_dir}/.env"
+  codex_home_raw="$(read_env_value "${env_file}" "VOICE_AGENT_CODEX_HOME" "${HOME}/.codex")"
+  codex_home="$(resolve_backend_path "${backend_dir}" "${codex_home_raw}" "${HOME}/.codex")"
+
+  for name in peekaboo playwright; do
+    if [[ "${dry_run}" == "true" ]]; then
+      echo "Would run: CODEX_HOME=${codex_home} codex mcp remove ${name}"
+      continue
+    fi
+    if CODEX_HOME="${codex_home}" codex mcp remove "${name}" > /dev/null 2>&1; then
+      echo "Removed Codex MCP entry: ${name}"
+    else
+      echo "Codex MCP entry absent or unchanged: ${name}"
+    fi
+  done
+}
+
+uninstall_command() {
+  local repo_root="$1"
+  shift || true
+  local delete_data="false"
+  local delete_checkout="false"
+  local remove_codex_mcp="false"
+  local assume_yes="false"
+  local dry_run="false"
+  local service_script runtime_root
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --keep-data)
+        delete_data="false"
+        shift
+        ;;
+      --delete-data)
+        delete_data="true"
+        shift
+        ;;
+      --delete-checkout)
+        delete_checkout="true"
+        shift
+        ;;
+      --remove-codex-mcp)
+        remove_codex_mcp="true"
+        shift
+        ;;
+      --yes | --non-interactive)
+        assume_yes="true"
+        shift
+        ;;
+      --dry-run)
+        dry_run="true"
+        shift
+        ;;
+      -h | --help)
+        uninstall_usage
+        return 0
+        ;;
+      *)
+        uninstall_usage >&2
+        echo "Unknown uninstall argument: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [[ "${assume_yes}" != "true" && "${dry_run}" != "true" ]]; then
+    uninstall_confirm "${delete_data}" "${delete_checkout}" "${remove_codex_mcp}" || return 1
+  fi
+
+  echo "MOBaiLE uninstall"
+
+  service_script="$(service_script_path "${repo_root}")"
+  if [[ -f "${service_script}" ]]; then
+    if [[ "$(service_install_preference)" == "yes" ]]; then
+      uninstall_run "${dry_run}" bash "${service_script}" uninstall
+    else
+      echo "Background service: already absent"
+    fi
+    if [[ "$(keep_awake_install_preference)" == "yes" ]]; then
+      uninstall_run "${dry_run}" bash "${service_script}" keep-awake-uninstall
+    elif [[ "$(uname -s)" == "Darwin" ]]; then
+      echo "Keep-awake service: already absent"
+    fi
+  else
+    echo "Service helper missing: ${service_script}"
+  fi
+
+  uninstall_remove_command "${repo_root}" "${dry_run}"
+
+  if [[ "${remove_codex_mcp}" == "true" ]]; then
+    uninstall_remove_codex_mcp "${repo_root}" "${dry_run}"
+  fi
+
+  if [[ "${delete_data}" == "true" ]]; then
+    runtime_root="$(runtime_data_root)"
+    if [[ -n "${runtime_root}" ]]; then
+      uninstall_delete_path "${dry_run}" "${runtime_root}" "runtime data"
+    fi
+    uninstall_delete_checkout_state "${repo_root}" "${dry_run}"
+  else
+    echo "Data kept. Reinstall later with the existing pairing/data still present."
+  fi
+
+  if [[ "${delete_checkout}" == "true" ]]; then
+    cd "${HOME}" 2> /dev/null || cd / 2> /dev/null || true
+    uninstall_delete_path "${dry_run}" "${repo_root}" "checkout"
+  else
+    echo "Checkout kept: ${repo_root}"
+  fi
+
+  if [[ "${dry_run}" == "true" ]]; then
+    echo "Dry run complete."
+  else
+    echo "Uninstall complete."
+  fi
+}
+
 delegate_service_command() {
   local repo_root="$1"
   local command_name="$2"
@@ -2470,6 +2765,10 @@ main() {
       demo_command "${repo_root}" "$@"
       ;;
     repair) repair_command "${repo_root}" ;;
+    uninstall)
+      shift || true
+      uninstall_command "${repo_root}" "$@"
+      ;;
     update)
       shift || true
       case "${1:-}" in

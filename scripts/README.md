@@ -56,6 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/vemundss/mobaile/main/scripts/insta
 - `mobaile first-run`: starter playground run through the paired backend
 - `mobaile demo`: export a sanitized Markdown or JSON demo replay from a sample or existing run
 - `mobaile repair`: restart service when installed, refresh pairing QR, and run diagnostics
+- `mobaile uninstall`: stop background services and optionally delete local MOBaiLE data
 - `service_macos.sh`: launchd install/start/stop/status/logs/sync plus keep-awake helpers
 - `service_linux.sh`: systemd user-service install/start/stop/status/logs/sync
 - `warmup_capabilities.sh`: preflight capabilities and runtime readiness

@@ -133,6 +133,19 @@ When you want the latest MOBaiLE updates later, run:
 mobaile update
 ```
 
+To remove MOBaiLE from this computer, run:
+
+```bash
+mobaile uninstall
+```
+
+By default this stops the background service, removes MOBaiLE's keep-awake service on macOS, and removes the `~/.local/bin/mobaile` command while keeping local data for a future reinstall. To also delete local pairing state, run history, logs, and runtime data, use:
+
+```bash
+mobaile uninstall --delete-data --yes
+```
+
+If this is the managed `~/MOBaiLE` checkout and you want to delete the checkout too, add `--delete-checkout`. MOBaiLE leaves user-owned tools such as Tailscale, Codex, Claude, Python, Node, and `uv` installed.
 
 ### Step 4. Reach for fallback or advanced setup only when you need it
 
@@ -142,7 +155,7 @@ mobaile update
 - Trusted private host with more autonomy: use the main `install.sh` path, or run `mobaile autonomy` after a backend-only install
 
 `install.sh` is the main setup entry point. `install_backend.sh` is the lower-level backend-only path.
-`install_backend.sh` installs `uv` if needed, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
+`install_backend.sh` installs `uv` if needed, lets `uv` provide a compatible backend Python, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
 In Tailscale mode, pairing advertises Tailscale/public URLs only so a Wi-Fi LAN fallback cannot mask a broken cellular path.
 The iPhone app only talks to this backend. It does not run code on-device.
 
@@ -162,21 +175,24 @@ All `/v1/*` endpoints require bearer auth using `VOICE_AGENT_API_TOKEN`.
 ## Prerequisites
 
 - macOS/Linux shell
-- `git`, `curl`, and Python 3.11+
-- `uv`, only if you are not letting `install_backend.sh` add it for you
+- `git` and `curl`
+- `uv` and Python 3.11+, only if you are not letting `install_backend.sh` add them for you
 - Codex CLI or Claude CLI, installed and signed in, for real agent runs
+- Node.js/npm only if you want `npx`-based browser/desktop automation in Full Access mode
 - Tailscale on the computer and iPhone for the default `Anywhere with Tailscale` setup
 
 If you are setting this up for the iPhone app, you also need a reachable backend URL. For local testing that can be `127.0.0.1`; for a real phone it should be a Tailscale, LAN, public HTTPS, or other reachable host URL. Tailscale is recommended for off-Wi-Fi private use, but it is not required for same-Wi-Fi pairing, local simulator testing, or a public HTTPS endpoint.
 
 MOBaiLE can install and pair without Codex or Claude; direct shell commands still work. For the intended agent coding experience, install and sign in to at least one agent CLI before the first real run. Current Codex CLI setup is documented by OpenAI at <https://developers.openai.com/codex/cli>.
+MOBaiLE can also run without Node.js/npm; only browser and desktop MCP automation need `npx`. `mobaile check` reports that as an informational setup item when it is missing.
 
-Check versions:
+Check versions after install:
 
 ```bash
-python3 --version
 uv --version
+cd backend && uv run python --version
 codex --version
+npx --version
 tailscale status
 ```
 
@@ -211,12 +227,14 @@ bash ./scripts/service_macos.sh keep-awake-status
 bash ./scripts/service_macos.sh sync
 bash ./scripts/service_macos.sh restart
 bash ./scripts/service_macos.sh logs
+bash ./scripts/service_macos.sh uninstall
 
 # Linux
 bash ./scripts/service_linux.sh status
 bash ./scripts/service_linux.sh sync
 bash ./scripts/service_linux.sh restart
 bash ./scripts/service_linux.sh logs
+bash ./scripts/service_linux.sh uninstall
 ```
 
 Notes:

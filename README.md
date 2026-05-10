@@ -46,12 +46,12 @@ If you want the shortest path, do this:
 7. Run `mobaile autonomy --deep --open-permissions` on the Mac if browser or desktop control needs final permission approval.
 8. Later, run `mobaile status` any time to check that the computer is ready. If your shell does not find it yet, run `~/.local/bin/mobaile status`.
 
-Run `mobaile setup` on the backend computer to open the computer-local setup page with the pairing QR, backend readiness checks, first-run status, and autonomy readiness. It uses `127.0.0.1`, so it is not a phone-openable link; scan the QR with the iPhone instead. On macOS, run `mobaile awake` if this computer should stay reachable while you are logged in. If setup feels off, run `mobaile check` for a quick preflight or `mobaile repair` to refresh pairing, restart the service, and run diagnostics. When you want the latest installed CLI/backend later, run `mobaile update`.
+Run `mobaile setup` on the backend computer to open the computer-local setup page with the pairing QR, backend readiness checks, first-run status, and autonomy readiness. It uses `127.0.0.1`, so it is not a phone-openable link; scan the QR with the iPhone instead. On macOS, run `mobaile awake` if this computer should stay reachable while you are logged in. If setup feels off, run `mobaile check` for a quick preflight or `mobaile repair` to refresh pairing, restart the service, and run diagnostics. When you want the latest installed CLI/backend later, run `mobaile update`. To remove MOBaiLE from the host, run `mobaile uninstall`; add `--delete-data --yes` when you also want local pairing, run history, logs, and runtime data deleted.
 
 `install.sh` installs or updates MOBaiLE in `~/MOBaiLE`, configures the backend, creates the pairing QR, keeps the service running in the background when supported, and installs the `mobaile` command for status, pairing, and logs.
 
-What the installer handles: `uv`, backend Python dependencies, backend config, service setup, computer-local setup page, QR pairing, and Full Access autonomy provisioning.
-What you still need: `git`, `curl`, Python 3.11+, and a signed-in agent CLI for agent runs. Codex CLI or Claude CLI works; without one, MOBaiLE can pair and run direct shell commands, but not agent coding runs. The default `Anywhere with Tailscale` path also needs Tailscale on both the computer and iPhone. You can skip Tailscale only for same-Wi-Fi pairing, local simulator testing, or a public HTTPS URL.
+What the installer handles: `uv`, a backend-compatible Python through `uv`, backend Python dependencies, backend config, service setup, computer-local setup page, QR pairing, and Full Access autonomy provisioning.
+What you still need: `git`, `curl`, and a signed-in agent CLI for agent runs. Codex CLI or Claude CLI works; without one, MOBaiLE can pair and run direct shell commands, but not agent coding runs. Browser/desktop automation in Full Access mode uses `npx`, so install Node.js/npm if `mobaile check` reports it missing. The default `Anywhere with Tailscale` path also needs Tailscale on both the computer and iPhone. You can skip Tailscale only for same-Wi-Fi pairing, local simulator testing, or a public HTTPS URL.
 
 Want to inspect first? Append `--dry-run` to any one-liner to print the choices and commands without changing your computer.
 
@@ -137,9 +137,10 @@ If you skip QR pairing, the app can also be connected manually with a reachable 
 
 On your computer:
 
-- `git`, `curl`, and Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/) only if you are not letting the installer add it for you
+- `git` and `curl`
+- [`uv`](https://docs.astral.sh/uv/) and Python 3.11+ only if you are not letting the installer add them for you
 - [Codex CLI](https://developers.openai.com/codex/cli) or Claude CLI, installed and signed in, for real agent runs
+- Node.js/npm only if you want `npx`-based browser/desktop automation in Full Access mode
 - [Tailscale](https://tailscale.com/download) for the default `Anywhere with Tailscale` path
 
 On your iPhone:
@@ -260,6 +261,8 @@ cd backend && bash ./run_backend.sh
 cd backend && uv run pytest -q
 cd backend && uv run python ../scripts/sync_contracts.py --check
 ```
+
+Shell linting is developer-only tooling. Install `shellcheck` and `shfmt` if you want to run `bash ./scripts/shell_checks.sh lint`; they are not required for a normal MOBaiLE host install.
 
 Service control:
 

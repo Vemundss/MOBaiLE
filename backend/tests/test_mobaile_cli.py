@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
@@ -373,6 +374,12 @@ def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
     repo = tmp_path / "repo"
     backend_dir = repo / "backend"
     fake_bin = create_fake_codex_bin(tmp_path)
+    npx_path = shutil.which("npx")
+    filtered_path_entries = [
+        entry
+        for entry in os.environ["PATH"].split(os.pathsep)
+        if not npx_path or Path(entry).resolve() != Path(npx_path).parent.resolve()
+    ]
     backend_dir.mkdir(parents=True)
     (backend_dir / ".env").write_text(
         "\n".join(
@@ -399,7 +406,7 @@ def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
             "MOBAILE_TEST_ACTIVE_BACKEND_DIR": str(backend_dir),
             "MOBAILE_TEST_SERVICE_STATE": "running",
             "MOBAILE_DOCTOR_SKIP_NETWORK": "1",
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "PATH": os.pathsep.join([str(fake_bin), *filtered_path_entries]),
         },
         capture_output=True,
         text=True,
@@ -409,6 +416,7 @@ def test_mobaile_check_reports_ready_for_wifi_setup(tmp_path: Path):
     assert result.returncode == 0
     assert "MOBaiLE setup check" in result.stdout
     assert "[ok] Codex CLI is available: codex 9.9.9" in result.stdout
+    assert "browser/desktop automation needs npx" in result.stdout
     assert "[info] Wi-Fi mode does not require Tailscale" in result.stdout
     assert "Check result: ready" in result.stdout
 
@@ -1411,6 +1419,173 @@ def test_mobaile_repair_restarts_service_refreshes_pairing_and_runs_doctor(tmp_p
     assert "Repair result: ready" in result.stdout
     assert "service restart" in log_path.read_text(encoding="utf-8")
     assert "--quiet --no-preview" in log_path.read_text(encoding="utf-8")
+
+
+def test_mobaile_uninstall_stops_services_and_keeps_data_by_default(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    scripts_dir = repo / "scripts"
+    home = tmp_path / "home"
+    runtime_root = tmp_path / "runtime-root"
+    log_path = repo / "uninstall.log"
+    backend_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    home.mkdir()
+    runtime_root.mkdir()
+    (runtime_root / "backend-runtime").mkdir()
+    (backend_dir / ".env").write_text("VOICE_AGENT_API_TOKEN=test-token\n", encoding="utf-8")
+    (backend_dir / "pairing.json").write_text('{"server_url":"http://127.0.0.1:8000"}\n', encoding="utf-8")
+
+    helper_name = "service_macos.sh" if platform.system() == "Darwin" else "service_linux.sh"
+    write_executable(
+        scripts_dir / helper_name,
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf "service %s\\n" "$*" >> "{log_path}"
+            """
+        ),
+    )
+    if platform.system() == "Darwin":
+        service_marker = home / "Library" / "LaunchAgents" / "com.mobile.voiceagent.backend.plist"
+        keep_awake_marker = home / "Library" / "LaunchAgents" / "com.mobile.voiceagent.keepawake.plist"
+        keep_awake_marker.parent.mkdir(parents=True, exist_ok=True)
+        keep_awake_marker.write_text("", encoding="utf-8")
+    else:
+        service_marker = home / ".config" / "systemd" / "user" / "mobaile-backend.service"
+    service_marker.parent.mkdir(parents=True, exist_ok=True)
+    service_marker.write_text("", encoding="utf-8")
+
+    command_path = home / ".local" / "bin" / "mobaile"
+    command_path.parent.mkdir(parents=True)
+    command_path.symlink_to(repo / "scripts" / "mobaile")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "uninstall"],
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_RUNTIME_DATA_ROOT": str(runtime_root),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "MOBaiLE uninstall" in result.stdout
+    assert "Data kept" in result.stdout
+    assert "Uninstall complete" in result.stdout
+    assert "service uninstall" in log_path.read_text(encoding="utf-8")
+    if platform.system() == "Darwin":
+        assert "service keep-awake-uninstall" in log_path.read_text(encoding="utf-8")
+    assert not command_path.exists()
+    assert runtime_root.exists()
+    assert (backend_dir / ".env").exists()
+    assert repo.exists()
+
+
+def test_mobaile_uninstall_delete_data_removes_runtime_and_checkout_state(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    scripts_dir = repo / "scripts"
+    home = tmp_path / "home"
+    runtime_root = tmp_path / "runtime-root"
+    backend_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    home.mkdir()
+    (runtime_root / "backend-runtime" / "logs").mkdir(parents=True)
+    (backend_dir / "data" / "profiles").mkdir(parents=True)
+    (backend_dir / "logs").mkdir()
+    (backend_dir / ".env").write_text("VOICE_AGENT_API_TOKEN=test-token\n", encoding="utf-8")
+    (backend_dir / "pairing.json").write_text('{"server_url":"http://127.0.0.1:8000"}\n', encoding="utf-8")
+    (backend_dir / "pairing-qr.png").write_text("qr", encoding="utf-8")
+    (backend_dir / "data" / "runs.db").write_text("db", encoding="utf-8")
+    (backend_dir / "logs" / "backend.log").write_text("log", encoding="utf-8")
+
+    helper_name = "service_macos.sh" if platform.system() == "Darwin" else "service_linux.sh"
+    write_executable(
+        scripts_dir / helper_name,
+        "#!/usr/bin/env bash\nset -euo pipefail\n",
+    )
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "uninstall", "--delete-data", "--yes"],
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_RUNTIME_DATA_ROOT": str(runtime_root),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Deleted runtime data" in result.stdout
+    assert not runtime_root.exists()
+    assert not (backend_dir / ".env").exists()
+    assert not (backend_dir / "pairing.json").exists()
+    assert not (backend_dir / "pairing-qr.png").exists()
+    assert not (backend_dir / "data").exists()
+    assert not (backend_dir / "logs").exists()
+    assert repo.exists()
+
+
+def test_mobaile_uninstall_delete_data_requires_yes_noninteractive(tmp_path: Path):
+    repo = tmp_path / "repo"
+    home = tmp_path / "home"
+    (repo / "backend").mkdir(parents=True)
+    home.mkdir()
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "uninstall", "--delete-data"],
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_RUNTIME_DATA_ROOT": str(tmp_path / "runtime-root"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "require --yes" in result.stderr
+
+
+def test_mobaile_uninstall_dry_run_allows_delete_data_without_yes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    backend_dir = repo / "backend"
+    home = tmp_path / "home"
+    runtime_root = tmp_path / "runtime-root"
+    backend_dir.mkdir(parents=True)
+    home.mkdir()
+    runtime_root.mkdir()
+    (backend_dir / ".env").write_text("VOICE_AGENT_API_TOKEN=test-token\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(PROJECT_ROOT / "scripts" / "mobaile"), "uninstall", "--delete-data", "--dry-run"],
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "MOBAILE_REPO_ROOT": str(repo),
+            "MOBAILE_TEST_RUNTIME_DATA_ROOT": str(runtime_root),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Would delete runtime data" in result.stdout
+    assert "Dry run complete" in result.stdout
+    assert runtime_root.exists()
+    assert (backend_dir / ".env").exists()
 
 
 def test_mobaile_update_check_reports_available_update(tmp_path: Path):
