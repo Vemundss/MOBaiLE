@@ -45,7 +45,7 @@ def test_setup_readiness_requires_auth_and_hides_pair_code(make_client, tmp_path
     assert payload["pairing"]["qr_available"] is True
     assert payload["pairing"]["qr_url"] is None
     assert payload["agent_cli"]["available"] == ["codex", "claude"]
-    assert payload["autonomy"]["setup_command"] == "mobaile ready"
+    assert payload["autonomy"]["setup_command"] == "mobaile ready --open-setup"
     assert {item["id"] for item in payload["autonomy"]["checks"]} >= {
         "autonomy_security_mode",
         "autonomy_browser_profile",

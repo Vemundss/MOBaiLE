@@ -848,7 +848,7 @@ autonomy_command() {
   elif [[ "$(uname -s)" == "Darwin" ]]; then
     echo
     echo "macOS privacy approvals are still manual when needed:"
-    echo "  mobaile ready --open-permissions"
+    echo "  mobaile ready --open-permissions --open-setup"
   fi
 
   if [[ "${deep}" != "true" ]]; then
@@ -886,6 +886,9 @@ Options:
   --quick                Skip the deep backend capability warmup
   --keep-awake           Install the macOS keep-awake helper (default on macOS)
   --no-keep-awake        Do not change keep-awake state
+  --skip-pair            Do not refresh the pairing QR
+  --open-setup           Open the computer-local setup page after checks
+  --no-open-setup        Do not open the setup page (default)
   --skip-check           Skip the final mobaile check
   --dry-run              Print commands without changing the host
 EOF
@@ -897,6 +900,8 @@ ready_command() {
   local open_permissions="false"
   local deep="true"
   local keep_awake="auto"
+  local refresh_pairing="true"
+  local open_setup="false"
   local run_check="true"
   local dry_run="false"
   local failures=0
@@ -922,6 +927,18 @@ ready_command() {
         ;;
       --no-keep-awake)
         keep_awake="no"
+        shift
+        ;;
+      --skip-pair)
+        refresh_pairing="false"
+        shift
+        ;;
+      --open-setup)
+        open_setup="true"
+        shift
+        ;;
+      --no-open-setup)
+        open_setup="false"
         shift
         ;;
       --skip-check)
@@ -1010,6 +1027,22 @@ ready_command() {
   fi
 
   echo
+  if [[ "${refresh_pairing}" == "true" ]]; then
+    if [[ "${dry_run}" == "true" ]]; then
+      echo "Would refresh pairing QR:"
+      echo "  $(format_command bash "${repo_root}/scripts/mobaile" pair)"
+    elif [[ "${open_setup}" == "true" ]]; then
+      if ! MOBAILE_SKIP_OPEN=1 pair_command "${repo_root}"; then
+        failures=$((failures + 1))
+      fi
+    elif ! pair_command "${repo_root}"; then
+      failures=$((failures + 1))
+    fi
+  else
+    echo "Pairing QR refresh: skipped"
+  fi
+
+  echo
   if [[ "${run_check}" == "true" ]]; then
     if [[ "${dry_run}" == "true" ]]; then
       echo "Would run mobaile check."
@@ -1018,6 +1051,18 @@ ready_command() {
     fi
   else
     echo "Final setup check: skipped"
+  fi
+
+  echo
+  if [[ "${open_setup}" == "true" ]]; then
+    if [[ "${dry_run}" == "true" ]]; then
+      echo "Would open the computer-local setup page:"
+      echo "  $(format_command bash "${repo_root}/scripts/mobaile" setup)"
+    elif ! setup_command "${repo_root}"; then
+      failures=$((failures + 1))
+    fi
+  else
+    echo "Setup page: run mobaile setup when you want the local QR and checklist."
   fi
 
   echo

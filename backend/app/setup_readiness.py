@@ -63,8 +63,8 @@ class SetupAutonomyState(BaseModel):
     status: SetupCheckStatus
     enabled: bool
     message: str
-    setup_command: str = "mobaile ready"
-    deep_check_command: str = "mobaile ready --open-permissions"
+    setup_command: str = "mobaile ready --open-setup"
+    deep_check_command: str = "mobaile ready --open-permissions --open-setup"
     checks: list[SetupReadinessCheck] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
 
@@ -145,7 +145,7 @@ def build_setup_readiness(
     if first_run.status != "ok":
         recommended_actions.append("Run `mobaile first-run` to test a safe starter task.")
     if autonomy.status != "ok":
-        recommended_actions.append("Run `mobaile ready --open-permissions` to finish high-autonomy host checks.")
+        recommended_actions.append("Run `mobaile ready --open-permissions --open-setup` to finish high-autonomy host checks.")
     if not next_actions and pairing.qr_available:
         recommended_actions.append("Scan the QR from the phone, then send a small prompt.")
     return SetupReadinessResponse(
@@ -216,7 +216,7 @@ def setup_page_html() -> str:
       <div class="actions">
         <button type="button" data-copy="mobaile pair">Copy pair command</button>
         <button type="button" data-copy="mobaile first-run">Copy first-run</button>
-        <button type="button" data-copy="mobaile ready --open-permissions">Copy ready command</button>
+        <button type="button" data-copy="mobaile ready --open-permissions --open-setup">Copy ready command</button>
         <button type="button" id="refresh">Refresh</button>
       </div>
     </section>
@@ -463,7 +463,7 @@ def _autonomy_state(env: RuntimeEnvironment) -> SetupAutonomyState:
 def _desktop_permission_message() -> str:
     if platform.system() != "Darwin":
         return "Native desktop permission checks are macOS-specific; browser and CLI automation can still work."
-    return "Run `mobaile ready --open-permissions` to verify Accessibility and Screen Recording."
+    return "Run `mobaile ready --open-permissions --open-setup` to verify Accessibility and Screen Recording."
 
 
 def _first_run_state(run_state: RunState) -> SetupFirstRunState:

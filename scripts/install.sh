@@ -576,13 +576,13 @@ print_product_summary() {
     echo "  1. This install is local-only on this computer."
     echo "  2. Run \`mobaile first-run\` to test a safe playground task."
     echo "  3. Re-run with On this Wi-Fi or Anywhere with Tailscale if you want to connect your iPhone."
-    echo "  4. Run \`mobaile ready --open-permissions\` if desktop/browser control is not ready."
+    echo "  4. Run \`mobaile ready --open-permissions --open-setup\` if desktop/browser control is not ready."
     print_status_follow_up 5
   else
     echo "  1. Scan the QR on this computer with your iPhone."
     echo "     If it did not open automatically, run \`mobaile pair\`."
     echo "  2. Run \`mobaile first-run\` to test a safe playground task."
-    echo "  3. Run \`mobaile ready --open-permissions\` if desktop/browser control is not ready."
+    echo "  3. Run \`mobaile ready --open-permissions --open-setup\` if desktop/browser control is not ready."
     print_status_follow_up 4
   fi
 }
@@ -618,7 +618,7 @@ print_dry_run_summary() {
   print_command bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
   if should_run_autonomy_setup; then
     if [[ "${HIGH_AUTONOMY_SETUP}" == "true" ]]; then
-      print_command bash "${CHECKOUT}/scripts/mobaile" ready --open-permissions
+      print_command bash "${CHECKOUT}/scripts/mobaile" ready --open-permissions --open-setup --skip-pair
     else
       print_command bash "${CHECKOUT}/scripts/mobaile" autonomy --no-open-permissions
     fi
@@ -698,12 +698,14 @@ run_install() {
   else
     bash "${CHECKOUT}/scripts/pairing_qr.sh" --quiet --no-preview
   fi
-  open_qr_if_possible
+  if [[ "${HIGH_AUTONOMY_SETUP}" != "true" ]]; then
+    open_qr_if_possible
+  fi
 
   if should_run_autonomy_setup; then
     if [[ "${HIGH_AUTONOMY_SETUP}" == "true" ]]; then
       step "Running high-autonomy readiness"
-      if ! bash "${CHECKOUT}/scripts/mobaile" ready --open-permissions; then
+      if ! bash "${CHECKOUT}/scripts/mobaile" ready --open-permissions --open-setup --skip-pair; then
         echo
         echo "High-autonomy readiness needs action. Core install and pairing setup completed."
       fi

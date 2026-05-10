@@ -256,7 +256,7 @@ def test_install_script_high_autonomy_runs_guided_ready_flow(tmp_path: Path):
 
     assert result.returncode == 0
     assert "Autonomy setup: Guided high-autonomy readiness" in result.stdout
-    assert "mobaile ready --open-permissions" in result.stdout
+    assert "mobaile ready --open-permissions --open-setup --skip-pair" in result.stdout
     assert "mobaile autonomy --no-open-permissions" not in result.stdout
 
 
@@ -320,7 +320,7 @@ def test_install_script_local_mode_summary_uses_distinct_step_numbers(tmp_path: 
     assert "This install is local-only on this computer." in result.stdout
     assert "  2. Run `mobaile first-run` to test a safe playground task." in result.stdout
     assert "  3. Re-run with On this Wi-Fi or Anywhere with Tailscale if you want to connect your iPhone." in result.stdout
-    assert "  4. Run `mobaile ready --open-permissions` if desktop/browser control is not ready." in result.stdout
+    assert "  4. Run `mobaile ready --open-permissions --open-setup` if desktop/browser control is not ready." in result.stdout
     assert "  5. Run `mobaile status` any time to check the connection." in result.stdout
 
 

@@ -464,6 +464,7 @@ def test_mobaile_ready_dry_run_guides_high_autonomy(tmp_path: Path):
             "ready",
             "--dry-run",
             "--open-permissions",
+            "--open-setup",
             "--no-keep-awake",
         ],
         env={
@@ -482,7 +483,9 @@ def test_mobaile_ready_dry_run_guides_high_autonomy(tmp_path: Path):
     assert "Backend service: not installed" in result.stdout
     assert "MOBaiLE autonomy setup" in result.stdout
     assert "Would run backend capability warmup." in result.stdout
+    assert "Would refresh pairing QR:" in result.stdout
     assert "Would run mobaile check." in result.stdout
+    assert "Would open the computer-local setup page:" in result.stdout
     assert "Ready result: ready or waiting on human approval." in result.stdout
 
 

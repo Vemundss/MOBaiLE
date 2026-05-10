@@ -79,10 +79,10 @@ What success looks like:
 For the least-friction private host, run this after install, or pass `--high-autonomy` to the installer:
 
 ```bash
-mobaile ready --open-permissions
+mobaile ready --open-permissions --open-setup
 ```
 
-This restarts the backend service if it is installed, installs the macOS keep-awake helper when available, provisions browser/desktop automation, opens the relevant macOS privacy panes, runs the deep backend warmup, and finishes with `mobaile check`.
+This restarts the backend service if it is installed, installs the macOS keep-awake helper when available, provisions browser/desktop automation, opens the relevant macOS privacy panes, refreshes the pairing QR, runs the deep backend warmup, finishes with `mobaile check`, and opens the computer-local setup page.
 
 It still leaves real trust-boundary work to you: sign in to Codex or Claude, sign in to Tailscale on both devices, approve macOS privacy prompts, and handle CAPTCHAs, 2FA, Apple ID, or admin approvals when a run reaches them.
 
@@ -167,7 +167,7 @@ If this is the managed `~/MOBaiLE` checkout and you want to delete the checkout 
 - Local-only testing on the same machine: `bash ./scripts/install_backend.sh --mode safe --phone-access local`
 - Backend-only/manual install from a checkout: `bash ./scripts/install_backend.sh --mode full-access --phone-access tailscale`
 - Stable public hostname: set `VOICE_AGENT_PUBLIC_SERVER_URL` in `backend/.env` or pass `--public-url https://your-host`
-- Trusted private host with more autonomy: use `--high-autonomy`, or run `mobaile ready --open-permissions` after a backend-only install
+- Trusted private host with more autonomy: use `--high-autonomy`, or run `mobaile ready --open-permissions --open-setup` after a backend-only install
 
 `install.sh` is the main setup entry point. `install_backend.sh` is the lower-level backend-only path.
 `install_backend.sh` installs `uv` if needed, lets `uv` provide a compatible backend Python, performs initial `uv sync`, creates `backend/.env`, and writes pairing info to `backend/pairing.json`.
@@ -433,7 +433,7 @@ curl -s -H "Authorization: Bearer ${TOKEN}" \
 Run the guided high-autonomy readiness flow:
 
 ```bash
-mobaile ready --open-permissions
+mobaile ready --open-permissions --open-setup
 ```
 
 Provision only the Codex browser/desktop automation layer:
