@@ -2202,7 +2202,7 @@
             "type": "array"
           },
           "deep_check_command": {
-            "default": "mobaile autonomy --deep --open-permissions",
+            "default": "mobaile ready --open-permissions --open-setup",
             "title": "Deep Check Command",
             "type": "string"
           },
@@ -2222,7 +2222,7 @@
             "type": "array"
           },
           "setup_command": {
-            "default": "mobaile autonomy",
+            "default": "mobaile ready --open-setup",
             "title": "Setup Command",
             "type": "string"
           },
