@@ -253,6 +253,46 @@ def test_service_macos_keep_awake_install_writes_caffeinate_agent(tmp_path: Path
     assert "bootstrap" in launchctl_log.read_text(encoding="utf-8")
 
 
+def test_service_macos_keep_awake_install_explains_unwritable_launch_agents(tmp_path: Path):
+    repo = tmp_path / "repo"
+    scripts_dir = repo / "scripts"
+    fake_bin = tmp_path / "bin"
+    home = tmp_path / "home"
+    launch_agents = home / "Library" / "LaunchAgents"
+
+    scripts_dir.mkdir(parents=True)
+    fake_bin.mkdir(parents=True)
+    launch_agents.mkdir(parents=True)
+    launch_agents.chmod(0o555)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "service_macos.sh", scripts_dir / "service_macos.sh")
+
+    write_executable(
+        fake_bin / "uname",
+        "#!/usr/bin/env bash\nprintf 'Darwin\\n'\n",
+    )
+
+    try:
+        result = subprocess.run(
+            ["bash", str(scripts_dir / "service_macos.sh"), "keep-awake-install"],
+            cwd=repo,
+            env={
+                **os.environ,
+                "HOME": str(home),
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        launch_agents.chmod(0o755)
+
+    assert result.returncode == 1
+    assert f"MOBaiLE cannot write launchd files in {launch_agents}." in result.stderr
+    assert f"sudo chown -R $(id -un):staff {launch_agents}" in result.stderr
+    assert "Permission denied" not in result.stderr
+
+
 def assert_service_sync_preserves_newer_runtime_pair_code(
     tmp_path: Path,
     script_name: str,

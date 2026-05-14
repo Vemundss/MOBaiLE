@@ -11,8 +11,9 @@ RUN_SCRIPT="${RUNTIME_DIR}/run_backend.sh"
 LOG_DIR="${RUNTIME_DIR}/logs"
 WARMUP_SCRIPT="${REPO_ROOT}/scripts/warmup_capabilities.sh"
 WARMUP_ON_START="${VOICE_AGENT_WARMUP_ON_START:-true}"
-PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
-KEEP_AWAKE_PLIST_PATH="${HOME}/Library/LaunchAgents/${KEEP_AWAKE_LABEL}.plist"
+LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
+PLIST_PATH="${LAUNCH_AGENTS_DIR}/${LABEL}.plist"
+KEEP_AWAKE_PLIST_PATH="${LAUNCH_AGENTS_DIR}/${KEEP_AWAKE_LABEL}.plist"
 DOMAIN="gui/$(id -u)"
 REQUIRED_PYTHON_VERSION="3.11"
 
@@ -56,6 +57,20 @@ ensure_uv_available() {
   echo "uv is required to sync the MOBaiLE runtime." >&2
   echo "Install it first with the one-line installer or add ~/.local/bin to PATH." >&2
   exit 1
+}
+
+fail_launch_agents_unwritable() {
+  echo "MOBaiLE cannot write launchd files in ${LAUNCH_AGENTS_DIR}." >&2
+  echo "This usually means the directory was created by sudo or another user." >&2
+  echo "Fix ownership, then run the installer again:" >&2
+  echo "  sudo chown -R \$(id -un):staff ${LAUNCH_AGENTS_DIR}" >&2
+  echo "  chmod u+rwx ${LAUNCH_AGENTS_DIR}" >&2
+  exit 1
+}
+
+ensure_launch_agents_writable() {
+  mkdir -p "${LAUNCH_AGENTS_DIR}" 2> /dev/null || fail_launch_agents_unwritable
+  [[ -d "${LAUNCH_AGENTS_DIR}" && -w "${LAUNCH_AGENTS_DIR}" ]] || fail_launch_agents_unwritable
 }
 
 merge_runtime_pairing_state() {
@@ -194,8 +209,11 @@ sync_runtime() {
 }
 
 write_plist() {
-  mkdir -p "${HOME}/Library/LaunchAgents" "${LOG_DIR}"
-  cat > "${PLIST_PATH}" << EOF
+  ensure_launch_agents_writable
+  mkdir -p "${LOG_DIR}"
+  local temp_plist="${PLIST_PATH}.tmp.$$"
+  trap 'rm -f "${temp_plist}"' RETURN
+  cat > "${temp_plist}" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -220,11 +238,16 @@ write_plist() {
   </dict>
 </plist>
 EOF
+  mv -f "${temp_plist}" "${PLIST_PATH}"
+  trap - RETURN
 }
 
 write_keep_awake_plist() {
-  mkdir -p "${HOME}/Library/LaunchAgents" "${LOG_DIR}"
-  cat > "${KEEP_AWAKE_PLIST_PATH}" << EOF
+  ensure_launch_agents_writable
+  mkdir -p "${LOG_DIR}"
+  local temp_plist="${KEEP_AWAKE_PLIST_PATH}.tmp.$$"
+  trap 'rm -f "${temp_plist}"' RETURN
+  cat > "${temp_plist}" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -247,6 +270,8 @@ write_keep_awake_plist() {
   </dict>
 </plist>
 EOF
+  mv -f "${temp_plist}" "${KEEP_AWAKE_PLIST_PATH}"
+  trap - RETURN
 }
 
 run_warmup_if_enabled() {
